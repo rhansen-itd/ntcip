@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NTCIP Traffic Controller Monitor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a1a;
+            color: #e0e0e0;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        header {
+            background: #2d2d2d;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        h1 {
+            color: #4CAF50;
+            margin-bottom: 10px;
+        }
+        
+        .stats {
+            display: flex;
+            gap: 20px;
+            font-size: 14px;
+            color: #aaa;
+        }
+        
+        .section {
+            background: #2d2d2d;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .section-title {
+            font-size: 18px;
+            margin-bottom: 15px;
+            color: #4CAF50;
+            border-bottom: 2px solid #4CAF50;
+            padding-bottom: 10px;
+        }
+        
+        /* Phase Display */
+        .phase-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+            gap: 15px;
+        }
+        
+        .phase {
+            text-align: center;
+        }
+        
+        .phase-circle {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            margin: 0 auto 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 18px;
+            border: 3px solid #444;
+            transition: all 0.3s;
+        }
+        
+        .phase-circle.GREEN {
+            background: #4CAF50;
+            color: white;
+            box-shadow: 0 0 20px rgba(76, 175, 80, 0.6);
+        }
+        
+        .phase-circle.YELLOW {
+            background: #FFC107;
+            color: black;
+            box-shadow: 0 0 20px rgba(255, 193, 7, 0.6);
+        }
+        
+        .phase-circle.RED {
+            background: #F44336;
+            color: white;
+            box-shadow: 0 0 20px rgba(244, 67, 54, 0.6);
+        }
+        
+        .phase-circle.DARK {
+            background: #333;
+            color: #666;
+        }
+        
+        .phase-label {
+            font-size: 14px;
+            color: #aaa;
+        }
+        
+        /* Detector Grid */
+        .detector-grid {
+            display: grid;
+            grid-template-columns: repeat(16, 1fr);
+            gap: 5px;
+        }
+        
+        .detector {
+            aspect-ratio: 1;
+            background: #333;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            color: #666;
+            transition: all 0.2s;
+        }
+        
+        .detector.ACTIVE {
+            background: #fff;
+            color: #000;
+            font-weight: bold;
+            box-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+        }
+        
+        /* Output indicators */
+        .output-grid {
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+            gap: 10px;
+        }
+        
+        .output {
+            background: #333;
+            padding: 15px;
+            border-radius: 6px;
+            text-align: center;
+            transition: all 0.3s;
+        }
+        
+        .output.ON {
+            background: #2196F3;
+            color: white;
+            box-shadow: 0 0 15px rgba(33, 150, 243, 0.6);
+        }
+        
+        /* Controls */
+        .controls {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            background: #4CAF50;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.3s;
+        }
+        
+        button:hover {
+            background: #45a049;
+        }
+        
+        button:active {
+            transform: scale(0.98);
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #4CAF50;
+            margin-right: 8px;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .disconnected .status-indicator {
+            background: #F44336;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1><span class="status-indicator"></span>NTCIP Traffic Controller Monitor</h1>
+            <div class="stats">
+                <span id="controller-ip"></span>
+                <span id="snmp-stats"></span>
+                <span id="last-update">Last update: --</span>
+            </div>
+        </header>
+        
+        <div class="section">
+            <div class="section-title">Phases 1-8</div>
+            <div class="phase-grid" id="phases-1-8"></div>
+        </div>
+        
+        <div class="section" id="phases-9-16-section" style="display: none;">
+            <div class="section-title">Phases 9-16</div>
+            <div class="phase-grid" id="phases-9-16"></div>
+        </div>
+        
+        <div class="section" id="overlaps-section" style="display: none;">
+            <div class="section-title">Overlaps 1-8</div>
+            <div class="phase-grid" id="overlaps"></div>
+        </div>
+        
+        <div class="section" id="detectors-section" style="display: none;">
+            <div class="section-title">Vehicle Detectors</div>
+            <div class="detector-grid" id="detectors"></div>
+        </div>
+        
+        <div class="section" id="outputs-section" style="display: none;">
+            <div class="section-title">Digital Outputs</div>
+            <div class="output-grid" id="outputs"></div>
+        </div>
+        
+        <div class="section">
+            <div class="section-title">Controls</div>
+            <div class="controls">
+                <button onclick="syncTime()">Sync Controller Time</button>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Update interval (milliseconds)
+        const UPDATE_INTERVAL = 250;
+        
+        // Initialize phase displays
+        function initPhases() {
+            const container1_8 = document.getElementById('phases-1-8');
+            for (let i = 1; i <= 8; i++) {
+                container1_8.innerHTML += createPhaseHTML(i);
+            }
+            
+            const container9_16 = document.getElementById('phases-9-16');
+            for (let i = 9; i <= 16; i++) {
+                container9_16.innerHTML += createPhaseHTML(i);
+            }
+            
+            const overlapsContainer = document.getElementById('overlaps');
+            for (let i = 1; i <= 8; i++) {
+                overlapsContainer.innerHTML += createOverlapHTML(i);
+            }
+        }
+        
+        function createPhaseHTML(num) {
+            return `
+                <div class="phase">
+                    <div class="phase-circle DARK" id="phase-${num}">${num}</div>
+                    <div class="phase-label">Phase ${num}</div>
+                </div>
+            `;
+        }
+        
+        function createOverlapHTML(num) {
+            return `
+                <div class="phase">
+                    <div class="phase-circle DARK" id="overlap-${num}">O${num}</div>
+                    <div class="phase-label">Overlap ${num}</div>
+                </div>
+            `;
+        }
+        
+        // Initialize detectors
+        function initDetectors() {
+            const container = document.getElementById('detectors');
+            for (let i = 1; i <= 64; i++) {
+                container.innerHTML += `<div class="detector" id="detector-${i}">${i}</div>`;
+            }
+        }
+        
+        // Initialize outputs
+        function initOutputs() {
+            const container = document.getElementById('outputs');
+            for (let i = 1; i <= 16; i++) {
+                container.innerHTML += `<div class="output" id="output-${i}">Output ${i}</div>`;
+            }
+        }
+        
+        // Update display from status data
+        function updateDisplay(status) {
+            // Update phases
+            for (const [num, state] of Object.entries(status.phases)) {
+                const elem = document.getElementById(`phase-${num}`);
+                if (elem) {
+                    elem.className = `phase-circle ${state}`;
+                    if (parseInt(num) > 8) {
+                        document.getElementById('phases-9-16-section').style.display = 'block';
+                    }
+                }
+            }
+            
+            // Update overlaps
+            for (const [num, state] of Object.entries(status.overlaps)) {
+                const elem = document.getElementById(`overlap-${num}`);
+                if (elem) {
+                    elem.className = `phase-circle ${state}`;
+                    document.getElementById('overlaps-section').style.display = 'block';
+                }
+            }
+            
+            // Update detectors
+            for (const [num, state] of Object.entries(status.detectors)) {
+                const elem = document.getElementById(`detector-${num}`);
+                if (elem) {
+                    elem.className = `detector ${state}`;
+                    document.getElementById('detectors-section').style.display = 'block';
+                }
+            }
+            
+            // Update outputs
+            for (const [num, state] of Object.entries(status.outputs)) {
+                const elem = document.getElementById(`output-${num}`);
+                if (elem) {
+                    elem.className = `output ${state}`;
+                    document.getElementById('outputs-section').style.display = 'block';
+                }
+            }
+            
+            // Update last update time
+            document.getElementById('last-update').textContent = 
+                `Last update: ${new Date().toLocaleTimeString()}`;
+        }
+        
+        // Fetch status from API
+        async function fetchStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const status = await response.json();
+                updateDisplay(status);
+            } catch (error) {
+                console.error('Error fetching status:', error);
+            }
+        }
+        
+        // Sync controller time
+        async function syncTime() {
+            try {
+                const response = await fetch('/api/control/time', { method: 'POST' });
+                const result = await response.json();
+                if (result.success) {
+                    alert('Controller time synced successfully');
+                } else {
+                    alert('Failed to sync time: ' + result.error);
+                }
+            } catch (error) {
+                alert('Error: ' + error);
+            }
+        }
+        
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            initPhases();
+            initDetectors();
+            initOutputs();
+            
+            // Start polling
+            fetchStatus();
+            setInterval(fetchStatus, UPDATE_INTERVAL);
+        });
+    </script>
+</body>
+</html>
