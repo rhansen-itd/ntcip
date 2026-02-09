@@ -1,0 +1,38 @@
+{
+  "controller": {
+    "ip": "10.37.2.68",
+    "port": 501,
+    "community": "administrator",
+    "timeout": 2,
+    "retries": 2
+  },
+  "monitors": {
+    "phases": {
+      "enabled": true,
+      "poll_interval": 0.25,
+      "monitor_1_8": true,
+      "monitor_9_16": false,
+      "monitor_overlaps": false
+    },
+    "detectors": {
+      "enabled": false,
+      "poll_interval": 0.1,
+      "detector_range": [1, 65]
+    },
+    "outputs": {
+      "enabled": false,
+      "poll_interval": 0.25,
+      "output_range": [1, 17]
+    }
+  },
+  "logging": {
+    "enabled": true,
+    "log_file": "ntcip_monitor.log",
+    "log_changes_only": true
+  },
+  "web_ui": {
+    "enabled": true,
+    "host": "0.0.0.0",
+    "port": 5000
+  }
+}

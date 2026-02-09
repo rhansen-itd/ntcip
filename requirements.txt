@@ -1,0 +1,11 @@
+# NTCIP Monitor Requirements
+
+# SNMP Library
+pysnmp>=5.0.0,<6.0.0
+
+# Flask for web UI
+flask>=2.3.0
+
+# Additional dependencies
+pyasn1>=0.4.8
+pycryptodomex>=3.11.0
