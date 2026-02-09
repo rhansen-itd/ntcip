@@ -53,6 +53,7 @@ class WebUI:
             status = {
                 'phases': {},
                 'overlaps': {},
+                'pedestrians': {},
                 'detectors': {},
                 'outputs': {},
                 'connected': True
