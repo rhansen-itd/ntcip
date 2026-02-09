@@ -224,6 +224,11 @@
             <div class="phase-grid" id="phases-9-16"></div>
         </div>
         
+        <div class="section" id="pedestrians-section" style="display: none;">
+            <div class="section-title">Pedestrian Signals</div>
+            <div class="phase-grid" id="pedestrians"></div>
+        </div>
+
         <div class="section" id="overlaps-section" style="display: none;">
             <div class="section-title">Overlaps 1-8</div>
             <div class="phase-grid" id="overlaps"></div>
@@ -262,7 +267,12 @@
             for (let i = 9; i <= 16; i++) {
                 container9_16.innerHTML += createPhaseHTML(i);
             }
-            
+
+            const pedestriansContainer = document.getElementById('pedestrians');
+            for (let i = 1; i <= 8; i++) {
+                pedestriansContainer.innerHTML += createPedestrianHTML(i);
+            }
+
             const overlapsContainer = document.getElementById('overlaps');
             for (let i = 1; i <= 8; i++) {
                 overlapsContainer.innerHTML += createOverlapHTML(i);
@@ -278,6 +288,15 @@
             `;
         }
         
+        function createPedestrianHTML(num) {
+            return `
+                <div class="phase">
+                    <div class="phase-circle DARK" id="pedestrian-${num}">P${num}</div>
+                    <div class="phase-label">Ped ${num}</div>
+                </div>
+            `;
+        }
+
         function createOverlapHTML(num) {
             return `
                 <div class="phase">
@@ -316,6 +335,15 @@
                 }
             }
             
+            // Update pedestrian signals
+            for (const [num, state] of Object.entries(status.pedestrians)) {
+                const elem = document.getElementById(`pedestrian-${num}`);
+                if (elem) {
+                    elem.className = `phase-circle ${state}`;
+                    document.getElementById('pedestrians-section').style.display = 'block';
+                }
+            }
+
             // Update overlaps
             for (const [num, state] of Object.entries(status.overlaps)) {
                 const elem = document.getElementById(`overlap-${num}`);

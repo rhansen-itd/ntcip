@@ -1,6 +1,7 @@
 {
   "controller": {
-    "ip": "10.37.2.68",
+    "ip": 
+    "10.37.2.68",
     "port": 501,
     "community": "administrator",
     "timeout": 2,
@@ -11,12 +12,13 @@
       "enabled": true,
       "poll_interval": 0.25,
       "monitor_1_8": true,
-      "monitor_9_16": false,
-      "monitor_overlaps": false
+      "monitor_9_16": true,
+      "monitor_pedestrians": true,
+      "monitor_overlaps": true
     },
     "detectors": {
-      "enabled": false,
-      "poll_interval": 0.1,
+      "enabled": true,
+      "poll_interval": 0.25,
       "detector_range": [1, 65]
     },
     "outputs": {

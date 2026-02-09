@@ -69,7 +69,13 @@ class WebUI:
                 status['overlaps'] = {
                     num: state.name for num, state in overlaps.items()
                 }
-            
+
+                # Get pedestrian data
+                pedestrians = self.app_instance.phase_monitor.get_all_pedestrians()
+                status['pedestrians'] = {
+                    num: state.name for num, state in pedestrians.items()
+                }
+
             # Get detector data
             if self.app_instance.detector_monitor:
                 detectors = self.app_instance.detector_monitor.get_all_detectors()

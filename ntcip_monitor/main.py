@@ -59,10 +59,10 @@ class NTCIPMonitorApp:
         # Initialize SNMP client
         self._init_snmp_client()
         
-        # Test connection
-        if not self._test_connection():
-            print("ERROR: Cannot connect to controller. Check configuration.")
-            sys.exit(1)
+#        # Test connection
+#        if not self._test_connection():
+#            print("ERROR: Cannot connect to controller. Check configuration.")
+#            sys.exit(1)
         
         # Initialize controller control
         self.controller = ControllerControl(self.snmp_client)
@@ -146,7 +146,8 @@ class NTCIPMonitorApp:
                 poll_interval=self.config_loader.get('monitors.phases.poll_interval', 0.25),
                 monitor_phases_1_8=self.config_loader.get('monitors.phases.monitor_1_8', True),
                 monitor_phases_9_16=self.config_loader.get('monitors.phases.monitor_9_16', False),
-                monitor_overlaps=self.config_loader.get('monitors.phases.monitor_overlaps', False)
+                monitor_overlaps=self.config_loader.get('monitors.phases.monitor_overlaps', False),
+                monitor_pedestrians=self.config_loader.get('monitors.phases.monitor_pedestrians', False)
             )
             self.phase_monitor.start()
         
@@ -235,7 +236,7 @@ def example_video_buffer_integration(app):
     
     # Subscribe to phase change events
     def on_phase_2_green_to_red(phase_num, old_state, new_state):
-        from ..core.data_models import SignalState
+        from .core.data_models import SignalState
         
         if phase_num == 2 and old_state == SignalState.GREEN and new_state == SignalState.RED:
             print("Phase 2: GREEN -> RED detected! Trigger video save.")

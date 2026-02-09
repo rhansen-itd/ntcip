@@ -23,10 +23,27 @@ PHASE_9_16_REDS = f'{PHASE_STATUS_BASE}.2.2'
 PHASE_9_16_YELLOWS = f'{PHASE_STATUS_BASE}.3.2'
 PHASE_9_16_GREENS = f'{PHASE_STATUS_BASE}.4.2'
 
-# Overlaps 1-8 (Group 3)
-OVERLAP_REDS = f'{PHASE_STATUS_BASE}.2.3'
-OVERLAP_YELLOWS = f'{PHASE_STATUS_BASE}.3.3'
-OVERLAP_GREENS = f'{PHASE_STATUS_BASE}.4.3'
+# Pedestrian Phases
+PED_1_8_DW = f'{PHASE_STATUS_BASE}.5.1'  # Don't Walks 1-8
+PED_1_8_FDW = f'{PHASE_STATUS_BASE}.6.1'  # Flashing Don't Walks 1-8
+PED_1_8_W = f'{PHASE_STATUS_BASE}.7.1'  # Walks 1-8
+
+# ============================================================================
+# OVERLAPS (User Verified OID: 1.3.6.1.4.1.1206.4.2.1.9.4.1)
+# ============================================================================
+# Based on MIB Entry: overlapStatusGroupGreens = ...1.9.4.1.4
+# Base Table: 1.3.6.1.4.1.1206.4.2.1.9.4.1 (overlapStatusGroupEntry)
+# Column 2 = Reds
+# Column 3 = Yellows
+# Column 4 = Greens
+# Index .1 = Group 1 (Overlaps 1-8)
+
+OVERLAP_STATUS_BASE = f'{NTCIP_BASE}.4.2.1.9.4.1'
+
+# Overlaps 1-8 (Group 1)
+OVERLAP_REDS    = f'{OVERLAP_STATUS_BASE}.2.1'  # Column 2, Group 1
+OVERLAP_YELLOWS = f'{OVERLAP_STATUS_BASE}.3.1'  # Column 3, Group 1
+OVERLAP_GREENS  = f'{OVERLAP_STATUS_BASE}.4.1'  # Column 4, Group 1
 
 # ============================================================================
 # VEHICLE DETECTORS (NTCIP 1202 Section 3.6.4)

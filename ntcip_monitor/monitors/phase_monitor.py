@@ -3,7 +3,7 @@ Phase Monitor - Monitors phases 1-16 and overlaps 1-8
 """
 
 from ..core.event_monitor import BaseMonitor, EVENT_PHASE_CHANGE, EVENT_PHASE_GREEN_START, EVENT_PHASE_RED_START, EVENT_PHASE_YELLOW_START, EVENT_OVERLAP_CHANGE
-from ..core.oid_definitions import get_phase_oids, OVERLAP_REDS, OVERLAP_YELLOWS, OVERLAP_GREENS
+from ..core.oid_definitions import get_phase_oids, OVERLAP_REDS, OVERLAP_YELLOWS, OVERLAP_GREENS, PED_1_8_DW, PED_1_8_FDW, PED_1_8_W
 from ..core.data_models import parse_phases_from_bitmask, SignalState, PhaseStatus, OverlapStatus
 from ..core.snmp_client import SNMPError
 
@@ -18,7 +18,8 @@ class PhaseMonitor(BaseMonitor):
     - 'phase_red_start': (phase_num)
     - 'phase_yellow_start': (phase_num)
     - 'overlap_change': (overlap_num, old_state, new_state)
-    
+    - 'pedestrian_change': (pedestrian_num, old_state, new_state)
+
     Example usage:
         monitor = PhaseMonitor(snmp_client)
         monitor.on('phase_change', lambda phase, old, new: print(f"Phase {phase}: {old} -> {new}"))
@@ -29,7 +30,8 @@ class PhaseMonitor(BaseMonitor):
     def __init__(self, snmp_client, poll_interval=0.25, 
                  monitor_phases_1_8=True, 
                  monitor_phases_9_16=False, 
-                 monitor_overlaps=False):
+                 monitor_overlaps=False,
+                 monitor_pedestrians=False):
         """
         Initialize phase monitor.
         
@@ -39,16 +41,19 @@ class PhaseMonitor(BaseMonitor):
             monitor_phases_1_8: Monitor phases 1-8 (default True)
             monitor_phases_9_16: Monitor phases 9-16 (default False)
             monitor_overlaps: Monitor overlaps 1-8 (default False)
+            monitor_pedestrians: Monitor pedestrian phases (default False)
         """
         super().__init__(snmp_client, poll_interval, name="PhaseMonitor")
         
         self.monitor_phases_1_8 = monitor_phases_1_8
         self.monitor_phases_9_16 = monitor_phases_9_16
         self.monitor_overlaps = monitor_overlaps
+        self.monitor_pedestrians = monitor_pedestrians
         
         # Store last state for each phase/overlap
         self._last_phases = {}      # {phase_num: SignalState}
         self._last_overlaps = {}    # {overlap_num: SignalState}
+        self._last_pedestrians = {} # {ped_num: SignalState}
     
     def _poll(self):
         """Poll phases and emit events on changes."""
@@ -64,6 +69,10 @@ class PhaseMonitor(BaseMonitor):
             # Poll overlaps 1-8
             if self.monitor_overlaps:
                 self._poll_overlaps()
+
+            # Poll pedestrian phases if enabled
+            if self.monitor_pedestrians:
+                self._poll_pedestrians()
                 
         except SNMPError as e:
             # Connection issue - will be retried next poll
@@ -117,6 +126,47 @@ class PhaseMonitor(BaseMonitor):
                 self.emit(EVENT_OVERLAP_CHANGE, overlap_num, old_state, new_state)
                 self._last_overlaps[overlap_num] = new_state
     
+    def _poll_pedestrians(self):
+        """Poll pedestrian signals and emit change events."""
+        try:
+            from ..core.oid_definitions import PED_1_8_DW, PED_1_8_FDW, PED_1_8_W
+            
+            # Read all 3 in ONE call to avoid threading issues
+            results = self.snmp_client.get(PED_1_8_DW, PED_1_8_FDW, PED_1_8_W)
+            
+            # Handle both single value and list
+            if isinstance(results, list):
+                dws, fdws, walks = results[0], results[1], results[2]
+            else:
+                # Only got one value - means OIDs are wrong
+                print(f"Warning: Expected 3 pedestrian values, got 1")
+                return
+            
+            # Parse pedestrians
+            pedestrians = parse_phases_from_bitmask(dws, fdws, walks, start_phase=1)
+            
+            # Check for changes
+            for ped_data in pedestrians:
+                ped_num = ped_data.phase_num
+                new_state = ped_data.state
+                old_state = self._last_pedestrians.get(ped_num)
+                
+                if old_state != new_state:
+                    self.emit('pedestrian_change', ped_num, old_state, new_state)
+                    
+                    if new_state == SignalState.GREEN:
+                        self.emit('pedestrian_walk_start', ped_num)
+                    elif new_state == SignalState.YELLOW:
+                        self.emit('pedestrian_clearance_start', ped_num)
+                    elif new_state == SignalState.RED:
+                        self.emit('pedestrian_dont_walk_start', ped_num)
+                    
+                    self._last_pedestrians[ped_num] = new_state
+        
+        except Exception as e:
+            # Don't break phase monitoring
+            print(f"Pedestrian monitoring error (suppressed): {e}")
+
     def _emit_phase_change_events(self, phase_num, old_state, new_state):
         """Emit phase change events."""
         # General change event
@@ -154,6 +204,18 @@ class PhaseMonitor(BaseMonitor):
         """
         return self._last_overlaps.get(overlap_num)
     
+    def get_current_pedestrian_state(self, ped_num):
+        """
+        Get current state of a specific pedestrian signal.
+        
+        Args:
+            ped_num: Pedestrian number (1-8)
+        
+        Returns:
+            SignalState or None if not monitored/unknown
+        """
+        return self._last_pedestrians.get(ped_num)
+    
     def get_all_phases(self):
         """Get dictionary of all current phase states."""
         return self._last_phases.copy()
@@ -161,3 +223,7 @@ class PhaseMonitor(BaseMonitor):
     def get_all_overlaps(self):
         """Get dictionary of all current overlap states."""
         return self._last_overlaps.copy()
+
+    def get_all_pedestrians(self):
+        """Get dictionary of all current pedestrian states."""
+        return self._last_pedestrians.copy()

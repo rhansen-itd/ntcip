@@ -167,6 +167,12 @@ EVENT_PHASE_GREEN_START = 'phase_green_start' # (phase_num)
 EVENT_PHASE_RED_START = 'phase_red_start'     # (phase_num)
 EVENT_PHASE_YELLOW_START = 'phase_yellow_start' # (phase_num)
 
+# Pedestrian events
+EVENT_PEDESTRIAN_CHANGE = 'pedestrian_change'              # (ped_num, old_state, new_state)
+EVENT_PEDESTRIAN_WALK_START = 'pedestrian_walk_start'      # (ped_num)
+EVENT_PEDESTRIAN_CLEARANCE_START = 'pedestrian_clearance_start'  # (ped_num)
+EVENT_PEDESTRIAN_DONT_WALK_START = 'pedestrian_dont_walk_start'  # (ped_num)
+
 # Overlap events
 EVENT_OVERLAP_CHANGE = 'overlap_change'       # (overlap_num, old_state, new_state)
 

@@ -49,12 +49,17 @@ class OutputMonitor(BaseMonitor):
             # Determine which outputs to read
             start, end = self.output_range
             outputs_to_read = range(start, end)
+            oids = [OUTPUT_OIDS[i - 1] for i in outputs_to_read]
             
-            # Read outputs ONE AT A TIME to ensure correct pairing
-            for output_num in outputs_to_read:
-                oid = OUTPUT_OIDS[output_num - 1]
-                value = self.snmp_client.get(oid)
-                
+            # Read all outputs
+            values = self.snmp_client.get(*oids)
+            
+            # Handle single value vs list
+            if not isinstance(values, list):
+                values = [values]
+            
+            # Check each output for changes
+            for output_num, value in zip(outputs_to_read, values):
                 new_state = OutputState.ON if value == 1 else OutputState.OFF
                 old_state = self._last_outputs.get(output_num)
                 

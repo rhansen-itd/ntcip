@@ -61,12 +61,17 @@ class DetectorMonitor(BaseMonitor):
     def _poll(self):
         """Poll detectors and emit events on changes."""
         try:
-            # Read all required detector groups ONE AT A TIME to ensure correct pairing
+            # Read all required detector groups
+            oids_to_read = [DETECTOR_GROUPS[i] for i in self._groups_to_poll]
+            bitmasks = self.snmp_client.get(*oids_to_read)
+            
+            # Handle single value vs list
+            if not isinstance(bitmasks, list):
+                bitmasks = [bitmasks]
+            
+            # Parse each group
             all_detectors = []
-            for group_idx in self._groups_to_poll:
-                oid = DETECTOR_GROUPS[group_idx]
-                bitmask = self.snmp_client.get(oid)
-                
+            for group_idx, bitmask in zip(self._groups_to_poll, bitmasks):
                 start_detector = group_idx * 8 + 1
                 detectors = parse_detectors_from_bitmask(bitmask, start_detector)
                 all_detectors.extend(detectors)
