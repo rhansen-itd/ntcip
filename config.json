@@ -1,7 +1,7 @@
 {
   "controller": {
     "ip": 
-    "127.0.0.1",
+    "10.70.10.51",
     "port": 501,
     "community": "administrator",
     "timeout": 2,

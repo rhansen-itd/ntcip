@@ -7,5 +7,5 @@ pysnmp>=5.0.0,<6.0.0
 flask>=2.3.0
 
 # Additional dependencies
-pyasn1>=0.4.8
+pyasn1>=0.6.0
 pycryptodomex>=3.11.0

@@ -2,6 +2,7 @@
 SNMP Client for NTCIP Communication with Econolite Controllers
 """
 
+import threading
 import warnings
 warnings.filterwarnings('ignore', message='.*pysnmp.*deprecated.*')
 
@@ -24,13 +25,6 @@ class EconoliteSNMPClient:
     def __init__(self, ip, port=501, community='administrator', timeout=2, retries=2):
         """
         Initialize SNMP client.
-        
-        Args:
-            ip: Controller IP address
-            port: SNMP port (default 501 for Econolite)
-            community: Community string / username (default 'administrator')
-            timeout: SNMP timeout in seconds
-            retries: Number of retries
         """
         self.ip = ip
         self.port = port
@@ -38,6 +32,7 @@ class EconoliteSNMPClient:
         self.timeout = timeout
         self.retries = retries
         self.engine = SnmpEngine()
+        self._lock = threading.Lock()
         
         # Stats
         self.stats = {
@@ -50,102 +45,102 @@ class EconoliteSNMPClient:
         """
         Perform SNMP GET on one or more OIDs.
         
-        Args:
-            *oids: Variable number of OID strings
-        
-        Returns:
-            list: List of integer values, or None on error
+        Updated with Chunking to prevent 'Too Big' errors on Econolite controllers.
         """
-        self.stats['reads'] += 1
         
-        # Build OID list
-        oid_objects = [ObjectType(ObjectIdentity(oid)) for oid in oids]
-        
-        try:
-            iterator = getCmd(
-                self.engine,
-                CommunityData(self.community, mpModel=0),  # SNMPv1
-                UdpTransportTarget((self.ip, self.port), timeout=self.timeout, retries=self.retries),
-                ContextData(),
-                *oid_objects
-            )
+        with self._lock:
+            self.stats['reads'] += 1
             
-            errorIndication, errorStatus, errorIndex, varBinds = next(iterator)
+            # --- CHUNK SIZE CONFIGURATION ---
+            # Set to 1 to force the controller to answer one item at a time.
+            # This is the safest way to fix the missing Outputs/Detectors.
+            CHUNK_SIZE = 1
             
-            if errorIndication:
+            all_values = []
+            
+            # Convert all OID strings to ObjectType objects once
+            all_oid_objects = [ObjectType(ObjectIdentity(oid)) for oid in oids]
+            
+            try:
+                # Process the OIDs in small chunks
+                for i in range(0, len(all_oid_objects), CHUNK_SIZE):
+                    chunk = all_oid_objects[i:i + CHUNK_SIZE]
+                    
+                    iterator = getCmd(
+                        self.engine,
+                        CommunityData(self.community, mpModel=0),  # SNMPv1
+                        UdpTransportTarget((self.ip, self.port), timeout=self.timeout, retries=self.retries),
+                        ContextData(),
+                        *chunk
+                    )
+                    
+                    errorIndication, errorStatus, errorIndex, varBinds = next(iterator)
+                    
+                    if errorIndication:
+                        self.stats['errors'] += 1
+                        raise SNMPError(f"SNMP Error: {errorIndication}")
+                    
+                    if errorStatus:
+                        self.stats['errors'] += 1
+                        raise SNMPError(f"SNMP Error: {errorStatus.prettyPrint()} at index {errorIndex}")
+                    
+                    # Extract values from this chunk and add to our master list
+                    chunk_values = [int(varBind[1]) for varBind in varBinds]
+                    all_values.extend(chunk_values)
+                
+                # Return logic matches the original interface (list vs single item)
+                return all_values if len(oids) > 1 else all_values[0]
+                
+            except StopIteration:
                 self.stats['errors'] += 1
-                raise SNMPError(f"SNMP Error: {errorIndication}")
-            
-            if errorStatus:
+                raise SNMPError("No SNMP response received")
+            except Exception as e:
                 self.stats['errors'] += 1
-                raise SNMPError(f"SNMP Error: {errorStatus.prettyPrint()} at index {errorIndex}")
-            
-            # Extract values
-            values = [int(varBind[1]) for varBind in varBinds]
-            
-            return values if len(values) > 1 else values[0]
-            
-        except StopIteration:
-            self.stats['errors'] += 1
-            raise SNMPError("No SNMP response received")
-        except Exception as e:
-            self.stats['errors'] += 1
-            raise SNMPError(f"SNMP exception: {type(e).__name__}: {e}")
+                # Re-raise known SNMP errors to keep error handling consistent
+                if isinstance(e, SNMPError):
+                    raise e
+                raise SNMPError(f"SNMP exception: {type(e).__name__}: {e}")
     
     def set(self, oid, value):
         """
         Perform SNMP SET on a single OID.
-        
-        Args:
-            oid: OID string
-            value: Integer value to set
-        
-        Returns:
-            bool: True on success, raises SNMPError on failure
         """
-        self.stats['writes'] += 1
-        
-        try:
-            iterator = setCmd(
-                self.engine,
-                CommunityData(self.community, mpModel=0),  # SNMPv1
-                UdpTransportTarget((self.ip, self.port), timeout=self.timeout, retries=self.retries),
-                ContextData(),
-                ObjectType(ObjectIdentity(oid), Integer32(value))
-            )
+        with self._lock:
+            self.stats['writes'] += 1
             
-            errorIndication, errorStatus, errorIndex, varBinds = next(iterator)
-            
-            if errorIndication:
+            try:
+                iterator = setCmd(
+                    self.engine,
+                    CommunityData(self.community, mpModel=0),  # SNMPv1
+                    UdpTransportTarget((self.ip, self.port), timeout=self.timeout, retries=self.retries),
+                    ContextData(),
+                    ObjectType(ObjectIdentity(oid), Integer32(value))
+                )
+                
+                errorIndication, errorStatus, errorIndex, varBinds = next(iterator)
+                
+                if errorIndication:
+                    self.stats['errors'] += 1
+                    raise SNMPError(f"SNMP SET Error: {errorIndication}")
+                
+                if errorStatus:
+                    self.stats['errors'] += 1
+                    raise SNMPError(f"SNMP SET Error: {errorStatus.prettyPrint()} at index {errorIndex}")
+                
+                return True
+                
+            except StopIteration:
                 self.stats['errors'] += 1
-                raise SNMPError(f"SNMP SET Error: {errorIndication}")
-            
-            if errorStatus:
+                raise SNMPError("No SNMP response to SET command")
+            except Exception as e:
                 self.stats['errors'] += 1
-                raise SNMPError(f"SNMP SET Error: {errorStatus.prettyPrint()} at index {errorIndex}")
-            
-            return True
-            
-        except StopIteration:
-            self.stats['errors'] += 1
-            raise SNMPError("No SNMP response to SET command")
-        except Exception as e:
-            self.stats['errors'] += 1
-            raise SNMPError(f"SNMP SET exception: {type(e).__name__}: {e}")
+                raise SNMPError(f"SNMP SET exception: {type(e).__name__}: {e}")
     
     def get_stats(self):
-        """Get client statistics."""
         return self.stats.copy()
     
     def test_connection(self):
-        """
-        Test SNMP connectivity.
-        
-        Returns:
-            bool: True if connection successful
-        """
         try:
-            # Try to read sysDescr (universal OID)
             self.get('1.3.6.1.2.1.1.1.0')
             return True
         except SNMPError:
@@ -153,5 +148,4 @@ class EconoliteSNMPClient:
 
 
 class SNMPError(Exception):
-    """Custom exception for SNMP errors."""
     pass

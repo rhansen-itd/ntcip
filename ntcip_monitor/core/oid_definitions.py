@@ -87,7 +87,7 @@ PHASE_9_16_VEH_CALL = f'{PHASE_CONTROL_BASE}.6.2'   # Phases 9-16
 # TIME BASE (NTCIP 1201 Section 2.6.3)
 # ============================================================================
 # globalTime - Controller clock (Integer32: seconds since 1970-01-01 00:00:00 UTC)
-GLOBAL_TIME = f'{NTCIP_BASE}.4.2.6.3.0'
+GLOBAL_TIME = f'{NTCIP_BASE}.4.2.6.3.1.0'
 
 # ============================================================================
 # HELPER MAPPINGS
