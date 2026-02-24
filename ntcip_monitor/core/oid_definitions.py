@@ -84,6 +84,19 @@ PHASE_1_8_VEH_CALL = f'{PHASE_CONTROL_BASE}.6.1'    # Phases 1-8
 PHASE_9_16_VEH_CALL = f'{PHASE_CONTROL_BASE}.6.2'   # Phases 9-16
 
 # ============================================================================
+# RING STATUS (NTCIP 1202 Section 3.5.4.4)
+# ============================================================================
+# ringStatus - Returns 8-bit integer containing termination and state bits
+# Base Table: 1.3.6.1.4.1.1206.4.2.1.7.6.1 (ringStatusEntry)
+# Column 1 = ringStatus
+RING_STATUS_BASE = f'{NTCIP_BASE}.4.2.1.7.6.1.1'
+
+RING_1_STATUS = f'{RING_STATUS_BASE}.1'
+RING_2_STATUS = f'{RING_STATUS_BASE}.2'
+RING_3_STATUS = f'{RING_STATUS_BASE}.3'
+RING_4_STATUS = f'{RING_STATUS_BASE}.4'
+
+# ============================================================================
 # TIME BASE (NTCIP 1201 Section 2.6.3)
 # ============================================================================
 # globalTime - Controller clock (Integer32: seconds since 1970-01-01 00:00:00 UTC)
@@ -144,3 +157,19 @@ def get_output_oid(output_num):
         raise ValueError("Output number must be 1-16")
     
     return OUTPUT_OIDS[output_num - 1]
+
+
+def get_ring_status_oid(ring_num):
+    """
+    Get OID for a specific ring status (1-4).
+    
+    Args:
+        ring_num: Ring number (1-4)
+        
+    Returns:
+        str: OID for the ring status
+    """
+    if not 1 <= ring_num <= 4:
+        raise ValueError("Ring number must be 1-4")
+        
+    return RING_STATUS_OIDS[ring_num - 1]

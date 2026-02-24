@@ -85,9 +85,11 @@ class DetectorMonitor(BaseMonitor):
                         self._last_detectors[det_num] = new_state
             
             self._last_state = {'detectors': all_detectors}
-            
-        except SNMPError:
-            pass
+        
+        #except SNMPError:
+        #    pass    
+        except SNMPError as e:
+            print(f"[DIAGNOSTIC] SNMP Polling Failed: {e}")
     
     def _emit_detector_change_events(self, detector_num, old_state, new_state):
         """Emit detector change events."""

@@ -1,0 +1,101 @@
+{
+  "201": {
+    "intersection_id": "201",
+    "description": "SH-55_and_Banks-Lowman_Rd",
+    "controller_ip": "10.37.23.200",
+    "snmp_port": 501,
+    "snmp_community": "administrator",
+    "poll_interval_sec": 0.2,
+    "timezone": "US/Mountain",
+
+    "cameras": {
+      "fisheye": {
+        "url": "rtsp://root:WesternSystems1!@10.37.23.204/axis-media/media.amp?camera=1&videocodec=h264",
+        "description": "full intersection",
+        "pre_roll_sec": 5,
+        "post_roll_sec": 5
+      }
+    },
+"detectors": {
+      "26": {
+        "type": "video",
+        "phase": 6,
+        "description": "SB Currux Stopbar",
+        "paired_detector_id": "33",
+        "camera_id": "fisheye",
+        "lag_threshold_sec": 5
+      },
+      "33": {
+        "type": "radar",
+        "phase": 6,
+        "description": "SB Evo Stopbar",
+        "paired_detector_id": "26",
+        "camera_id": "fisheye",
+        "lag_threshold_sec": 5
+      },
+      "17": {
+        "type": "video",
+        "phase": 2,
+        "description": "NB Currux Stopbar",
+        "paired_detector_id": "46",
+        "camera_id": "fisheye",
+        "lag_threshold_sec": 5
+      },
+      "46": {
+        "type": "radar",
+        "phase": 2,
+        "description": "NB Evo Stopbar",
+        "paired_detector_id": "17",
+        "camera_id": "fisheye",
+        "lag_threshold_sec": 5
+      },
+      "24": {
+        "type": "video",
+        "phase": 7,
+        "description": "WB Currux Stopbar",
+        "paired_detector_id": "38",
+        "camera_id": "fisheye",
+        "lag_threshold_sec": 5
+      },
+      "38": {
+        "type": "radar",
+        "phase": 7,
+        "description": "WB Evo Stopbar",
+        "paired_detector_id": "24",
+        "camera_id": "fisheye",
+        "lag_threshold_sec": 5
+      },
+      "13": {
+        "type": "video",
+        "phase": 8,
+        "description": "EB Currux Stopbar",
+        "paired_detector_id": "52",
+        "camera_id": "fisheye",
+        "lag_threshold_sec": 5
+      },
+      "52": {
+        "type": "radar",
+        "phase": 8,
+        "description": "EB Evo Stopbar",
+        "paired_detector_id": "13",
+        "camera_id": "fisheye",
+        "lag_threshold_sec": 5
+      },
+      "11": {
+        "type": "video",
+        "phase": 11,
+        "description": "WB Bridge Clearance Currux",
+        "paired_detector_id": "51",
+        "camera_id": "fisheye",
+        "lag_threshold_sec": 5
+      },
+      "51": {
+        "type": "radar",
+        "phase": 11,
+        "description": "WB Bridge Clearance Evo",
+        "paired_detector_id": "11",
+        "camera_id": "fisheye",
+        "lag_threshold_sec": 5      }
+    }
+  }
+}
