@@ -24,9 +24,9 @@ PHASE_9_16_YELLOWS = f'{PHASE_STATUS_BASE}.3.2'
 PHASE_9_16_GREENS = f'{PHASE_STATUS_BASE}.4.2'
 
 # Pedestrian Phases
-PED_1_8_DW = f'{PHASE_STATUS_BASE}.5.1'  # Don't Walks 1-8
+PED_1_8_DW = f'{PHASE_STATUS_BASE}.5.1'   # Don't Walks 1-8
 PED_1_8_FDW = f'{PHASE_STATUS_BASE}.6.1'  # Flashing Don't Walks 1-8
-PED_1_8_W = f'{PHASE_STATUS_BASE}.7.1'  # Walks 1-8
+PED_1_8_W = f'{PHASE_STATUS_BASE}.7.1'    # Walks 1-8
 
 # ============================================================================
 # OVERLAPS (User Verified OID: 1.3.6.1.4.1.1206.4.2.1.9.4.1)
@@ -51,14 +51,14 @@ OVERLAP_GREENS  = f'{OVERLAP_STATUS_BASE}.4.1'  # Column 4, Group 1
 # vehicleDetectorStatusGroupActive - 8 groups of 8 detectors each (64 total)
 DETECTOR_BASE = f'{NTCIP_BASE}.4.2.1.2.4.1.2'
 
-DETECTOR_1_8 = f'{DETECTOR_BASE}.1'      # Detectors 1-8
-DETECTOR_9_16 = f'{DETECTOR_BASE}.2'     # Detectors 9-16
-DETECTOR_17_24 = f'{DETECTOR_BASE}.3'    # Detectors 17-24
-DETECTOR_25_32 = f'{DETECTOR_BASE}.4'    # Detectors 25-32
-DETECTOR_33_40 = f'{DETECTOR_BASE}.5'    # Detectors 33-40
-DETECTOR_41_48 = f'{DETECTOR_BASE}.6'    # Detectors 41-48
-DETECTOR_49_56 = f'{DETECTOR_BASE}.7'    # Detectors 49-56
-DETECTOR_57_64 = f'{DETECTOR_BASE}.8'    # Detectors 57-64
+DETECTOR_1_8   = f'{DETECTOR_BASE}.1'   # Detectors 1-8
+DETECTOR_9_16  = f'{DETECTOR_BASE}.2'   # Detectors 9-16
+DETECTOR_17_24 = f'{DETECTOR_BASE}.3'   # Detectors 17-24
+DETECTOR_25_32 = f'{DETECTOR_BASE}.4'   # Detectors 25-32
+DETECTOR_33_40 = f'{DETECTOR_BASE}.5'   # Detectors 33-40
+DETECTOR_41_48 = f'{DETECTOR_BASE}.6'   # Detectors 41-48
+DETECTOR_49_56 = f'{DETECTOR_BASE}.7'   # Detectors 49-56
+DETECTOR_57_64 = f'{DETECTOR_BASE}.8'   # Detectors 57-64
 
 DETECTOR_GROUPS = [
     DETECTOR_1_8, DETECTOR_9_16, DETECTOR_17_24, DETECTOR_25_32,
@@ -80,21 +80,36 @@ OUTPUT_OIDS = [f'{OUTPUT_BASE}.{i}' for i in range(1, 17)]
 # phaseControlGroupVehCall - Place vehicle calls
 PHASE_CONTROL_BASE = f'{NTCIP_BASE}.4.2.1.1.5.1'
 
-PHASE_1_8_VEH_CALL = f'{PHASE_CONTROL_BASE}.6.1'    # Phases 1-8
-PHASE_9_16_VEH_CALL = f'{PHASE_CONTROL_BASE}.6.2'   # Phases 9-16
+PHASE_1_8_VEH_CALL  = f'{PHASE_CONTROL_BASE}.6.1'  # Phases 1-8
+PHASE_9_16_VEH_CALL = f'{PHASE_CONTROL_BASE}.6.2'  # Phases 9-16
 
 # ============================================================================
-# RING STATUS (NTCIP 1202 Section 3.5.4.4)
+# RING STATUS (NTCIP 1202 Section 5.8.6.1)
 # ============================================================================
-# ringStatus - Returns 8-bit integer containing termination and state bits
-# Base Table: 1.3.6.1.4.1.1206.4.2.1.7.6.1 (ringStatusEntry)
-# Column 1 = ringStatus
+# ringStatusEntry table : ...7.6.1
+# Column 1 (ringStatus): ...7.6.1.1
+# Row index = ring number (1-4)
+#
+# Bit layout:
+#   Bit 5 : Force Off  (1 = active phase terminated by Force Off)
+#   Bit 4 : Max Out    (1 = active phase terminated by Max Out)
+#   Bit 3 : Gap Out    (1 = active phase terminated by Gap Out)
+#   Bits 0-2 (coded status):
+#       0 = Min Green  1 = Extension  2 = Maximum    3 = Green Rest
+#       4 = Yellow Change             5 = Red Clearance
+#       6 = Red Rest   7 = Undefined
 RING_STATUS_BASE = f'{NTCIP_BASE}.4.2.1.7.6.1.1'
 
-RING_1_STATUS = f'{RING_STATUS_BASE}.1'
-RING_2_STATUS = f'{RING_STATUS_BASE}.2'
-RING_3_STATUS = f'{RING_STATUS_BASE}.3'
-RING_4_STATUS = f'{RING_STATUS_BASE}.4'
+RING_STATUS_OIDS = [f'{RING_STATUS_BASE}.{i}' for i in range(1, 5)]  # rings 1-4
+
+# ============================================================================
+# PHASE-TO-RING MAPPING  (NTCIP 1202 Section 3.5.2 – phaseRing)
+# ============================================================================
+# phaseRing is a column in the phaseTable:
+#   phaseTable  = ...1.2.1   (phaseEntry)
+#   Column 4    = phaseRing  (which ring 1-4 this phase belongs to)
+# Full OID: NTCIP_BASE.4.2.1.1.2.1.4.<phase_num>
+PHASE_RING_BASE = f'{NTCIP_BASE}.4.2.1.1.2.1.4'
 
 # ============================================================================
 # TIME BASE (NTCIP 1201 Section 2.6.3)
@@ -159,17 +174,39 @@ def get_output_oid(output_num):
     return OUTPUT_OIDS[output_num - 1]
 
 
-def get_ring_status_oid(ring_num):
-    """
-    Get OID for a specific ring status (1-4).
-    
+def get_ring_status_oid(ring_num: int) -> str:
+    """Return the SNMP OID for a specific ring's status byte.
+
     Args:
-        ring_num: Ring number (1-4)
-        
+        ring_num: Ring number in the range [1, 4].
+
     Returns:
-        str: OID for the ring status
+        Fully-qualified OID string for ``ringStatus.ring_num``.
+
+    Raises:
+        ValueError: If ``ring_num`` is not between 1 and 4 inclusive.
     """
     if not 1 <= ring_num <= 4:
-        raise ValueError("Ring number must be 1-4")
-        
+        raise ValueError(f"Ring number must be 1-4, got {ring_num!r}")
     return RING_STATUS_OIDS[ring_num - 1]
+
+
+def get_phase_ring_oid(phase_num: int) -> str:
+    """Return the SNMP OID for the ring assignment of a specific phase.
+
+    Queries ``phaseRing`` from the NTCIP phase table so the application can
+    dynamically discover which ring owns each phase rather than relying solely
+    on the default NEMA dual-ring layout.
+
+    Args:
+        phase_num: Phase number in the range [1, 16].
+
+    Returns:
+        Fully-qualified OID string for ``phaseRing.phase_num``.
+
+    Raises:
+        ValueError: If ``phase_num`` is not between 1 and 16 inclusive.
+    """
+    if not 1 <= phase_num <= 16:
+        raise ValueError(f"Phase number must be 1-16, got {phase_num!r}")
+    return f'{PHASE_RING_BASE}.{phase_num}'

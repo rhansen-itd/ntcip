@@ -162,31 +162,45 @@ class BaseMonitor(ABC, EventEmitter):
 # ============================================================================
 
 # Phase events
-EVENT_PHASE_CHANGE = 'phase_change'           # (phase_num, old_state, new_state)
-EVENT_PHASE_GREEN_START = 'phase_green_start' # (phase_num)
-EVENT_PHASE_RED_START = 'phase_red_start'     # (phase_num)
-EVENT_PHASE_YELLOW_START = 'phase_yellow_start' # (phase_num)
+EVENT_PHASE_CHANGE = 'phase_change'               # (phase_num, old_state, new_state)
+EVENT_PHASE_GREEN_START = 'phase_green_start'     # (phase_num)
+EVENT_PHASE_RED_START = 'phase_red_start'         # (phase_num)
+EVENT_PHASE_YELLOW_START = 'phase_yellow_start'   # (phase_num)
 
 # Pedestrian events
-EVENT_PEDESTRIAN_CHANGE = 'pedestrian_change'              # (ped_num, old_state, new_state)
-EVENT_PEDESTRIAN_WALK_START = 'pedestrian_walk_start'      # (ped_num)
+EVENT_PEDESTRIAN_CHANGE = 'pedestrian_change'                    # (ped_num, old_state, new_state)
+EVENT_PEDESTRIAN_WALK_START = 'pedestrian_walk_start'            # (ped_num)
 EVENT_PEDESTRIAN_CLEARANCE_START = 'pedestrian_clearance_start'  # (ped_num)
 EVENT_PEDESTRIAN_DONT_WALK_START = 'pedestrian_dont_walk_start'  # (ped_num)
 
 # Overlap events
-EVENT_OVERLAP_CHANGE = 'overlap_change'       # (overlap_num, old_state, new_state)
+EVENT_OVERLAP_CHANGE = 'overlap_change'           # (overlap_num, old_state, new_state)
 
 # Detector events
-EVENT_DETECTOR_CHANGE = 'detector_change'     # (detector_num, old_state, new_state)
-EVENT_DETECTOR_ON = 'detector_on'             # (detector_num)
-EVENT_DETECTOR_OFF = 'detector_off'           # (detector_num)
+EVENT_DETECTOR_CHANGE = 'detector_change'         # (detector_num, old_state, new_state)
+EVENT_DETECTOR_ON = 'detector_on'                 # (detector_num)
+EVENT_DETECTOR_OFF = 'detector_off'               # (detector_num)
 
 # Output events
-EVENT_OUTPUT_CHANGE = 'output_change'         # (output_num, old_state, new_state)
-EVENT_OUTPUT_ON = 'output_on'                 # (output_num)
-EVENT_OUTPUT_OFF = 'output_off'               # (output_num)
+EVENT_OUTPUT_CHANGE = 'output_change'             # (output_num, old_state, new_state)
+EVENT_OUTPUT_ON = 'output_on'                     # (output_num)
+EVENT_OUTPUT_OFF = 'output_off'                   # (output_num)
+
+# Ring events
+EVENT_RING_STATE_CHANGE = 'ring_state_change'
+# Emitted when bits 0-2 (coded timing state) change for a ring.
+# Signature: (ring_num: int, old_state: RingState, new_state: RingState)
+
+EVENT_RING_TERMINATION = 'ring_termination'
+# Emitted on the 0->1 edge of any termination bit (GapOut, MaxOut, ForceOff).
+# Signature: (ring_num: int, reason: TerminationReason)
+
+EVENT_PHASE_TERMINATED = 'phase_terminated'
+# Emitted by PhaseMonitor (proxied from RingMonitor) when the ring that owns
+# a phase registers a termination while that phase is in Yellow.
+# Signature: (phase_num: int, ring_num: int, reason: TerminationReason)
 
 # System events
-EVENT_ERROR = 'error'                         # (exception)
-EVENT_CONNECTION_LOST = 'connection_lost'     # ()
+EVENT_ERROR = 'error'                             # (exception)
+EVENT_CONNECTION_LOST = 'connection_lost'         # ()
 EVENT_CONNECTION_RESTORED = 'connection_restored' # ()

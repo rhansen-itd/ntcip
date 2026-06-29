@@ -1,7 +1,6 @@
 {
   "controller": {
-    "ip": 
-    "10.70.10.51",
+    "ip": "10.37.2.68",
     "port": 501,
     "community": "administrator",
     "timeout": 2,
@@ -10,7 +9,7 @@
   "monitors": {
     "phases": {
       "enabled": true,
-      "poll_interval": 0.25,
+      "poll_interval": 0.2,
       "monitor_1_8": true,
       "monitor_9_16": true,
       "monitor_pedestrians": true,
@@ -18,13 +17,18 @@
     },
     "detectors": {
       "enabled": true,
-      "poll_interval": 0.25,
+      "poll_interval": 0.2,
       "detector_range": [1, 65]
     },
     "outputs": {
       "enabled": false,
-      "poll_interval": 0.25,
+      "poll_interval": 0.2,
       "output_range": [1, 17]
+    },
+    "rings": {
+      "enabled": true,
+      "poll_interval": 0.25,
+      "rings_to_monitor": [1, 2]
     }
   },
   "logging": {

@@ -129,52 +129,10 @@ from typing import Dict, List, Optional, Tuple
 from config_manager import ConfigProvider, ConfigProviderError
 
 # ---------------------------------------------------------------------------
-# JSON-lines logger
+# Module-level logger
 # ---------------------------------------------------------------------------
 
-class _JsonFormatter(logging.Formatter):
-    """Emit log records as single-line JSON objects."""
-
-    def format(self, record: logging.LogRecord) -> str:  # noqa: D102
-        payload = {
-            "ts": self.formatTime(record, self.datefmt),
-            "level": record.levelname,
-            "logger": record.name,
-            "msg": record.getMessage(),
-        }
-        if record.exc_info:
-            payload["exc"] = self.formatException(record.exc_info)
-        _SKIP = {
-            "msg", "args", "levelname", "levelno", "pathname", "filename",
-            "module", "exc_info", "exc_text", "stack_info", "lineno",
-            "funcName", "created", "msecs", "relativeCreated", "thread",
-            "threadName", "processName", "process", "name", "message",
-        }
-        for k, v in record.__dict__.items():
-            if k not in _SKIP:
-                payload[k] = v
-        return json.dumps(payload, default=str)
-
-
-def _build_logger(name: str) -> logging.Logger:
-    """Return a logger that emits JSON lines to stdout.
-
-    Args:
-        name: Logger hierarchy name.
-
-    Returns:
-        Configured :class:`logging.Logger`.
-    """
-    logger = logging.getLogger(name)
-    if not logger.handlers:
-        handler = logging.StreamHandler()
-        handler.setFormatter(_JsonFormatter())
-        logger.addHandler(handler)
-    logger.setLevel(logging.DEBUG)
-    return logger
-
-
-log = _build_logger("discrepancy_engine")
+log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Timezone resolution helper
@@ -436,7 +394,7 @@ class DiscrepancyMonitor:
         self._pre_roll_sec = pre_roll_sec
         self._post_roll_sec = post_roll_sec
         self._max_duration_sec = max_duration_sec
-        self._log = _build_logger(f"discrepancy_engine.{intersection_id}")
+        self._log = logging.getLogger(f"{__name__}.{intersection_id}")
 
         self._trigger_dir.mkdir(parents=True, exist_ok=True)
 

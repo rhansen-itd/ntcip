@@ -110,56 +110,10 @@ from typing import Any, Dict, List, Optional
 from config_manager import ConfigProvider, ConfigProviderError
 
 # ---------------------------------------------------------------------------
-# JSON-lines logger (consistent with video_buffer and discrepancy_engine)
+# Module-level logger
 # ---------------------------------------------------------------------------
 
-class _JsonFormatter(logging.Formatter):
-    """Emit log records as single-line JSON objects.
-
-    Merges any ``extra=`` keyword arguments passed to the logger call
-    directly into the JSON payload, enabling structured field queries.
-    """
-
-    def format(self, record: logging.LogRecord) -> str:  # noqa: D102
-        payload: Dict[str, Any] = {
-            "ts": self.formatTime(record, self.datefmt),
-            "level": record.levelname,
-            "logger": record.name,
-            "msg": record.getMessage(),
-        }
-        if record.exc_info:
-            payload["exc"] = self.formatException(record.exc_info)
-        _SKIP = {
-            "msg", "args", "levelname", "levelno", "pathname", "filename",
-            "module", "exc_info", "exc_text", "stack_info", "lineno",
-            "funcName", "created", "msecs", "relativeCreated", "thread",
-            "threadName", "processName", "process", "name", "message",
-        }
-        for k, v in record.__dict__.items():
-            if k not in _SKIP:
-                payload[k] = v
-        return json.dumps(payload, default=str)
-
-
-def _build_logger(name: str) -> logging.Logger:
-    """Return a logger configured for JSON-line output to stdout.
-
-    Args:
-        name: Logger hierarchy name (e.g. ``"routine_scheduler.1234_main"``).
-
-    Returns:
-        Configured :class:`logging.Logger`.
-    """
-    logger = logging.getLogger(name)
-    if not logger.handlers:
-        handler = logging.StreamHandler()
-        handler.setFormatter(_JsonFormatter())
-        logger.addHandler(handler)
-    logger.setLevel(logging.DEBUG)
-    return logger
-
-
-log = _build_logger("routine_scheduler")
+log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Timezone resolution helper
@@ -372,7 +326,7 @@ class RoutineScheduler:
         self._trigger_dir = Path(trigger_dir)
         self._check_interval_sec = check_interval_sec
         self._post_roll_sec = post_roll_sec
-        self._log = _build_logger(f"routine_scheduler.{intersection_id}")
+        self._log = logging.getLogger(f"{__name__}.{intersection_id}")
 
         self._trigger_dir.mkdir(parents=True, exist_ok=True)
 
