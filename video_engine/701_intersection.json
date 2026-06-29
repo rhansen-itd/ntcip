@@ -1,0 +1,199 @@
+{
+  "701": {
+    "intersection_id": "701",
+    "description": "US-95_Whitley_Dr_and_US-30_16th_St",
+    "controller_ip": "10.70.10.51",
+    "snmp_port": 501,
+    "snmp_community": "administrator",
+    "poll_interval_sec": 0.2,
+    "timezone": "US/Mountain",
+    "cameras": {
+      "NB": {
+        "url": "http://10.70.10.20:8088/videostreams/1/stream",
+        "description": "Northbound camera",
+        "pre_roll_sec": 5,
+        "post_roll_sec": 5
+      },
+      "EB": {
+        "url": "http://10.70.10.20:8088/videostreams/2/stream",
+        "description": "Eastbound camera",
+        "pre_roll_sec": 5,
+        "post_roll_sec": 5
+      },
+      "SB": {
+        "url": "http://10.70.10.20:8088/videostreams/3/stream",
+        "description": "Southbound camera",
+        "pre_roll_sec": 5,
+        "post_roll_sec": 5
+      },
+      "WB": {
+        "url": "http://10.70.10.20:8088/videostreams/4/stream",
+        "description": "Westbound camera",
+        "pre_roll_sec": 5,
+        "post_roll_sec": 5
+      }
+    },
+    "detectors": {
+      "33": {
+        "type": "video",
+        "phase": 3,
+        "description": "EBL1 ITS Plus",
+        "paired_detector_id": "7",
+        "camera_id": "EB",
+        "lag_threshold_sec": 5
+      },
+      "7": {
+        "type": "video",
+        "phase": 3,
+        "description": "EBL1 Iteris",
+        "paired_detector_id": "33",
+        "camera_id": "EB",
+        "lag_threshold_sec": 5
+      },
+      "34": {
+        "type": "video",
+        "phase": 3,
+        "description": "EBL2 ITS Plus",
+        "paired_detector_id": "6",
+        "camera_id": "EB",
+        "lag_threshold_sec": 5
+      },
+      "6": {
+        "type": "video",
+        "phase": 3,
+        "description": "EBL2 Iteris",
+        "paired_detector_id": "34",
+        "camera_id": "EB",
+        "lag_threshold_sec": 5
+      },
+      "41": {
+        "type": "video",
+        "phase": 5,
+        "description": "SBL ITS Plus",
+        "paired_detector_id": "4",
+        "camera_id": "SB",
+        "lag_threshold_sec": 5
+      },
+      "4": {
+        "type": "video",
+        "phase": 5,
+        "description": "SBL Iteris",
+        "paired_detector_id": "41",
+        "camera_id": "SB",
+        "lag_threshold_sec": 5
+      },
+      "42": {
+        "type": "video",
+        "phase": 2,
+        "description": "SBT1 ITS Plus",
+        "paired_detector_id": "3",
+        "camera_id": "SB",
+        "lag_threshold_sec": 5
+      },
+      "3": {
+        "type": "video",
+        "phase": 2,
+        "description": "SBT1 Iteris",
+        "paired_detector_id": "42",
+        "camera_id": "SB",
+        "lag_threshold_sec": 5
+      },
+      "43": {
+        "type": "video",
+        "phase": 2,
+        "description": "SBT2 ITS Plus",
+        "paired_detector_id": "2",
+        "camera_id": "SB",
+        "lag_threshold_sec": 5
+      },
+      "2": {
+        "type": "video",
+        "phase": 2,
+        "description": "SBT2 Iteris",
+        "paired_detector_id": "43",
+        "camera_id": "SB",
+        "lag_threshold_sec": 5
+      },
+      "49": {
+        "type": "video",
+        "phase": 1,
+        "description": "NBL ITS Plus",
+        "paired_detector_id": "20",
+        "camera_id": "NB",
+        "lag_threshold_sec": 5
+      },
+      "20": {
+        "type": "video",
+        "phase": 1,
+        "description": "NBL Iteris",
+        "paired_detector_id": "49",
+        "camera_id": "NB",
+        "lag_threshold_sec": 5
+      },
+      "50": {
+        "type": "video",
+        "phase": 6,
+        "description": "NBT ITS Plus",
+        "paired_detector_id": "19",
+        "camera_id": "NB",
+        "lag_threshold_sec": 5
+      },
+      "19": {
+        "type": "video",
+        "phase": 6,
+        "description": "NBT Iteris",
+        "paired_detector_id": "50",
+        "camera_id": "NB",
+        "lag_threshold_sec": 5
+      },
+      "51": {
+        "type": "video",
+        "phase": 6,
+        "description": "NBTR ITS Plus",
+        "paired_detector_id": "18",
+        "camera_id": "NB",
+        "lag_threshold_sec": 5
+      },
+      "18": {
+        "type": "video",
+        "phase": 6,
+        "description": "NBTR Iteris",
+        "paired_detector_id": "51",
+        "camera_id": "NB",
+        "lag_threshold_sec": 5
+      },
+      "59": {
+        "type": "video",
+        "phase": 4,
+        "description": "WBL ITS Plus",
+        "paired_detector_id": "22",
+        "camera_id": "WB",
+        "lag_threshold_sec": 5
+      },
+      "22": {
+        "type": "video",
+        "phase": 4,
+        "description": "WBL Iteris",
+        "paired_detector_id": "59",
+        "camera_id": "WB",
+        "lag_threshold_sec": 5
+      },
+      "60": {
+        "type": "video",
+        "phase": 4,
+        "description": "WBTR ITS Plus",
+        "paired_detector_id": "21",
+        "camera_id": "WB",
+        "lag_threshold_sec": 5
+      },
+      "21": {
+        "type": "video",
+        "phase": 4,
+        "description": "WBTR Iteris",
+        "paired_detector_id": "60",
+        "camera_id": "WB",
+        "lag_threshold_sec": 5
+      }
+    }
+  }
+}

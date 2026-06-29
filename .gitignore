@@ -5,3 +5,7 @@ __pycache__/
 
 # MIBs
 MIBs/
+
+# Runtime-generated video_engine artifacts
+video_engine/discrepancies_log.csv
+video_engine/trigger_manual_*.json
