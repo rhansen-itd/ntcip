@@ -261,6 +261,42 @@ Suggested prompt:
 
 ---
 
+## 6 — Retire the `full` (CFR) video backend (Target: Opus)
+
+`video_engine/video_buffer.py` is the legacy `full`/CFR `cv2.VideoWriter`
+backend. As of 2026-07-15 it is **unused** (no intersection config sets
+`video_backend`, so every deployment defaults to `remux`), **strictly worse**
+than `remux` on the three edge constraints (clip-length accuracy, CPU, RAM), and
+carries the documented **RAM-unboundedness bug** (`DiskWriter._write_loop`
+buffers a whole clip in memory — tens of GB for a multi-minute 1080p clip).
+Nothing consumes decoded pixels today, and the flagged *future* decoded path is
+explicitly a new bounded branch, not this file — so `full` is not the seam for
+it either.
+
+Decide and implement one of:
+- **(a, recommended)** delete `video_buffer.py` and collapse
+  `system_runner._build_video_manager` to remux-only (drop the backend switch
+  and the `full` config docs); or
+- **(b)** if a central re-encode/decoded need turns out to be real, keep the
+  *switch* but rebuild that need as a **RAM-bounded decoded** backend — do not
+  ship the CFR one.
+
+Coordinate with **Item 5**: that item removes `_old_`/`_edge_` and currently says
+"do not touch `video_buffer.py` — it remains the supported `full` backend"; this
+item reopens exactly that decision (it's the last CFR file). Do Item 5 first or
+fold both into one sweep. On completion, update CLAUDE.md's hardware-constraints
+/ "two backends" section and the `config_manager.py` config docs.
+
+Suggested prompt:
+> [Opus] In the ntcip project, do Item 6 of ROADMAP.md: retire the `full` (CFR)
+> video backend. Confirm nothing selects it, then remove `video_buffer.py` and
+> simplify `system_runner._build_video_manager` to remux-only (or, if a central
+> decoded need is confirmed, replace it with a RAM-bounded decoded backend — not
+> the CFR one). Update CLAUDE.md's backends section and `config_manager.py` docs,
+> and land a DESIGN_HISTORY.md entry.
+
+---
+
 ## Future (not yet scoped)
 
 Items below need a planning pass before they're actionable (no Target/Scope/

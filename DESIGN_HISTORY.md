@@ -348,3 +348,29 @@ decided. Entries after this point are logged as the decision lands.
   [VIDEO_BUFFER_REMUX_PLAN.md](video_engine/VIDEO_BUFFER_REMUX_PLAN.md) and the
   2026-07-14 entries above. The follow-up cleanup (retire the superseded
   `_old_`/`_edge_` CFR buffers) is now ROADMAP Item 5.
+
+- 2026-07-15 — **Clean manual-recording CLIs; retired the `__record`/`__trigger`
+  harnesses.** Added `video_engine/tools/record_clip.py` (one-shot clip with an
+  optional `--at HH:MM[:SS]` scheduled start and a `--serve` long-running mode)
+  and `video_engine/tools/drop_trigger.py` (start/stop/extend Hot Folder
+  triggers), and removed the superseded `__record.py` (hardcoded URL, wired to
+  the legacy `full` backend, blocked forever) and `__trigger.py`. **Why:** the
+  video engine only records in response to Hot Folder triggers, so manual
+  recording always needs "run the manager + drop triggers." `__record`/`__trigger`
+  were a crufty two-terminal dev harness for that; `record_clip.py`
+  (fire-and-forget or `--serve`) + `drop_trigger.py` cover the same ground
+  cleanly. Scheduling is tool-side, not in the trigger: the trigger's
+  `event_timestamp` is a *retrospective* anchor into the ~`pre_roll +
+  keyframe_margin` (~14 s default) pre-roll ring, never a forward scheduler, so
+  `--at` holds the trigger until the target wall-clock time. Both new tools are
+  `remux`-only by design.
+
+- 2026-07-15 — **Scoped ROADMAP Item 6: retire the `full` (CFR) backend.**
+  `video_buffer.py` is unused (nothing sets `video_backend`; all deployments
+  default to `remux`), strictly worse than remux on the edge constraints, and
+  carries the known RAM-unboundedness bug. Filed Item 6 to delete it (recommended)
+  or, if a central decoded need is confirmed, replace it with a RAM-bounded
+  decoded backend — explicitly *not* the CFR one. **Why:** keeping a broken,
+  unused backend as a co-equal option is misleading; the future decoded path
+  (plan §6) is a new bounded branch, not this file. Item 6 reopens Item 5's
+  "keep `video_buffer.py`" note — the two should be coordinated.

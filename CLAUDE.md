@@ -178,8 +178,8 @@ the 2026-07-15 DESIGN_HISTORY entry.
 - **Logging**: structured JSON-lines via a shared `_JsonFormatter` pattern
   (see `video_buffer.py`, `system_runner.py`). Use `logging`, not `print()`,
   for anything in the monitor/discrepancy/buffer business logic. (`print()` is
-  fine in the standalone manual test scripts under `video_engine/tools/` like
-  `__trigger.py`, `__record.py`, `simulate_playback.py` — those are debug
+  fine in the standalone manual tools under `video_engine/tools/` like
+  `record_clip.py`, `drop_trigger.py`, `simulate_playback.py` — those are debug
   tools, not production modules.)
 - **Docstrings**: Google-style throughout (Args/Returns/Raises). Match this in
   new code.
@@ -207,14 +207,18 @@ As of this writing:
 - `video_engine/701_intersection.json` — real in-progress config for a second
   intersection (701, US-95/Whitley Dr), distinct from intersection 201 in
   `video_engine/intersections.json`. See [ROADMAP.md](ROADMAP.md) #2.
-- `video_engine/tools/` holds the standalone `__`-prefixed debug/manual scripts
-  (`__capture_rtsp.py`, `__trigger.py`, `__record.py`, `__replay_verify.py`,
-  `__probe_adversarial.py`, `simulate_playback.py`); `video_engine/tests/fixtures/`
-  holds captured test data (`sample.ts` + its `.packets.jsonl` profile). The four
-  tools that import `video_engine/` modules (`__record`, `__replay_verify`,
-  `__probe_adversarial`, `simulate_playback`) add a `sys.path` bootstrap
-  (`.../tools/` → parent) so they run from any working directory; the other two
-  are stdlib-only and location-independent.
+- `video_engine/tools/` holds the standalone debug/manual scripts. Two clean
+  CLIs cover manual recording: **`record_clip.py`** (one-shot clip, or `--serve`
+  to keep the buffer running while you drop triggers; replaced `__record.py`) and
+  **`drop_trigger.py`** (writes a Hot Folder trigger; replaced `__trigger.py`).
+  The rest are `__`-prefixed dev/verification tools: `__capture_rtsp.py`,
+  `__replay_verify.py`, `__probe_adversarial.py`, plus `simulate_playback.py`.
+  `video_engine/tests/fixtures/` holds captured test data (`sample.ts` + its
+  `.packets.jsonl` profile). The four tools that import `video_engine/` modules
+  (`record_clip`, `__replay_verify`, `__probe_adversarial`, `simulate_playback`)
+  add a `sys.path` bootstrap (`.../tools/` → parent) so they run from any working
+  directory; the other two (`__capture_rtsp`, `drop_trigger`) are stdlib-only and
+  location-independent.
 
 See [ROADMAP.md](ROADMAP.md) for open architectural decisions and planned work.
 
