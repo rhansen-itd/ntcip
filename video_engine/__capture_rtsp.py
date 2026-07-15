@@ -58,7 +58,11 @@ def capture(url: str, out: str, seconds: int, transport: str) -> None:
         "-hide_banner",
         "-loglevel", "warning",
         "-rtsp_transport", transport,   # tcp is far more reliable for capture
-        "-rw_timeout", "10000000",      # 10s I/O timeout so a bad URL fails fast
+        # Fail-fast on a dead URL. The option name is scheme-specific: the RTSP
+        # demuxer uses -timeout (socket I/O, microseconds); -rw_timeout is only
+        # valid for plain tcp/http/file inputs and the RTSP demuxer rejects it.
+        *(["-timeout", "10000000"] if url.lower().startswith("rtsp") else
+          ["-rw_timeout", "10000000"]),
         "-i", url,
         "-t", str(seconds),
         "-c", "copy",                   # NO re-encode: keep the camera's timing
@@ -154,7 +158,9 @@ def profile(out: str) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("url", help="RTSP URL, e.g. rtsp://user:pass@host:554/stream")
+    ap.add_argument("url", nargs="?",
+                    help="RTSP URL, e.g. rtsp://user:pass@host:554/stream "
+                         "(not required with --profile-only)")
     ap.add_argument("--out", default="sample.ts",
                     help="output file (default sample.ts; .ts/.mkv are kill-safe)")
     ap.add_argument("--seconds", type=int, default=180,
@@ -170,6 +176,9 @@ def main() -> None:
         _require("ffprobe")
         profile(args.profile_only)
         return
+
+    if not args.url:
+        ap.error("url is required unless --profile-only is given")
 
     _require("ffmpeg")
     _require("ffprobe")
