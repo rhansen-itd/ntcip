@@ -195,6 +195,74 @@ decided. Entries after this point are logged as the decision lands.
   dated "implemented"/"verified" entry when it lands. See [[ROADMAP.md]]
   Item 1.
 
+- 2026-07-14 — **Item 1 implemented (Opus pass): remux backend + blind
+  self-test landed.** New module `video_engine/remux_video_buffer.py` implements
+  the PyAV stream-copy buffer decided above, mirroring `video_buffer.py`'s public
+  surface (`VideoBufferConfig`, `VideoBufferManager`) so `system_runner.py`
+  selects it via a config flag. Three roles: `PacketStreamBuffer` (demux →
+  time-windowed encoded-packet ring, no `time.sleep()` in the read loop, keyframe
+  retained behind the pre-roll horizon), `ClipRemuxer` (keyframe-seek pre-roll,
+  per-clip timestamp rebase, incremental mux, clean finalize), and a
+  `VideoBufferManager` that reuses the Hot Folder poll / semaphore / disk-check.
+  Backend selection is a thin import switch in `SystemRunner._build_video_manager`
+  keyed on the intersection config's `video_backend` (`"remux"` default edge /
+  `"full"` legacy CFR central). PyAV (`av>=12`) added to `requirements.txt`.
+
+  **Decisions made during implementation (not pre-specified in the plan):**
+
+  - **Packets are detached from their source container, not held as `av.Packet`.**
+    The first cut stored live `av.Packet` objects in the ring and used
+    `add_stream_from_template(packet.stream)`. This **segfaulted**: pre-roll
+    packets (and packets buffered across an RTSP reconnect) outlive the container
+    they were demuxed from, and an `av.Packet.stream` / template reference into a
+    closed container is a use-after-free. Fix: at demux time copy the encoded
+    payload to `bytes` plus plain pts/dts/duration/time_base/keyframe into a
+    `PacketRecord`, and capture codec params once per stream-open into a
+    `StreamTemplate` (codec name, w/h, pix_fmt, extradata, time_base). The output
+    stream is built with `add_stream(codec_name)` + params — no live input-stream
+    reference, no encoder. This is load-bearing for both the ring and reconnect
+    survival, not just the test. (PyAV 18's template call is also renamed
+    `add_stream_from_template`; moot now that we don't use it.)
+  - **Timestamp rebase uses a single offset = first packet's DTS, subtracted from
+    both PTS and DTS.** The first attempt subtracted `pts0` from PTS and `dts0`
+    from DTS separately; on B-frame streams `pts0 != dts0`, which inverts
+    `pts >= dts` on the first following packet and the muxer rejects it
+    (`EINVAL`). One offset preserves the PTS/DTS relationship. The clip's length
+    is `max_pts − min_pts`, which is offset-invariant, so length fidelity holds
+    regardless (verified exact to 0.000s on CFR, jitter, and B-frame synthetics).
+  - **Mid-clip DTS discontinuity → clamp, don't split** (plan §4 left this open).
+    On a backward jump / wraparound / stall (`out_dts <= last_out_dts`) the
+    remuxer re-anchors the offset so output DTS advances one frame past the last
+    and continues — keeping every frame with a one-frame gap rather than splitting
+    the clip. Simplest correct choice for the edge; Fable probes it on real data.
+  - **Container format = `.ts` (MPEG-TS), default `container_ext`.** MPEG-TS
+    survives an abrupt process kill / power loss with no trailer to finalize
+    (unlike `.mp4`'s trailing `moov` atom), needs no repair to be playable, and
+    matches `__capture_rtsp.py`'s `sample.ts`. Overridable via config.
+  - **Packet routing is by subscription, not a per-tick flush.** A started
+    `ClipRemuxer` `subscribe()`s to its camera's `PacketStreamBuffer` under the
+    capture lock, which atomically hands it the pre-roll snapshot and registers it
+    for live packets — so there is no gap/dup at the seam and no `_feed_active_writers`
+    polling. Each remuxer owns a writer thread + queue, keeping disk I/O off the
+    zero-drift capture loop (mirrors the old `DiskWriter` threading model).
+  - **`extend` now genuinely extends** (reschedules the max-duration timer) in the
+    remux backend, where the legacy `full` backend treated `extend` as `stop`.
+    The discrepancy engine doesn't currently emit `extend`, so this is forward-
+    looking, not a behavior change to an exercised path.
+
+  **Blind self-test — `video_engine/__replay_verify.py`** (debug tool, `print()`
+  allowed). Replays ffmpeg-synthesized streams through the *real*
+  `VideoBufferManager` and Hot Folder via a real-time-paced `PacketStreamBuffer`
+  subclass injected through a new `stream_buffer_factory` seam on the manager
+  (the same seam a future decoded `FrameStreamBuffer` would use — plan §6). All
+  green: length fidelity exact (0.000s) on CFR / jitter / B-frame; first frame
+  decodes and is a keyframe; a real-time windowed clip tracks
+  `pre_roll + (stop − start)` (keyframe-aligned); and **RSS stayed flat across a
+  genuine 240s / 4800-packet clip (≈0.8 MB growth)** — the CLAUDE.md
+  RAM-unboundedness violation is gone by construction. Real-stream verification
+  (§8) is left for the Fable pass against an owner capture. See [[ROADMAP.md]]
+  Item 1 and [VIDEO_BUFFER_REMUX_PLAN.md](video_engine/VIDEO_BUFFER_REMUX_PLAN.md).
+
 - 2026-07-14 — Added `video_engine/__capture_rtsp.py` (ffmpeg/ffprobe-based,
   stdlib-only) to record a faithful stream-copy sample + a jitter/GOP profile
   from a real camera, for the later Fable verification pass. Capture host is

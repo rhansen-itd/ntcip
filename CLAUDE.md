@@ -53,8 +53,9 @@ able to drive the same video engine with zero video_engine changes).
 
 ### Hot Folder pattern (the bridge)
 
-Implemented in `discrepancy_engine.py` (writer) and `video_buffer.py` (reader,
-`Path.glob("trigger_*.json")`, oldest-first poll loop).
+Implemented in `discrepancy_engine.py` (writer) and both video-buffer backends
+as readers (`video_buffer.py` and `remux_video_buffer.py`, identical
+`Path.glob("trigger_*.json")` oldest-first poll loop).
 
 - Filename: `trigger_{iso8601}_{uuid4_short}.json`
 - Writer: write full JSON to `*.tmp`, then atomic `os.rename()` to `*.json`.
@@ -105,32 +106,48 @@ When adding intersection-level config needs, extend `ConfigProvider`'s
 interface and both implementations together — don't special-case one
 deployment path with a dict lookup that bypasses the abstraction.
 
-## Hardware constraints (edge = J1900-class CPU) — current production code does NOT meet this
+## Hardware constraints (edge = J1900-class CPU)
 
-These exist in `video_buffer.py`:
+There are now **two video-buffer backends**, selected by the intersection
+config's `video_backend` key (thin import switch in
+`SystemRunner._build_video_manager`; both expose the same `VideoBufferConfig` /
+`VideoBufferManager` surface):
 
-- **Zero-drift capture**: the stream-read loop has no `time.sleep()`. ✅
-- **RAM pre-roll**: `collections.deque` sized to the configured pre-roll window. ✅
+- **`remux` (default, edge)** — `video_engine/remux_video_buffer.py`. PyAV
+  stream-copy: demux to encoded packets, RAM-bounded time-windowed packet
+  pre-roll, copy to disk using the source's own timestamps (no decode/encode).
+  Meets all the constraints below, including the previously-violated one.
+- **`full` (central/server)** — `video_engine/video_buffer.py`. The legacy CFR
+  `cv2.VideoWriter` path; RAM-unbounded (see below), viable only on ample-RAM
+  hosts.
+
+Constraint status:
+
+- **Zero-drift capture**: the stream-read loop has no `time.sleep()`. ✅ (both;
+  `remux` iterates `container.demux()` which blocks on I/O naturally).
+- **RAM pre-roll**: `collections.deque`. ✅ `remux` holds *encoded packets*
+  bounded by a **time window** (`pre_roll_sec + keyframe_margin_sec`),
+  independent of clip length; `full` holds decoded frames sized to the window.
 - **Concurrent-recording cap**: `threading.Semaphore(max_concurrent_writers)`,
-  default 2. ✅
-- **Disk check**: writer checks free space before starting a recording and
-  aborts + logs if below `min_free_disk_mb`. ✅
-- **"Dump pre-roll, then route live frames directly to disk"**: ❌ **violated.**
-  `DiskWriter._write_loop` in `video_buffer.py` collects every raw frame of the
-  *entire* clip (pre-roll + live, up to `max_duration_sec`) into an in-memory
-  list and only writes to disk after the stop trigger arrives, so it can
-  compute an exact FPS from total frames / total elapsed time. This is RAM-
-  unbounded — a multi-minute 1080p clip is tens of GB. It currently only works
-  because it's being run from a powerful non-edge machine over the network,
-  not the J1900 boxes this project targets.
+  default 2. ✅ (both).
+- **Disk check**: free space checked before a recording starts, aborts + logs
+  below `min_free_disk_mb`. ✅ (both).
+- **"Dump pre-roll, then route live frames directly to disk"**:
+  - `remux`: ✅ **satisfied.** `ClipRemuxer` muxes packets to disk incrementally
+    (pre-roll then live), never accumulating the clip in RAM. Verified: RSS flat
+    (~1 MB growth) across a genuine 240s clip in `__replay_verify.py`.
+  - `full`: ❌ **still violated.** `DiskWriter._write_loop` in `video_buffer.py`
+    collects every raw frame of the *entire* clip into an in-memory list and only
+    writes on stop (to compute an exact FPS from total frames / total elapsed
+    time) — RAM-unbounded, a multi-minute 1080p clip is tens of GB. This is why
+    `full` is central/server-only, never an edge default.
 
-  `video_engine/_edge_video_buffer.py` and `video_engine/_old_video_buffer.py`
-  are two kept-but-not-wired-in alternatives, both RAM-bounded (incremental
-  disk writes), differing in FPS strategy and drift behavior. Which one (if
-  either) was actually verified working is unresolved — see the provenance
-  note in [ROADMAP.md](ROADMAP.md) #1 before assuming either is trustworthy,
-  and before changing any of the three files or wiring a buffer
-  implementation into `system_runner.py`.
+Clip length in `remux` is accurate **by construction** (= source PTS span = true
+elapsed), so there is no FPS to guess and nothing drifts under RTSP jitter — the
+defect the three CFR variants all shared. See [[DESIGN_HISTORY.md]] (2026-07-14
+Item 1 entries) and
+[VIDEO_BUFFER_REMUX_PLAN.md](video_engine/VIDEO_BUFFER_REMUX_PLAN.md); real-stream
+Fable verification of the timestamp core is still pending.
 
 ## NTCIP / SNMP rules
 
@@ -173,10 +190,13 @@ As of this writing:
   drafts that were never committed are preserved at commit `1f48bfa` if ever
   needed again; the rest are recoverable from their normal file history.
 - `video_engine/_edge_video_buffer.py` and `video_engine/_old_video_buffer.py`
-  are **both kept intentionally** — live candidates for the edge RAM-vs-drift
-  decision in [ROADMAP.md](ROADMAP.md) #1, not dead code, even though nothing
-  currently imports either one. Provenance of which was actually verified
-  working is unresolved (see roadmap) — don't assume either is ground truth.
+  are **superseded** as of the 2026-07-14 remux decision (ROADMAP #1): both are
+  interim RAM-bounded CFR attempts, and the remux backend
+  (`remux_video_buffer.py`) replaces the whole CFR-for-edge approach, making the
+  old "which one was verified" provenance question moot for production. They're
+  still on disk (nothing imports them); actually moving them to `legacy/` or
+  deleting them is a follow-up cleanup, not part of Item 1 — don't wire either
+  into `system_runner.py`.
 - `ntcip_monitor/monitors/ring_monitor.py` — new, not yet committed to git.
 - `video_engine/701_intersection.json` — real in-progress config for a second
   intersection (701, US-95/Whitley Dr), distinct from intersection 201 in
