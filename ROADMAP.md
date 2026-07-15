@@ -93,17 +93,17 @@ despite being the current default in `system_runner.py`. It stays as the
 Full detail in [VIDEO_BUFFER_REMUX_PLAN.md](VIDEO_BUFFER_REMUX_PLAN.md) §8.
 
 **Opus — build + blind self-test (no camera needed):**
-- [ ] `video_engine/remux_video_buffer.py`: `PacketStreamBuffer` (PyAV demux,
+- [x] `video_engine/remux_video_buffer.py`: `PacketStreamBuffer` (PyAV demux,
       packet pre-roll ring, keyframe tracking, wall-clock receive stamps),
       `ClipRemuxer` (keyframe-seek pre-roll, per-clip timestamp rebase,
       incremental mux, clean finalize), `VideoBufferManager` (reuse the
       existing Hot Folder poll / semaphore / disk-check).
-- [ ] `VideoBufferConfig` `backend` switch (`remux` | `full`) wired in
+- [x] `VideoBufferConfig` `backend` switch (`remux` | `full`) wired in
       `system_runner.py`; keep the decoded-path seam clean (plan §6).
-- [ ] `__replay_verify.py` + ffmpeg-synthesized CFR/jitter/B-frame streams;
+- [x] `__replay_verify.py` + ffmpeg-synthesized CFR/jitter/B-frame streams;
       assert clip length ≈ requested window ≈ source PTS span, first frame
       decodes, RSS flat across a 4-min clip. Add `av` to `requirements.txt`.
-- [ ] DESIGN_HISTORY.md entry; check off these boxes.
+- [x] DESIGN_HISTORY.md entry; check off these boxes.
 
 **Fable — verify against a real capture (after the owner records one):**
 - [ ] Run `__replay_verify.py` on the owner's real `sample.ts`; confirm

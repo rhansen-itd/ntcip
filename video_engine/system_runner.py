@@ -63,8 +63,9 @@ from typing import Any, Dict, Optional
 # Config layer (Session 2)
 from config_manager import JsonFileConfigProvider, ConfigProviderError
 
-# Video buffer (Session 1)
-from video_buffer import VideoBufferConfig, VideoBufferManager
+# Video buffer (Session 1). The concrete backend (edge "remux" vs. central
+# "full") is selected at runtime in SystemRunner.__init__ from the intersection
+# config's "video_backend" key, so the import is deferred to _build_video_manager.
 
 # Discrepancy engine (Session 3)
 from discrepancy_engine import DiscrepancyMonitor
@@ -222,16 +223,12 @@ class SystemRunner:
             first_cam = next(iter(cameras_cfg.values()))
             pre_roll_sec = float(first_cam.get("pre_roll_sec", pre_roll_sec))
 
-        video_cfg = VideoBufferConfig(
-            streams=stream_map,
-            trigger_dir=str(self._trigger_dir),
-            output_dir=str(self._output_dir),
+        self._video_manager = self._build_video_manager(
+            stream_map=stream_map,
             pre_roll_sec=pre_roll_sec,
-            poll_interval_sec=2.0,        # conservative; adjust if needed
             max_concurrent_writers=max_concurrent_writers,
             min_free_disk_mb=min_free_disk_mb,
         )
-        self._video_manager = VideoBufferManager(video_cfg)
 
         # ── 3. Discrepancy engine ─────────────────────────────────────────
         # DiscrepancyMonitor reads detector pairing and lag thresholds from
@@ -390,6 +387,86 @@ class SystemRunner:
             "Teardown complete — exiting",
             extra={"intersection_id": self._intersection_id},
         )
+
+    # ------------------------------------------------------------------
+    # Video buffer backend selection
+    # ------------------------------------------------------------------
+
+    def _build_video_manager(
+        self,
+        stream_map: Dict[str, str],
+        pre_roll_sec: float,
+        max_concurrent_writers: int,
+        min_free_disk_mb: float,
+    ) -> Any:
+        """Build the configured video-buffer backend.
+
+        The intersection config's ``"video_backend"`` key selects the concrete
+        implementation (both expose the same ``VideoBufferConfig`` /
+        ``VideoBufferManager`` surface, so this is a thin import switch, not a
+        rewrite):
+
+        - ``"remux"`` (default) — the PyAV stream-copy edge backend
+          (``remux_video_buffer``): accurate clip length by construction,
+          near-zero CPU, RAM bounded by a time window not clip length.
+        - ``"full"`` — the legacy CFR ``cv2.VideoWriter`` backend
+          (``video_buffer``): buffers whole clips in RAM for exact-FPS output;
+          viable only on an ample-RAM central/server host, not a J1900 edge box.
+
+        Args:
+            stream_map: Mapping of ``camera_id`` -> stream URL.
+            pre_roll_sec: Shared pre-roll window length.
+            max_concurrent_writers: Concurrent-recording cap.
+            min_free_disk_mb: Disk-free abort threshold.
+
+        Returns:
+            A constructed (not yet started) video buffer manager.
+        """
+        backend = str(self._intersection_cfg.get("video_backend", "remux")).lower()
+
+        if backend == "full":
+            from video_buffer import VideoBufferConfig, VideoBufferManager
+
+            log.info(
+                "Using 'full' (CFR) video backend",
+                extra={"intersection_id": self._intersection_id},
+            )
+            video_cfg = VideoBufferConfig(
+                streams=stream_map,
+                trigger_dir=str(self._trigger_dir),
+                output_dir=str(self._output_dir),
+                pre_roll_sec=pre_roll_sec,
+                poll_interval_sec=2.0,
+                max_concurrent_writers=max_concurrent_writers,
+                min_free_disk_mb=min_free_disk_mb,
+            )
+            return VideoBufferManager(video_cfg)
+
+        if backend != "remux":
+            log.warning(
+                "Unknown video_backend — defaulting to 'remux'",
+                extra={
+                    "intersection_id": self._intersection_id,
+                    "video_backend": backend,
+                },
+            )
+        from remux_video_buffer import VideoBufferConfig, VideoBufferManager
+
+        log.info(
+            "Using 'remux' (stream-copy) video backend",
+            extra={"intersection_id": self._intersection_id},
+        )
+        video_cfg = VideoBufferConfig(
+            streams=stream_map,
+            trigger_dir=str(self._trigger_dir),
+            output_dir=str(self._output_dir),
+            pre_roll_sec=pre_roll_sec,
+            poll_interval_sec=2.0,
+            max_concurrent_writers=max_concurrent_writers,
+            min_free_disk_mb=min_free_disk_mb,
+            backend="remux",
+        )
+        return VideoBufferManager(video_cfg)
 
     # ------------------------------------------------------------------
     # NTCIP wiring

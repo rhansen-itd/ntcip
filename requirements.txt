@@ -7,13 +7,21 @@ pysnmp>=5.0.0,<6.0.0
 flask>=2.3.0
 
 # Additional dependencies
-pyasn1>=0.6.0
+# Upper bound is load-bearing: pyasn1 0.6.1+ removed pyasn1.compat.octets,
+# which pysnmp 5.x's hlapi still imports at module load time.
+pyasn1>=0.6.0,<0.6.1
 pycryptodomex>=3.11.0
 
 # Video Engine Requirements
 
-# RTSP/HTTP video capture and frame I/O
+# RTSP/HTTP video capture and frame I/O.
+# opencv-python drives the legacy "full" (CFR) video_buffer backend.
 opencv-python>=4.8.0
+
+# PyAV (FFmpeg bindings) drives the edge-default "remux"/stream-copy backend
+# (remux_video_buffer.py): demux to encoded packets, RAM-bounded packet pre-roll,
+# copy to disk using source timestamps — no decode/encode. Wheels bundle FFmpeg.
+av>=12.0.0
 
 # Timezone handling for trigger/event timestamps
 pytz>=2023.3

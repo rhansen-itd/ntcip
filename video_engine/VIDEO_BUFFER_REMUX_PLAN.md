@@ -6,7 +6,8 @@ out explicitly in [§8](#8-division-of-labor--opus-vs-fable). Land the outcome
 as a dated [[DESIGN_HISTORY.md]] entry when the implementation session
 completes.
 
-Status: **planned, not yet implemented** (2026-07-14).
+Status: **Opus implementation + blind self-test landed** (2026-07-14);
+real-stream Fable verification (§8) pending an owner capture.
 
 ---
 
@@ -256,17 +257,17 @@ deployment check (remux does no decode/encode), not a blocker for this item.
 ## 8. Division of labor — Opus vs. Fable
 
 **Opus (design + implement + blind self-test), one session end-to-end:**
-- [ ] `remux_video_buffer.py`: `PacketStreamBuffer`, `ClipRemuxer`,
+- [x] `remux_video_buffer.py`: `PacketStreamBuffer`, `ClipRemuxer`,
       `VideoBufferManager` (reusing the poll/semaphore/disk logic).
-- [ ] Per-clip timestamp rebase + keyframe-seek pre-roll ([§4](#4-timestamp-handling-the-core-of-the-design)).
-- [ ] `VideoBufferConfig` extensions + `system_runner.py` backend switch
+- [x] Per-clip timestamp rebase + keyframe-seek pre-roll ([§4](#4-timestamp-handling-the-core-of-the-design)).
+- [x] `VideoBufferConfig` extensions + `system_runner.py` backend switch
       ([§5](#5-configuration--backend-selection)).
-- [ ] Keep the decoded-path seam clean ([§6](#6-future-decoded-path-leave-room-do-not-build)).
-- [ ] `__replay_verify.py` + synthetic-stream self-tests
+- [x] Keep the decoded-path seam clean ([§6](#6-future-decoded-path-leave-room-do-not-build)).
+- [x] `__replay_verify.py` + synthetic-stream self-tests
       ([§7.1](#71-blind-self-test-opus-thisnext-session--no-camera-needed));
       green on CFR, jittered, and B-frame synthetics.
-- [ ] Add `av` (PyAV) to `requirements.txt`; note the container-format choice.
-- [ ] DESIGN_HISTORY.md entry; check off the Opus boxes in ROADMAP Item 1.
+- [x] Add `av` (PyAV) to `requirements.txt`; note the container-format choice.
+- [x] DESIGN_HISTORY.md entry; check off the Opus boxes in ROADMAP Item 1.
 
 **Fable (verification + debug escalation), after the owner's real capture:**
 - [ ] Run `__replay_verify.py` against the real `sample.ts`; confirm
