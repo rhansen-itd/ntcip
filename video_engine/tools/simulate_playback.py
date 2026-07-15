@@ -7,6 +7,12 @@ plays them back into DiscrepancyMonitor using a simulated clock.
 import os
 import sys
 
+# This tool lives in video_engine/tools/; put video_engine/ on sys.path so the
+# sibling-module imports below (config_manager, discrepancy_engine) resolve
+# regardless of the working directory. (The pyatspm path below is intentionally
+# left cwd-relative — same behavior as before the move.)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 current_dir = os.getcwd()
 atspm_project_path = os.path.abspath(os.path.join(current_dir, '..', 'pyatspm', 'src'))
 

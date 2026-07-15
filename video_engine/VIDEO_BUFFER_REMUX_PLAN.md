@@ -242,10 +242,11 @@ gets a synthetic case too (`-bf 2`).
 
 ### 7.2 Real-stream verification (Fable, after a capture exists)
 
-The owner records a real feed with `video_engine/__capture_rtsp.py` on a
+The owner records a real feed with `video_engine/tools/__capture_rtsp.py` on a
 camera-capable box (does **not** need to be a J1900 — clip faithfulness comes
 from the camera's timestamps, not the capture host). Fable then runs
-`__replay_verify.py` against that `sample.ts` and the profiled jitter/GOP, and
+`video_engine/tools/__replay_verify.py` against that `sample.ts`
+(`video_engine/tests/fixtures/sample.ts`) and the profiled jitter/GOP, and
 adversarially probes the [§4](#4-timestamp-handling-the-core-of-the-design)
 edge cases on real data. Details in [§8](#8-division-of-labor--opus-vs-fable).
 

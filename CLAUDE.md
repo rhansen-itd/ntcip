@@ -172,9 +172,9 @@ Fable verification of the timestamp core is still pending.
 - **Logging**: structured JSON-lines via a shared `_JsonFormatter` pattern
   (see `video_buffer.py`, `system_runner.py`). Use `logging`, not `print()`,
   for anything in the monitor/discrepancy/buffer business logic. (`print()` is
-  fine in the standalone manual test scripts like `__trigger.py`,
-  `__record.py`, `simulate_playback.py` — those are debug tools, not
-  production modules.)
+  fine in the standalone manual test scripts under `video_engine/tools/` like
+  `__trigger.py`, `__record.py`, `simulate_playback.py` — those are debug
+  tools, not production modules.)
 - **Docstrings**: Google-style throughout (Args/Returns/Raises). Match this in
   new code.
 - **No unsolicited files**: don't generate README/requirements/deployment
@@ -201,6 +201,13 @@ As of this writing:
 - `video_engine/701_intersection.json` — real in-progress config for a second
   intersection (701, US-95/Whitley Dr), distinct from intersection 201 in
   `video_engine/intersections.json`. See [ROADMAP.md](ROADMAP.md) #2.
+- `video_engine/tools/` holds the standalone `__`-prefixed debug/manual scripts
+  (`__capture_rtsp.py`, `__trigger.py`, `__record.py`, `__replay_verify.py`,
+  `simulate_playback.py`); `video_engine/tests/fixtures/` holds captured test
+  data (`sample.ts` + its `.packets.jsonl` profile). The three tools that import
+  `video_engine/` modules (`__record`, `__replay_verify`, `simulate_playback`)
+  add a one-line `sys.path` bootstrap (`.../tools/` → parent) so they run from
+  any working directory; the other two are stdlib-only and location-independent.
 
 See [ROADMAP.md](ROADMAP.md) for open architectural decisions and planned work.
 
@@ -208,7 +215,9 @@ See [ROADMAP.md](ROADMAP.md) for open architectural decisions and planned work.
 
 - `requirements.txt` covers both packages (pysnmp/flask/pyasn1/pycryptodomex
   for `ntcip_monitor`; opencv-python/pytz for `video_engine`).
-- `video_engine/simulate_playback.py` expects a sibling project at
+- `video_engine/tools/simulate_playback.py` expects a sibling project at
   `../pyatspm` (present on this machine at `/home/hansrkid/pyatspm`) for
   reading historical detector events out of a pyatspm SQLite DB. It's not a
-  pip dependency — `simulate_playback.py` adds it to `sys.path` directly.
+  pip dependency — `simulate_playback.py` adds it to `sys.path` directly. Note
+  that path is resolved from the **current working directory** (`os.getcwd()`),
+  not the script's location, so run it from the repo root as before.

@@ -1,4 +1,9 @@
 # record.py
+import os, sys
+# This tool lives in video_engine/tools/; put video_engine/ on sys.path so the
+# sibling-module import below resolves regardless of the working directory.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from video_buffer import VideoBufferConfig, VideoBufferManager
 import cv2,time
 

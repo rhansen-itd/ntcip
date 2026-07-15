@@ -275,3 +275,25 @@ decided. Entries after this point are logged as the decision lands.
   for the standalone manual test scripts (`__trigger.py`, `__record.py`,
   `simulate_playback.py`). **Why:** edge/central deployments need parseable
   logs; ad-hoc prints don't survive to the log aggregator.
+
+- 2026-07-15 — **Reorganized `video_engine/` dev tooling and fixtures.** Moved
+  the five standalone debug/manual scripts (`__capture_rtsp.py`, `__trigger.py`,
+  `__record.py`, `__replay_verify.py`, `simulate_playback.py`) into
+  `video_engine/tools/`, and the captured verification fixture (`sample.ts` +
+  its `.packets.jsonl` profile) into `video_engine/tests/fixtures/`. The three
+  tools that import sibling `video_engine/` modules gained a one-line
+  `sys.path.insert(0, <parent>)` bootstrap so they run from any cwd.
+  **Why:** separate throwaway dev/debug scripts and test data from the
+  production package surface, following conventional project layout; the
+  production modules (`remux_video_buffer.py`, `video_buffer.py`,
+  `discrepancy_engine.py`, `config_manager.py`, `system_runner.py`) stay flat
+  in `video_engine/`. No production code moved — the two packages' import
+  boundary is unchanged.
+
+- 2026-07-15 — **Fixed two `__capture_rtsp.py` bugs found during the first real
+  capture.** (1) The RTSP demuxer rejects ffmpeg's `-rw_timeout`; switched to
+  `-timeout` for `rtsp://` URLs (kept `-rw_timeout` for http/file). (2) The
+  `url` positional was required even with `--profile-only`; made it optional and
+  moved the requirement check into the capture path. **Why:** both only surface
+  against a live camera (the dev box can't reach one), so they slipped past the
+  synthetic self-tests; the owner hit them capturing the first `sample.ts`.

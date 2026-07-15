@@ -106,8 +106,9 @@ Full detail in [VIDEO_BUFFER_REMUX_PLAN.md](VIDEO_BUFFER_REMUX_PLAN.md) §8.
 - [x] DESIGN_HISTORY.md entry; check off these boxes.
 
 **Fable — verify against a real capture (after the owner records one):**
-- [ ] Run `__replay_verify.py` on the owner's real `sample.ts`; confirm
-      length accuracy under real jitter + RAM-boundedness.
+- [ ] Run `video_engine/tools/__replay_verify.py` on the owner's real capture
+      (`video_engine/tests/fixtures/sample.ts`); confirm length accuracy under
+      real jitter + RAM-boundedness.
 - [ ] Adversarially probe the plan §4 edge cases (B-frame/DTS monotonicity,
       keyframe-seek first-frame decode, mid-clip PTS discontinuity, concurrent
       triggers, RTSP drop/reconnect). Debug residual drift/dup/freeze; log the

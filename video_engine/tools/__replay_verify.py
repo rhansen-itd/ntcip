@@ -43,6 +43,10 @@ import uuid
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+# This tool lives in video_engine/tools/; put video_engine/ on sys.path so the
+# remux_video_buffer import below resolves regardless of the working directory.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import av
 
 from remux_video_buffer import (
