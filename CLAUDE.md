@@ -13,6 +13,25 @@ against the implementation, not just aspirational. Treat anything stated as
 "implemented" as load-bearing: don't casually change it without understanding
 why it's built that way.
 
+## Workflow & documentation
+
+Three docs divide the labor; keep them in sync:
+
+- **CLAUDE.md** (this file) — what the code currently *does*. The "now"
+  snapshot of conventions, verified against the implementation.
+- **[ROADMAP.md](ROADMAP.md)** — what still needs *deciding or building*.
+  Priority-ordered, stable-ID numbered items, each with a Target model and a
+  Suggested prompt. Read it first; sessions are scoped there.
+- **[DESIGN_HISTORY.md](DESIGN_HISTORY.md)** — *why* past decisions were made.
+  Build history plus an append-only, dated Decisions log.
+
+**At the end of a session:** check off completed boxes in ROADMAP.md, append a
+dated entry to DESIGN_HISTORY.md's Decisions log capturing the decision and its
+rationale (not just the diff), update this file if a load-bearing convention
+changed, and move fully-finished ROADMAP items into DESIGN_HISTORY.md. Default
+model routing is **Opus, one item end-to-end per session**; see ROADMAP.md's
+intro for the item conventions.
+
 ## Module boundaries — read this before touching either package
 
 There are two independent top-level packages and they must stay that way:
