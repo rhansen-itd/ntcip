@@ -29,106 +29,6 @@ highest used so far.
 
 ---
 
-## 1 — Edge-viable video buffer: remux/stream-copy rewrite (Target: Opus builds, Fable verifies) — highest priority
-
-**Decision (2026-07-14): go remux.** Replace the CFR `cv2.VideoWriter` path
-with a PyAV **remux / stream-copy** buffer — demux packets, RAM-bounded
-pre-roll of encoded packets, copy to disk using the camera's own timestamps.
-Accurate length by construction, near-zero edge CPU, RAM bounded by a time
-window not clip length. Full design, component specs, timestamp handling, the
-decoded-path seam, and the Opus/Fable task split are in
-**[VIDEO_BUFFER_REMUX_PLAN.md](VIDEO_BUFFER_REMUX_PLAN.md)** — read it before
-starting. The scope/prompt below is the summary; the plan is authoritative.
-
-### Background — the three CFR variants (now superseded)
-
-Three implementations of the disk-writing path exist, representing different
-points on the same tradeoff. All three assume a single FPS and therefore drift
-under RTSP jitter, so the remux decision above supersedes the earlier "pick
-one of these empirically" plan (the `_old_`/`_edge_` provenance question is now
-moot for production; kept here as background):
-
-| File | FPS strategy | Peak RAM per clip | Drift |
-|---|---|---|---|
-| `video_engine/_old_video_buffer.py` (kept on disk, not wired into `system_runner.py`) | fixed/reported FPS at writer-open time | bounded — incremental write | unclear — see provenance note below |
-| `video_engine/_edge_video_buffer.py` (kept on disk, not wired into `system_runner.py`) | derived once from a 3s warmup window, then incremental write | bounded — ~80–180MB peak at 720p/1080p | acceptable for clips under ~30s; grows for longer clips because a single FPS value is assumed constant for the whole recording |
-| `video_engine/video_buffer.py` (current production, wired into `system_runner.py`) | exact, computed from total frames / total elapsed time over the **entire** clip | unbounded — holds every raw frame of the full clip (pre-roll + live) in RAM until the stop trigger arrives | none |
-
-**Why this matters:** `video_buffer.py` is only viable today because it's
-being run from a powerful machine over the network, not from the J1900-class
-edge box the project targets. A 5-minute 1080p clip at 20fps held entirely as
-raw `ndarray` frames is tens of GB — that will not run on the actual edge
-hardware. This directly violates the "RAM pre-roll only, then route live
-frames straight to disk" constraint in CLAUDE.md.
-
-**Provenance note — unresolved, don't trust either memory or code "polish"
-alone:** which of `_old_` / `_edge_` was actually run and verified to work
-acceptably for short clips is genuinely unclear — the human memory on this
-has flipped once already. Code archaeology gives circumstantial-only signal:
-both files share an identical module docstring (same lineage, diverged disk-
-writer logic). `_old_`'s `DiskWriter.push()` has an ad-hoc patch comment
-(`# NEW CODE: Prevent duplicate frames`) suggesting a real bug was observed
-and band-aided during actual use. `_edge_`'s docstring explicitly argues
-against both a full-buffer approach (citing the same ~35GB math that
-describes `video_buffer.py`'s problem) and against trusting "metadata claims"
-for FPS (which is what `_old_` does) — reading like a later, more deliberate
-iteration written in response to both predecessors' shortcomings, and it has
-no duplicate-frame patch. That's evidence about which was written *more
-recently and more deliberately*, not evidence about which was actually
-*tested and confirmed working* — an LLM can write a well-justified docstring
-for code that was never run against a real stream. Resolve this empirically,
-not by further guessing: run both `_old_` and `_edge_` against the same real
-or recorded RTSP stream for a few short (~15–30s) clips and a few long
-(~3–5min) clips, and watch for (a) duplicate/frozen frames, (b) measured
-clip duration vs. wall-clock elapsed time. Whichever holds up becomes the
-documented ground truth for this tradeoff — until then, treat both as
-unverified candidates rather than picking a "winner" from memory.
-
-Until the remux backend lands, treat `video_buffer.py` as **not edge-ready**
-despite being the current default in `system_runner.py`. It stays as the
-`full` (central/server) backend; the remux path becomes the edge default.
-
-### Scope
-
-Full detail in [VIDEO_BUFFER_REMUX_PLAN.md](VIDEO_BUFFER_REMUX_PLAN.md) §8.
-
-**Opus — build + blind self-test (no camera needed):**
-- [x] `video_engine/remux_video_buffer.py`: `PacketStreamBuffer` (PyAV demux,
-      packet pre-roll ring, keyframe tracking, wall-clock receive stamps),
-      `ClipRemuxer` (keyframe-seek pre-roll, per-clip timestamp rebase,
-      incremental mux, clean finalize), `VideoBufferManager` (reuse the
-      existing Hot Folder poll / semaphore / disk-check).
-- [x] `VideoBufferConfig` `backend` switch (`remux` | `full`) wired in
-      `system_runner.py`; keep the decoded-path seam clean (plan §6).
-- [x] `__replay_verify.py` + ffmpeg-synthesized CFR/jitter/B-frame streams;
-      assert clip length ≈ requested window ≈ source PTS span, first frame
-      decodes, RSS flat across a 4-min clip. Add `av` to `requirements.txt`.
-- [x] DESIGN_HISTORY.md entry; check off these boxes.
-
-**Fable — verify against a real capture (after the owner records one):**
-- [ ] Run `video_engine/tools/__replay_verify.py` on the owner's real capture
-      (`video_engine/tests/fixtures/sample.ts`); confirm length accuracy under
-      real jitter + RAM-boundedness.
-- [ ] Adversarially probe the plan §4 edge cases (B-frame/DTS monotonicity,
-      keyframe-seek first-frame decode, mid-clip PTS discontinuity, concurrent
-      triggers, RTSP drop/reconnect). Debug residual drift/dup/freeze; log the
-      outcome in DESIGN_HISTORY.md.
-
-Suggested prompt:
-> [Opus] In the ntcip project, do Item 1 of ROADMAP.md following
-> VIDEO_BUFFER_REMUX_PLAN.md: build the remux/stream-copy video buffer in a new
-> `video_engine/remux_video_buffer.py` (PyAV demux, RAM-bounded packet
-> pre-roll, keyframe-seek pre-roll, per-clip timestamp rebase, incremental mux,
-> clean finalize), keep the `VideoBufferManager` Hot Folder/semaphore/disk-check
-> surface so `system_runner.py` selects it via a `backend` config flag, and
-> preserve a clean seam for a future decoded backend. Self-test blind with
-> `__replay_verify.py` against ffmpeg-synthesized CFR/jitter/B-frame streams
-> (assert clip length ≈ source PTS span, first frame decodes, RSS flat over a
-> 4-min clip). Add PyAV to requirements. Land the DESIGN_HISTORY.md entry and
-> leave the real-stream verification boxes for the Fable pass.
-
----
-
 ## 2 — Merge or finalize the second intersection config (Target: Opus)
 
 `video_engine/701_intersection.json` (intersection 701, US-95/Whitley Dr) is
@@ -339,6 +239,25 @@ segmented network, not a code change.
   valid nitpick, low value: it's a top-level orchestrator constructor called
   from exactly one place (`main()`) with sensible defaults. Skip unless doing
   a broader `system_runner.py` pass anyway.
+
+---
+
+## 5 — Retire the superseded CFR buffers (Target: Sonnet, mechanical)
+
+Item 1 (remux backend) is complete and real-stream verified (see
+DESIGN_HISTORY.md 2026-07-15), which unblocks the follow-up cleanup the plan
+deferred: `video_engine/_old_video_buffer.py` and
+`video_engine/_edge_video_buffer.py` are superseded interim CFR attempts,
+imported by nothing. Move them to a `legacy/` folder or delete them (they're
+recoverable from git history either way), and update CLAUDE.md's "Known repo
+clutter" note when done. Do **not** touch `video_buffer.py` — it remains the
+supported `full` (central/server) backend.
+
+Suggested prompt:
+> [Sonnet] In the ntcip project, do Item 5 of ROADMAP.md: remove (or move to
+> `video_engine/legacy/`) the superseded `_old_video_buffer.py` and
+> `_edge_video_buffer.py`, confirm nothing imports them, update CLAUDE.md's
+> clutter note, and add a DESIGN_HISTORY.md one-liner.
 
 ---
 

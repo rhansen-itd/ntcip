@@ -146,8 +146,14 @@ Clip length in `remux` is accurate **by construction** (= source PTS span = true
 elapsed), so there is no FPS to guess and nothing drifts under RTSP jitter — the
 defect the three CFR variants all shared. See [[DESIGN_HISTORY.md]] (2026-07-14
 Item 1 entries) and
-[VIDEO_BUFFER_REMUX_PLAN.md](video_engine/VIDEO_BUFFER_REMUX_PLAN.md); real-stream
-Fable verification of the timestamp core is still pending.
+[VIDEO_BUFFER_REMUX_PLAN.md](video_engine/VIDEO_BUFFER_REMUX_PLAN.md).
+**Real-stream Fable verification passed 2026-07-15** against the owner's
+capture (`tests/fixtures/sample.ts`): exact length fidelity under real jitter,
+RSS flat, and all plan-§4 adversarial probes green (B-frames, backward-jump
+clamp, concurrent triggers, drop/reconnect). One documented behavior: mid-clip
+**forward** PTS gaps are deliberately preserved (no frames arrived = real
+elapsed time), while backward jumps are clamped — see the module docstring and
+the 2026-07-15 DESIGN_HISTORY entry.
 
 ## NTCIP / SNMP rules
 
@@ -194,20 +200,21 @@ As of this writing:
   interim RAM-bounded CFR attempts, and the remux backend
   (`remux_video_buffer.py`) replaces the whole CFR-for-edge approach, making the
   old "which one was verified" provenance question moot for production. They're
-  still on disk (nothing imports them); actually moving them to `legacy/` or
-  deleting them is a follow-up cleanup, not part of Item 1 — don't wire either
-  into `system_runner.py`.
+  still on disk (nothing imports them); with Item 1 now complete and verified
+  (2026-07-15), retiring them is ROADMAP #5 — don't wire either into
+  `system_runner.py`.
 - `ntcip_monitor/monitors/ring_monitor.py` — new, not yet committed to git.
 - `video_engine/701_intersection.json` — real in-progress config for a second
   intersection (701, US-95/Whitley Dr), distinct from intersection 201 in
   `video_engine/intersections.json`. See [ROADMAP.md](ROADMAP.md) #2.
 - `video_engine/tools/` holds the standalone `__`-prefixed debug/manual scripts
   (`__capture_rtsp.py`, `__trigger.py`, `__record.py`, `__replay_verify.py`,
-  `simulate_playback.py`); `video_engine/tests/fixtures/` holds captured test
-  data (`sample.ts` + its `.packets.jsonl` profile). The three tools that import
-  `video_engine/` modules (`__record`, `__replay_verify`, `simulate_playback`)
-  add a one-line `sys.path` bootstrap (`.../tools/` → parent) so they run from
-  any working directory; the other two are stdlib-only and location-independent.
+  `__probe_adversarial.py`, `simulate_playback.py`); `video_engine/tests/fixtures/`
+  holds captured test data (`sample.ts` + its `.packets.jsonl` profile). The four
+  tools that import `video_engine/` modules (`__record`, `__replay_verify`,
+  `__probe_adversarial`, `simulate_playback`) add a `sys.path` bootstrap
+  (`.../tools/` → parent) so they run from any working directory; the other two
+  are stdlib-only and location-independent.
 
 See [ROADMAP.md](ROADMAP.md) for open architectural decisions and planned work.
 

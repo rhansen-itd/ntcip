@@ -46,7 +46,13 @@ Timestamp handling (the correctness core; see plan section 4):
   A mid-clip backward jump or wraparound (camera reboot / RTCP resync) is
   handled by *re-anchoring the offset* so output DTS stays continuous (the "clamp
   the gap" choice from plan section 4 — keep all frames, one-frame gap, rather
-  than splitting the clip).
+  than splitting the clip). **Forward** gaps are deliberately passed through
+  unclamped: a forward PTS jump means no frames arrived for that interval (stall
+  / frame loss), so preserving it keeps the clip's span equal to true elapsed
+  time — the design's core promise. Verified against a real capture with a
+  spliced 64s forward gap (2026-07-15 Fable pass; see DESIGN_HISTORY.md). If
+  real hardware ever exhibits an absurd forward resync jump (hours), revisit
+  with a bounded forward clamp.
 
 Future decoded path (plan section 6 — leave room, do NOT build here):
 ``PacketStreamBuffer`` deals in **packets**; a future ``FrameStreamBuffer`` would

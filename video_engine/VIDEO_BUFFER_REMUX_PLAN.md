@@ -6,8 +6,10 @@ out explicitly in [§8](#8-division-of-labor--opus-vs-fable). Land the outcome
 as a dated [[DESIGN_HISTORY.md]] entry when the implementation session
 completes.
 
-Status: **Opus implementation + blind self-test landed** (2026-07-14);
-real-stream Fable verification (§8) pending an owner capture.
+Status: **Complete.** Opus implementation + blind self-test landed 2026-07-14;
+real-stream Fable verification (§8) passed 2026-07-15 against the owner's
+capture (`video_engine/tests/fixtures/sample.ts`) — all standard checks and
+adversarial probes green, no code defects; outcome logged in DESIGN_HISTORY.md.
 
 ---
 
@@ -271,16 +273,19 @@ deployment check (remux does no decode/encode), not a blocker for this item.
 - [x] DESIGN_HISTORY.md entry; check off the Opus boxes in ROADMAP Item 1.
 
 **Fable (verification + debug escalation), after the owner's real capture:**
-- [ ] Run `__replay_verify.py` against the real `sample.ts`; confirm
+- [x] Run `__replay_verify.py` against the real `sample.ts`; confirm
       written-length accuracy within tolerance under **real** jitter, and
-      RAM-boundedness across a long clip.
-- [ ] Adversarial probes on real data: B-frame/DTS-monotonicity, first-frame
+      RAM-boundedness across a long clip. *(2026-07-15: exact — 0.0000s error
+      over 180.005s / 1801 packets; RSS growth 3.0 MB.)*
+- [x] Adversarial probes on real data: B-frame/DTS-monotonicity, first-frame
       decodes from the keyframe seek, a mid-clip PTS discontinuity behaves per
       the [§4](#4-timestamp-handling-the-core-of-the-design) decision,
       concurrent triggers under the semaphore both produce correct clips,
-      RTSP drop/reconnect mid-recording finalizes cleanly.
-- [ ] Debug any drift/dup/freeze the synthetic self-tests missed; record the
-      outcome and any fix in DESIGN_HISTORY.md.
+      RTSP drop/reconnect mid-recording finalizes cleanly. *(All pass; forward
+      PTS gaps are preserved by design — documented in the module docstring.)*
+- [x] Debug any drift/dup/freeze the synthetic self-tests missed; record the
+      outcome and any fix in DESIGN_HISTORY.md. *(None found; see the
+      2026-07-15 DESIGN_HISTORY entry.)*
 
 This matches Fable's defined role (correctness-critical + debugging
 escalation) and keeps Opus's blind implementation honest by having a second

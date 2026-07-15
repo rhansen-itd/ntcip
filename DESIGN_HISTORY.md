@@ -297,3 +297,54 @@ decided. Entries after this point are logged as the decision lands.
   moved the requirement check into the capture path. **Why:** both only surface
   against a live camera (the dev box can't reach one), so they slipped past the
   synthetic self-tests; the owner hit them capturing the first `sample.ts`.
+
+- 2026-07-15 — **ROADMAP Item 1 complete: remux backend verified against the
+  owner's real capture (Fable pass) — all standard checks and adversarial
+  probes green, zero code defects found.** The real fixture
+  (`video_engine/tests/fixtures/sample.ts`: h264 720×720 10fps, 180s, 1801
+  packets, genuine jitter — PTS deltas 0.011ms–150ms, σ≈11ms — long 6.2s GOPs,
+  no B-frames, monotonic DTS) was run through
+  `video_engine/tools/__replay_verify.py`: **length fidelity exact** (out span
+  180.0050s = source span 180.0050s, 0.0000s error, all 1801 packets) and
+  **RSS flat** (3.0 MB growth across the full-length clip). Adversarial probes
+  (plan §4 edge cases, run via `video_engine/tools/__probe_adversarial.py` —
+  committed so they can be re-run; it reuses `__replay_verify.py`'s
+  `Harness`/`PacedReplayStreamBuffer`):
+  - *Windowed clip @1x on the real 6.2s-GOP stream* — 13.0s for a 10.0s
+    request, inside the keyframe-aligned bound (start ≤ one GOP early, never
+    unboundedly off); first frame decodes and is a keyframe.
+  - *Mid-clip backward PTS/DTS jump* (self-concatenated TS, PTS restarting at
+    1.4s mid-stream) — re-anchor clamp worked exactly as designed: output span
+    360.010s ≈ 2× source, all 3602 packets kept, output DTS strictly
+    monotonic, max residual gap one frame (0.15s), decodes from frame 0.
+  - *Mid-clip 64s forward PTS gap* (spliced 0–60s + 120–180s cuts, `-copyts`)
+    — **behavior finding, judged correct, now documented**: forward gaps pass
+    through unclamped (out span 180.0s with the 64s hole preserved). Rationale:
+    a forward jump means no frames arrived, so preserving it keeps clip span =
+    true elapsed time — the design's core promise; clamping would hide a real
+    camera outage from the reviewer. Documented in the module docstring with a
+    revisit note should real hardware ever produce an absurd (hours) forward
+    resync jump. No code change beyond the docstring.
+  - *B-frames on real content* (re-encode of the capture with `-bf 2`; 1801
+    pts≠dts packets) — exact fidelity (180.1000s = source), DTS strictly
+    monotonic, `pts ≥ dts` invariant held, all 1801 frames decode.
+  - *Concurrent triggers under the semaphore* — two simultaneous clips on one
+    camera both correct (8.90s each, keyframe starts, monotonic); a third
+    trigger at the cap=2 was dropped with the expected warning.
+  - *Source drop + reconnect mid-recording* (looping replay buffer with
+    `reconnect_on_eof=True`) — the clip spans the reconnect (261.2s,
+    2614 packets), the PTS restart was clamped to one frame, output DTS
+    monotonic, the whole clip decodes, clean finalize.
+  Also confirmed in passing: the fidelity test exercises the
+  `preroll_truncated` fallback (ring shorter than the requested window → falls
+  back to the earliest keyframe) on every run, and single-camera-per-trigger
+  (`target_cams[0]`) is pre-existing parity with the `full` backend, not a
+  remux regression. **Why this closes Item 1:** plan §9 acceptance criteria
+  1–4 were met by the 2026-07-14 Opus session; criterion 5 (real-stream Fable
+  pass green) is met by this entry. Item 1 is removed from [[ROADMAP.md]]; its
+  full background (CFR-variant comparison, `_old_`/`_edge_` provenance
+  question — moot for production since remux takes timing from source PTS)
+  stays preserved in
+  [VIDEO_BUFFER_REMUX_PLAN.md](video_engine/VIDEO_BUFFER_REMUX_PLAN.md) and the
+  2026-07-14 entries above. The follow-up cleanup (retire the superseded
+  `_old_`/`_edge_` CFR buffers) is now ROADMAP Item 5.
