@@ -96,6 +96,22 @@ trigger-id interaction that prevents double-firing. Don't re-derive this from
 first principles; the docstring already encodes the corner cases that were
 worked out by hand.
 
+Two accuracy-critical Rule 2 mechanics (added 2026-07-19, see DESIGN_HISTORY):
+the partner-overlap test runs against `_DetectorState.on_intervals` — a
+bounded deque of completed `(on_ts, off_ts)` ON intervals appended on the
+falling edge under the per-detector lock, pruned only by the evaluator thread
+— **not** a most-recent-edge scalar (a scalar cannot represent an interval;
+that shape caused both false negatives and leaked Rule 3 overlaps). And a
+Rule 2 verdict older than `_ORPHAN_DECISION_GRACE_SEC` past its window close
+is discarded, never fired late (the pre-roll footage is gone by then). The
+rule functions are pinned by `video_engine/tests/test_discrepancy_rules.py`
+(26 stdlib-`unittest` cases, incl. the stale-refire guard) — run it after any
+engine change: `python3 video_engine/tests/test_discrepancy_rules.py`.
+Accuracy vs. an ATSPM ground-truth export is measured with
+`video_engine/tools/__accuracy_report.py` (correspondence-based
+precision/recall; models cooldown + poll aliasing), not by comparing raw
+counts.
+
 ## Config abstraction
 
 `video_engine/config_manager.py` already implements the provider pattern:
@@ -212,13 +228,20 @@ As of this writing:
   to keep the buffer running while you drop triggers; replaced `__record.py`) and
   **`drop_trigger.py`** (writes a Hot Folder trigger; replaced `__trigger.py`).
   The rest are `__`-prefixed dev/verification tools: `__capture_rtsp.py`,
-  `__replay_verify.py`, `__probe_adversarial.py`, plus `simulate_playback.py`.
-  `video_engine/tests/fixtures/` holds captured test data (`sample.ts` + its
-  `.packets.jsonl` profile). The four tools that import `video_engine/` modules
-  (`record_clip`, `__replay_verify`, `__probe_adversarial`, `simulate_playback`)
-  add a `sys.path` bootstrap (`.../tools/` → parent) so they run from any working
-  directory; the other two (`__capture_rtsp`, `drop_trigger`) are stdlib-only and
-  location-independent.
+  `__replay_verify.py`, `__probe_adversarial.py`, `__accuracy_report.py`
+  (engine-log vs ATSPM-export precision/recall report), `__capture_ntcip.py`
+  (raw NTCIP detector-edge capture, all 64 channels, ATSPM 82/81 event codes —
+  for channel-mapping audits against the pyatspm DB; reuses the production
+  SNMP client/OID math, `--simulate` for offline smoke tests), plus
+  `simulate_playback.py`. `video_engine/tests/` holds the unit tests
+  (`test_discrepancy_rules.py`, stdlib `unittest` — the layout precedent for
+  ROADMAP 4d) and `video_engine/tests/fixtures/` the captured test data
+  (`sample.ts` + its `.packets.jsonl` profile). The four tools that import
+  `video_engine/` modules (`record_clip`, `__replay_verify`,
+  `__probe_adversarial`, `simulate_playback`) add a `sys.path` bootstrap
+  (`.../tools/` → parent) so they run from any working directory; the others
+  (`__capture_rtsp`, `drop_trigger`, `__accuracy_report`) don't import them
+  and are location-independent (`__accuracy_report` needs `pytz`).
 
 See [ROADMAP.md](ROADMAP.md) for open architectural decisions and planned work.
 

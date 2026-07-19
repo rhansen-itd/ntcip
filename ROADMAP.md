@@ -29,6 +29,53 @@ highest used so far.
 
 ---
 
+> **Fable last-day priority order (2026-07-19).** For the final Fable session
+> block, tackle in this order: **~~7~~ (✅ done 2026-07-19, see
+> DESIGN_HISTORY) → 4d → 8 → 4f**, then mechanical filler **4a / 4b / 5** if
+> time remains. Rationale: 4d stands up the `tests/` breadth everything else
+> leans on (Item 7 already established the layout precedent); 8 fixes a
+> genuine edge-runtime concurrency hazard; 4f closes a real security gap. See
+> the per-item entries below.
+
+---
+
+## 8 — remux VideoBufferManager thread-safety + multi-camera assumption (Target: Fable)
+
+Found 2026-07-19 while reviewing `video_engine/remux_video_buffer.py`.
+
+- **Unlocked shared state across three thread contexts (real bug).**
+  `_active_writers`, `_stop_timers`, and `_draining` are mutated from the poll
+  loop (`_scan_trigger_dir`/`_handle_start`/`_stop_trigger`/`_reap_finished`),
+  from `threading.Timer` callbacks (`_auto_stop` → `_stop_trigger`), and from
+  the main thread (`stop()`), with **no lock**. Compound sequences (pop timer →
+  cancel → pop writer → append `_draining`) can interleave, and `_draining` is
+  iterated-and-removed by `_reap_finished`/`stop()` while a Timer thread may be
+  appending — a concurrent-list-mutation hazard (intermittent `RuntimeError` /
+  missed join / semaphore accounting drift). The `full` backend's poll-only
+  model doesn't hit this because it has no Timer callbacks; the remux backend's
+  `_auto_stop` timers introduced the exposure. Fix: guard the manager's
+  writer/timer/draining bookkeeping with a single `threading.Lock` (short
+  critical sections; no I/O under the lock).
+- **Single-camera assumption (latent, both backends).** `_handle_start` does
+  `cam_id = target_cams[0]` and creates exactly one writer, so a `["all"]` or
+  two-camera trigger silently records only the first camera. Present in
+  `video_buffer.py` too, so it's a design assumption, not a remux regression —
+  harmless today (every intersection uses the single `fisheye` camera) but the
+  trigger schema advertises multi-camera. Recommended for now: warn when a
+  trigger resolves to >1 camera and document the single-camera assumption in the
+  schema; defer true per-camera writers until a second camera is deployed.
+
+Suggested prompt:
+> [Fable] In the ntcip project, do Item 8 of ROADMAP.md: guard
+> `remux_video_buffer.VideoBufferManager`'s `_active_writers`/`_stop_timers`/
+> `_draining` bookkeeping with a single lock to close the poll-loop vs
+> Timer-callback vs stop() races, and handle the multi-camera trigger case
+> (warn + document the single-camera assumption, or implement per-camera
+> writers). Add a regression test if Item 4d/7 scaffolding exists. DESIGN_HISTORY
+> entry + check off.
+
+---
+
 ## 2 — Merge or finalize the second intersection config (Target: Opus)
 
 `video_engine/701_intersection.json` (intersection 701, US-95/Whitley Dr) is
@@ -166,15 +213,25 @@ pure/deterministic — no mocking needed — making a reasonable first
   to `pytz.utc` and logs a warning — no mocking needed, `pytest`'s `caplog`
   fixture covers the log assertion.)
 
-This is the first test coverage in the repo — worth deciding on a test
-runner/layout (e.g. `tests/` at root, `pytest`) as part of this session rather
-than ad hoc.
+**Sequencing (2026-07-19):** Item 7 has landed and established the layout
+precedent: per-package tests (`video_engine/tests/test_discrepancy_rules.py`),
+**stdlib `unittest`** (pytest is not installed in the deployment env; the
+tests run via `python3 video_engine/tests/test_discrepancy_rules.py` or
+unittest discovery, and remain pytest-compatible if it's ever added). Mirror
+that: put the ntcip_monitor cases in `ntcip_monitor/tests/`, use `unittest`,
+and for the `_resolve_pytz` log assertion use
+`unittest.TestCase.assertLogs` instead of pytest's `caplog`. With the layout
+decision removed, 4d is pure mechanical breadth over deterministic functions —
+hence the Sonnet target below, not Opus.
 
 Suggested prompt:
-> [Opus] In the ntcip project, do Item 4d of ROADMAP.md: stand up the first
-> `tests/` directory (pytest, root-level) and cover the six pure/deterministic
-> functions listed there. Decide and document the test runner/layout in
-> DESIGN_HISTORY.md — this is the scaffolding 4a/4e/4h build on.
+> [Sonnet] In the ntcip project, do Item 4d of ROADMAP.md: cover the six
+> pure/deterministic functions listed there with `pytest`. Do NOT invent a new
+> test layout — follow the `tests/` layout Item 7 already established (check
+> `video_engine/tests/` and the DESIGN_HISTORY entry from 7) and place the
+> `ntcip_monitor` tests in the matching per-package location. No mocking needed.
+> DESIGN_HISTORY one-liner + check off. (Runs after Item 7; it is the
+> scaffolding 4a/4e/4h build on.)
 
 ### 4e. Broader test backlog — needs mocking/fixtures, defer until after 4d
 

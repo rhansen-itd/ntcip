@@ -40,6 +40,20 @@ Rule 2 — Orphan Pulse (Ghost Car)
     window.  If System B was completely OFF during the entire window
     [A_on_time − threshold … A_off_time + threshold], a trigger fires.
 
+    "Completely OFF" is decided against a bounded, time-windowed record of the
+    partner's recent ON *intervals* (``_DetectorState.on_intervals``), not a
+    single most-recent-edge scalar: the check fires only if **no** partner ON
+    interval intersects the observation window **and** the partner is not
+    currently ON.  (A scalar cannot represent an interval — it silently dropped
+    legitimate orphans whenever the partner actuated *after* the window, and it
+    missed mid-window overlaps that a newer partner ON had overwritten.)
+
+    The verdict must also be **fresh**: if the evaluator only reaches the
+    candidate more than ``_ORPHAN_DECISION_GRACE_SEC`` after the window closed
+    (e.g. the pair sat in cooldown or inside an active Rule 1 recording), the
+    candidate is discarded instead of fired — the RAM pre-roll for that moment
+    is long gone, so a late trigger would record the wrong footage.
+
     Because the full orphan window has elapsed by the time the trigger fires,
     the **exact clip duration is known**: ``pre_roll_sec + disagreement_sec +
     post_roll_sec + threshold``.  This is passed as ``max_duration_sec`` in the
@@ -101,10 +115,13 @@ Thread-safety contract
 ──────────────────────
 ``on_detector_on`` / ``on_detector_off`` are called from the NTCIP monitor's
 event-dispatch thread and must return in microseconds.  They only acquire a
-per-detector ``threading.Lock`` long enough to mutate four scalar fields.
+per-detector ``threading.Lock`` long enough to mutate four scalar fields plus,
+on a falling edge, one O(1) ``deque.append`` recording the just-closed ON
+interval.
 
 The background evaluator thread acquires the same locks briefly to snapshot
-each detector's state, then releases them before any comparison or I/O.
+each detector's state (pruning expired ON intervals while it holds the lock —
+never from the callback path), then releases them before any comparison or I/O.
 
 All ``_PairRuntimeState`` fields are written exclusively by the evaluator thread
 except ``cooldown_active``, which the NTCIP callback thread may clear via the
@@ -120,11 +137,12 @@ import os
 import threading
 import time
 import uuid
+from collections import deque
 from dataclasses import dataclass, field
 import pytz
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Deque, Dict, List, Optional, Sequence, Tuple
 
 from config_manager import ConfigProvider, ConfigProviderError
 
@@ -133,6 +151,19 @@ from config_manager import ConfigProvider, ConfigProviderError
 # ---------------------------------------------------------------------------
 
 log = logging.getLogger(__name__)
+
+# Maximum staleness of a Rule 2 verdict: an orphan candidate whose observation
+# window closed more than this many seconds ago is discarded instead of fired
+# (the pre-roll footage for it no longer exists).  Sized to tolerate evaluator
+# scheduling jitter (ticks are 0.1 s) while staying far below the cooldown.
+_ORPHAN_DECISION_GRACE_SEC = 2.0
+
+# Hard cap on the partner ON-interval history deque.  The time-based pruning in
+# the evaluator is the real bound (~3 × threshold); this maxlen is a
+# belt-and-suspenders RAM cap.  At the 0.2 s NTCIP poll floor a detector can
+# produce at most ~2.5 intervals/s, so 128 comfortably exceeds any prunable
+# window.
+_PARTNER_INTERVAL_MAXLEN = 128
 
 # ---------------------------------------------------------------------------
 # Timezone resolution helper
@@ -192,6 +223,15 @@ class _DetectorState:
             so the evaluator can reconstruct the pulse window
             ``[last_pulse_on_time, last_off_time]`` even after the detector
             has already transitioned back to OFF.
+        on_intervals: Bounded history of recently *completed* ON intervals as
+            ``(on_ts, off_ts)`` tuples, appended on each falling edge.  This is
+            what Rule 2 consults to decide whether this detector (as the
+            partner) overlapped an orphan candidate's observation window — a
+            deque because a single most-recent-edge scalar cannot represent an
+            interval.  The evaluator thread prunes entries older than the
+            largest window Rule 2 ever inspects; ``maxlen`` is only a RAM
+            backstop.  The *current* ON (if any) is not in the deque — it is
+            represented by ``is_on`` / ``last_on_time``.
     """
 
     detector_id: str
@@ -199,6 +239,9 @@ class _DetectorState:
     last_on_time: float = 0.0
     last_off_time: float = 0.0
     last_pulse_on_time: float = 0.0
+    on_intervals: Deque[Tuple[float, float]] = field(
+        default_factory=lambda: deque(maxlen=_PARTNER_INTERVAL_MAXLEN)
+    )
     lock: threading.Lock = field(default_factory=threading.Lock)
 
 
@@ -241,6 +284,12 @@ class _PairRuntimeState:
     # Rule 1 active-resolution tracking (new in Session 5)
     active_trigger_id: Optional[str] = None
     resolution_start_time: Optional[float] = None
+    # Monotonic ON-edge timestamp of the most recent orphan pulse already
+    # registered for each slot.  Prevents a single stale pulse from being
+    # re-armed (and re-fired) after each cooldown expiry when the detector has
+    # not actuated again.  See _maybe_register_orphan.
+    last_handled_pulse_on_a: float = 0.0
+    last_handled_pulse_on_b: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -276,29 +325,38 @@ def _check_rule1_continuous(
 def _check_rule2_orphan(
     pulse_on: float,
     pulse_off: float,
-    other_last_on: float,
-    other_last_off: float,
+    other_intervals: Sequence[Tuple[float, float]],
     other_is_on: bool,
     now: float,
     threshold: float,
+    decision_grace_sec: float = _ORPHAN_DECISION_GRACE_SEC,
 ) -> Tuple[bool, str]:
     """Rule 2: detect an orphan pulse — a brief actuation the partner never saw.
 
     The observation window is ``[pulse_on − threshold … pulse_off + threshold]``.
     The check is deferred until ``now >= pulse_off + threshold`` so the full
-    post-pulse grace period has elapsed before a verdict is rendered.
+    post-pulse grace period has elapsed before a verdict is rendered, and it is
+    abandoned once ``now > pulse_off + threshold + decision_grace_sec`` — a
+    verdict that late (pair was in cooldown or inside an active Rule 1
+    recording) would trigger a clip whose pre-roll footage no longer exists.
 
-    Rule 3 protection is embedded here: if the partner's ``last_on_time``
-    falls anywhere inside the observation window, the check is suppressed.
+    Rule 3 protection is embedded here: if **any** completed partner ON
+    interval intersects the observation window, or the partner is currently
+    ON, the check is suppressed.  Interval intersection (rather than a single
+    most-recent-edge comparison) is what makes a partner actuation *after* the
+    window correctly non-suppressing, and a partner ON that merely straddles
+    the window boundary correctly suppressing.
 
     Args:
         pulse_on: ``time.time()`` of the orphan candidate's ON-edge.
         pulse_off: ``time.time()`` of the orphan candidate's OFF-edge.
-        other_last_on: ``last_on_time`` of the partner detector.
-        other_last_off: ``last_off_time`` of the partner detector.
+        other_intervals: Completed ON intervals of the partner detector as
+            ``(on_ts, off_ts)`` tuples, most-recent-last.  Need only cover the
+            observation window — older entries are ignored by the overlap test.
         other_is_on: Current ON state of the partner detector.
         now: Current ``time.time()``.
         threshold: Allowable disagreement window in seconds.
+        decision_grace_sec: Maximum verdict staleness past the window end.
 
     Returns:
         A ``(should_fire, description)`` tuple.  ``should_fire`` is ``True``
@@ -311,21 +369,22 @@ def _check_rule2_orphan(
     window_start = pulse_on - threshold
     window_end   = pulse_off + threshold
 
+    if now > window_end + decision_grace_sec:
+        return False, ""
+
     if other_is_on:
         return False, ""
 
-    if other_last_on > 0.0 and window_start <= other_last_on <= window_end:
-        return False, ""
+    for on_ts, off_ts in other_intervals:
+        if on_ts <= window_end and off_ts >= window_start:
+            return False, ""
 
-    if other_last_on == 0.0 or other_last_on < window_start:
-        pulse_duration = round(pulse_off - pulse_on, 3)
-        desc = (
-            f"orphan pulse duration={pulse_duration}s "
-            f"window=[{window_start:.3f}, {window_end:.3f}]"
-        )
-        return True, desc
-
-    return False, ""
+    pulse_duration = round(pulse_off - pulse_on, 3)
+    desc = (
+        f"orphan pulse duration={pulse_duration}s "
+        f"window=[{window_start:.3f}, {window_end:.3f}]"
+    )
+    return True, desc
 
 
 # ---------------------------------------------------------------------------
@@ -513,9 +572,15 @@ class DiscrepancyMonitor:
             return
         with state.lock:
             state.is_on = False
-            state.last_off_time = time.time()
+            now = time.time()
+            state.last_off_time = now
             # last_pulse_on_time intentionally NOT updated here — it retains
             # the ON-edge value so the evaluator can form [pulse_on, pulse_off].
+            if state.last_pulse_on_time > 0.0:
+                # Close out the ON interval for the partner-overlap history.
+                # O(1) append under the already-held lock; pruning is the
+                # evaluator thread's job.
+                state.on_intervals.append((state.last_pulse_on_time, now))
 
         self._maybe_reset_cooldown_early(key)
 
@@ -661,20 +726,31 @@ class DiscrepancyMonitor:
         if state_a is None or state_b is None:
             return
 
+        det_cfg   = self._intersection_cfg["detectors"].get(det_a_id, {})
+        threshold = float(det_cfg.get("lag_threshold_sec", 2.0))
+
+        # ON intervals older than this can never intersect a still-decidable
+        # Rule 2 window (window span < 3×threshold, verdict staleness capped
+        # by the decision grace), so prune them while the lock is held.
+        prune_before = now - (
+            3.0 * threshold + _ORPHAN_DECISION_GRACE_SEC + 1.0
+        )
+
         with state_a.lock:
             a_is_on         = state_a.is_on
-            a_last_on       = state_a.last_on_time
             a_last_off      = state_a.last_off_time
             a_last_pulse_on = state_a.last_pulse_on_time
+            while state_a.on_intervals and state_a.on_intervals[0][1] < prune_before:
+                state_a.on_intervals.popleft()
+            a_intervals     = tuple(state_a.on_intervals)
 
         with state_b.lock:
             b_is_on         = state_b.is_on
-            b_last_on       = state_b.last_on_time
             b_last_off      = state_b.last_off_time
             b_last_pulse_on = state_b.last_pulse_on_time
-
-        det_cfg   = self._intersection_cfg["detectors"].get(det_a_id, {})
-        threshold = float(det_cfg.get("lag_threshold_sec", 2.0))
+            while state_b.on_intervals and state_b.on_intervals[0][1] < prune_before:
+                state_b.on_intervals.popleft()
+            b_intervals     = tuple(state_b.on_intervals)
 
         # ── 4. Rule 1 — Continuous Disagreement (new-detection path) ─────
         both_agree = (a_is_on == b_is_on)
@@ -723,7 +799,7 @@ class DiscrepancyMonitor:
             pulse_on, pulse_off = rt.orphan_watch_a
             fire, desc = _check_rule2_orphan(
                 pulse_on, pulse_off,
-                b_last_on, b_last_off, b_is_on,
+                b_intervals, b_is_on,
                 now, threshold,
             )
             if fire:
@@ -758,7 +834,7 @@ class DiscrepancyMonitor:
             pulse_on, pulse_off = rt.orphan_watch_b
             fire, desc = _check_rule2_orphan(
                 pulse_on, pulse_off,
-                a_last_on, a_last_off, a_is_on,
+                a_intervals, a_is_on,
                 now, threshold,
             )
             if fire:
@@ -807,6 +883,12 @@ class DiscrepancyMonitor:
         * ``last_pulse_on`` is non-zero (an ON edge has been observed).
         * The candidate differs from any already-registered candidate for
           this slot (prevents re-registering the same pulse each tick).
+        * The pulse's ON-edge is newer than the last pulse already handled for
+          this slot.  A pulse's ``last_pulse_on`` is monotonic (updated only on
+          a fresh rising edge), so once a pulse has been armed it is never
+          re-armed — even after its trigger fires and the post-trigger cooldown
+          later expires while the detector's state is unchanged.  Without this
+          guard a single stale ghost pulse re-fires once per cooldown period.
         * The pulse ON-duration is strictly less than ``threshold``.  Longer
           pulses are handled by Rule 1 and excluded here to avoid
           double-triggering.
@@ -831,7 +913,13 @@ class DiscrepancyMonitor:
         if existing is not None and existing[0] == last_pulse_on:
             return  # Already watching this exact pulse.
 
+        handled_attr = f"last_handled_pulse_on_{which}"
+        if last_pulse_on <= getattr(rt, handled_attr):
+            return  # This pulse was already armed once; don't re-arm it after
+                    # a cooldown while the detector's state is unchanged.
+
         setattr(rt, attr, (last_pulse_on, last_off))
+        setattr(rt, handled_attr, last_pulse_on)
 
     # ------------------------------------------------------------------
     # Early cooldown reset (called from NTCIP callback thread)

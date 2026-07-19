@@ -1,0 +1,59 @@
+,,1/1/2020,6/1/2026
+TM:,EBL,,
+TM:,EBT,63,63
+TM:,EBR,,
+TM:,WBL,40,40
+TM:,WBT,41,41
+TM:,WBR,42,42
+TM:,NBL,,
+TM:,NBT,60,60
+TM:,NBR,61,61
+TM:,SBL,,
+TM:,SBT,43,43
+TM:,SBR,45,45
+Exc:,Detector,,
+Exc:,Phase,,
+Exc:,Status,,
+Plt:,P2 Arrival,49,49
+Plt:,P4 Arrival,,
+Plt:,P6 Arrival,36,36
+Plt:,P8 Arrival,,
+Plt:,P1 Occupancy,,
+Plt:,P2 Occupancy,46,46
+Plt:,P3 Occupancy,53,53
+Plt:,P4 Occupancy,39,39
+Plt:,P5 Occupancy,,
+Plt:,P6 Occupancy,33,33
+Plt:,P7 Occupancy,38,38
+Plt:,P8 Occupancy,51,51
+Plt:,P1 Stop Bar,,
+Plt:,P2 Stop Bar,60,60
+Plt:,P3 Stop Bar,64,64
+Plt:,P4 Stop Bar,41,41
+Plt:,P5 Stop Bar,,
+Plt:,P6 Stop Bar,43,43
+Plt:,P7 Stop Bar,40,40
+Plt:,P8 Stop Bar,63,63
+Det:,P1 Stopbar,,
+Det:,P2 Stopbar,60,60
+Det:,P3 Stopbar,64,64
+Det:,P4 Stopbar,41,41
+Det:,P5 Stopbar,,
+Det:,P6 Stopbar,43,43
+Det:,P7 Stopbar,40,40
+Det:,P8 Stopbar,63,63
+Det:,P1 Pairs,,"[[43,29]]"
+Det:,P2 Pairs,"[[46,17]]","[[46,17],[2,46],[2,17]]"
+Det:,P3 Pairs,,"[[41,30],[3,41],[3,30]]"
+Det:,P4 Pairs,"[[39,22]]","[[39,22],[4,22],[4,39]]"
+Det:,P5 Pairs,,
+Det:,P6 Pairs,"[[33,26]]","[[33,26]]"
+Det:,P7 Pairs,"[[38,24]]","[[38,24],[7,24],[7,38]]"
+Det:,P8 Pairs,"[[42,31]]","[[42,31],[8,31],[8,42]]"
+RB:,R1,"1,2|4,11,3|16,8","1,2|4,11,3|16,8"
+RB:,R2,"5,6|7|16,8","5,6|7|16,8"
+RB:,B,"1,5,16,8","1,5,16,8"
+WD:,Sensor1,56,
+WD:,Sensor2,57,
+WD:,Sensor3,58,
+WD:,Sensor4,,

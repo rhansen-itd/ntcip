@@ -374,3 +374,104 @@ decided. Entries after this point are logged as the decision lands.
   unused backend as a co-equal option is misleading; the future decoded path
   (plan §6) is a new bounded branch, not this file. Item 6 reopens Item 5's
   "keep `video_buffer.py`" note — the two should be coordinated.
+
+- 2026-07-19 — **Discrepancy-engine accuracy: stale-refire fix, Rule 2
+  interval-based partner history, and the accuracy validation harness
+  (ROADMAP Item 7, Fable).** Trigger: the owner compared the engine's live
+  output (`discrepancies_log.csv`, NTCIP-polled at 0.2 s) against an ATSPM
+  ground truth from the sibling `pyatspm` project (controller data at 0.1 s)
+  and the two looked "way off". Scope was worked out in
+  `SCOPE_discrepancy_accuracy.md` (repo root); three changes landed:
+  1. **Rule 2 stale-refire guard** (inline fix earlier the same day, this
+     session pinned it with tests): orphan pulses re-fired once per ~60 s
+     cooldown expiry on *unchanged* detector state — 15 of the 76 rule 2 rows
+     in the 2-hour sample were phantom duplicates with identical pulse
+     windows. Fixed by `last_handled_pulse_on_a/b` in `_PairRuntimeState` and
+     a monotonic ON-edge guard in `_maybe_register_orphan`: a pulse is armed
+     at most once, ever.
+  2. **Rule 2 partner history is now an interval record, not a scalar.**
+     `_check_rule2_orphan` used to decide "was the partner OFF for the whole
+     observation window?" from `other_last_on` alone — a scalar cannot
+     represent an interval, so (a) a partner actuating *after* the window
+     matched no branch and silently suppressed a legitimate orphan (false
+     negative), (b) a mid-window partner ON overwritten by a newer edge became
+     invisible (leaked Rule 3 overlap → false positive), and (c) a partner ON
+     straddling the window start looked like "last ON before window" and fired
+     falsely. Now each `_DetectorState` keeps `on_intervals`, a bounded deque
+     of completed `(on_ts, off_ts)` intervals appended O(1) on the falling
+     edge under the existing per-detector lock (callback microsecond contract
+     preserved); the evaluator thread prunes it during its snapshot (time
+     window ≈ 3×threshold; `maxlen=128` as a RAM backstop) and
+     `_check_rule2_orphan` — still a pure function — does true interval
+     intersection against the window. **New behavior decision:** a verdict
+     rendered more than `_ORPHAN_DECISION_GRACE_SEC` (2 s) after the window
+     closed is discarded instead of fired. Rationale: the evaluator only
+     reaches a candidate that late when the pair sat in cooldown or inside an
+     active Rule 1 recording, and by then the RAM pre-roll for the event is
+     gone — the old code could fire a trigger whose clip showed the wrong
+     minute entirely. Trigger schema and Hot Folder untouched.
+  3. **Accuracy validation harness** (`video_engine/tools/__accuracy_report.py`,
+     stdlib+pytz dev tool): measures *correspondence*, not raw counts — counts
+     diverge by design (per-pair 60 s cooldown, 0.2 s poll). It reconstructs
+     precise engine event times from the rule 2 descriptions' embedded Unix
+     windows (with a clock self-check against `Local_Timestamp`), restricts to
+     the engine's coverage blocks (gap-split) ∩ the GT export window, does
+     global nearest-start one-to-one matching, and separates expected misses
+     (poll-aliased pulses < 2×poll; export-boundary-clipped events; simulated
+     cooldown/active-recording suppression — an upper bound, since the early
+     cooldown reset can shorten real cooldowns) from **true misses**, plus a
+     per-pair breakdown. On the 2026-07-19 sample: precision 38/104 = 36.5 %
+     (42.7 % projected post-fix — the 15 phantoms are tagged individually),
+     adjusted recall 36.5 %, and the per-pair table shows the residual gap is
+     strongly bimodal: pairs 30:41 (8/8), 22:39 (3/3), 29:43 (9/10 real) match
+     well, while 17:2, 26:33, 24:7, 38:7 have *zero* correspondence in either
+     direction with nearest-candidate deltas of hundreds of seconds —
+     i.e. the engine config and the pyatspm export likely disagree about
+     those pairings/phase mappings. That config audit is the recommended next
+     accuracy step, not further rule changes.
+  Also seeded the repo's first unit-test file:
+  `video_engine/tests/test_discrepancy_rules.py` — 26 stdlib-`unittest` cases
+  (pytest is not installed on the target env) covering
+  `_check_rule1_continuous` boundaries, `_check_rule2_orphan` interval
+  semantics (incl. the three scalar-era bug shapes above and the staleness
+  grace), `_maybe_register_orphan` incl. the stale-refire guard, and
+  integration tests driving real callbacks + `_evaluate_pair` against a stub
+  `ConfigProvider` and a temp Hot Folder. This layout (per-package `tests/`,
+  `unittest`, `sys.path` bootstrap like `tools/`) is the precedent Item 4d
+  should mirror. Item 7 is removed from [[ROADMAP.md]];
+  `SCOPE_discrepancy_accuracy.md` remains on disk as the detailed scope
+  record.
+
+- 2026-07-19 — **Channel-mapping investigation + raw NTCIP capture tool
+  (`__capture_ntcip.py`).** Follow-up to the Item 7 accuracy harness's
+  bimodal per-pair result. Findings: (1) the pairwise-triangle expansion of
+  3-detector phases is **not** the problem — pyatspm's `int_cfg.csv` `Det: P*
+  Pairs` table (6/1/2026 epoch) lists the exact same triangles the engine
+  builds from `_intersections.json`, and both sides expand them identically;
+  (2) it is **not a label swap** either — dead-pair engine triggers align in
+  time with *no* GT anomaly on *any* pair (nearest 10–90 s away), ruling out
+  "engine pair X is really pyatspm pair Y"; (3) the signature is
+  **channel-level**: on phases 2, 6, 7 (+ Currux det 4), both engine channels
+  pulse but essentially never overlap, while controller-internal data shows
+  those zones agreeing — and dead vs. healthy channels interleave within the
+  same SNMP detector groups (2,4,7 dead / 3,8 healthy in group 1), ruling out
+  a systematic bit/group off-by-one in the monitor. Likeliest cause:
+  per-channel assignments in `_intersections.json` (which NTCIP channel each
+  physical Evo/ITSPlus/Currux unit drives) are wrong for those phases.
+  Also found: `video_engine/intersections.json` — what `system_runner` loads
+  by default — is a **stale 10-detector config** with placeholder pairs
+  (11↔51 "phase 11", 13↔52); the live run that produced the sample log used
+  the 19-detector triangle config at repo root (`_intersections.json`).
+  Promoting it is ROADMAP #2 territory. To resolve the channel question
+  empirically, added `video_engine/tools/__capture_ntcip.py`: polls all 64
+  detector channels via the production `EconoliteSNMPClient` + the same
+  `DETECTOR_GROUPS`/LSB-first bit math as `DetectorMonitor` (so it sees
+  exactly what the engine sees), and writes every ON/OFF edge as CSV using
+  ATSPM's own 82/81 event codes for direct correlation against the pyatspm
+  SQLite raw log. `--config`/`--intersection` pulls the controller address
+  from an intersection JSON; `--simulate` provides an offline fake controller
+  (verified: 10/s achieved rate, alternating edges, init-state rows).
+  `oid_definitions` is loaded by file path because the `ntcip_monitor`
+  package `__init__` eagerly imports pysnmp, which `--simulate` must not
+  require. Next step: capture a few minutes live and correlate per-channel
+  edge streams against pyatspm channels (argmax similarity → true map).

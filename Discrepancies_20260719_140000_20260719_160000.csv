@@ -1,0 +1,637 @@
+phase,anomaly_type,start_timestamp,end_timestamp,duration_sec,det_a_id,det_b_id,on_det_id,description
+1,isolated_pulse,1784491301.4,1784491302.6,1.1999998092651367,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 1.200s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784491303.8,1784491304.6,0.7999999523162842,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.800s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784491305.8,1784491306.0,0.20000004768371582,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.200s; Det 43 was completely OFF in ±5.0s window
+1,extended_disagreement,1784491306.3,1784491330.0,23.700000047683716,43,29,29,Ph1: Det 29 ON / Det 43 OFF for 23.70s (threshold=5.0s)
+1,isolated_pulse,1784491336.7,1784491337.1,0.39999985694885254,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.400s; Det 43 was completely OFF in ±5.0s window
+1,extended_disagreement,1784491816.4,1784491823.7,7.299999952316284,43,29,43,Ph1: Det 43 ON / Det 29 OFF for 7.30s (threshold=5.0s)
+1,isolated_pulse,1784491873.8,1784491874.6,0.7999999523162842,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.800s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784491883.6,1784491885.2,1.6000001430511475,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 1.600s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784491886.0,1784491889.5,3.5,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 3.500s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784491900.3,1784491900.9,0.6000001430511475,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.600s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784491904.4,1784491908.5,4.099999904632568,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 4.100s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784491908.8,1784491910.7,1.9000000953674316,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 1.900s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784491923.5,1784491923.6,0.09999990463256836,43,29,43,Ph1: Det 43 isolated pulse ON/OFF for 0.100s; Det 29 was completely OFF in ±5.0s window
+1,isolated_pulse,1784492097.0,1784492099.6,2.5999999046325684,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 2.600s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784492101.9,1784492102.7,0.7999999523162842,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.800s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784492103.5,1784492105.2,1.7000000476837158,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 1.700s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784492105.4,1784492106.2,0.7999999523162842,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.800s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784492270.9,1784492271.6,0.6999998092651367,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.700s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784492274.5,1784492274.8,0.2999999523162842,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.300s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784492275.9,1784492278.6,2.6999998092651367,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 2.700s; Det 43 was completely OFF in ±5.0s window
+1,extended_disagreement,1784492279.9,1784492298.2,18.299999952316284,43,29,29,Ph1: Det 29 ON / Det 43 OFF for 18.30s (threshold=5.0s)
+1,isolated_pulse,1784492299.4,1784492300.2,0.7999999523162842,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.800s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784492740.8,1784492741.8,1.0,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 1.000s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784492742.8,1784492743.4,0.6000001430511475,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.600s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784492743.8,1784492744.5,0.7000000476837158,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.700s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784492745.8,1784492747.5,1.7000000476837158,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 1.700s; Det 43 was completely OFF in ±5.0s window
+1,extended_disagreement,1784492748.8,1784492754.4,5.6000001430511475,43,29,29,Ph1: Det 29 ON / Det 43 OFF for 5.60s (threshold=5.0s)
+1,isolated_pulse,1784492756.9,1784492757.3,0.39999985694885254,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.400s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784492758.6,1784492759.0,0.40000009536743164,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.400s; Det 43 was completely OFF in ±5.0s window
+1,extended_disagreement,1784492759.2,1784492789.9,30.700000047683716,43,29,29,Ph1: Det 29 ON / Det 43 OFF for 30.70s (threshold=5.0s)
+1,isolated_pulse,1784492790.3,1784492793.0,2.700000047683716,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 2.700s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784492793.3,1784492796.3,3.0,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 3.000s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784492796.7,1784492798.1,1.3999998569488525,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 1.400s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784492802.6,1784492803.3,0.7000000476837158,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.700s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784493419.9,1784493420.2,0.2999999523162842,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.300s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784493422.0,1784493422.4,0.40000009536743164,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.400s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784493775.5,1784493775.9,0.40000009536743164,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.400s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784493776.3,1784493777.1,0.7999999523162842,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.800s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784493778.1,1784493779.7,1.6000001430511475,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 1.600s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784493780.9,1784493781.3,0.39999985694885254,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.400s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784493781.7,1784493782.0,0.2999999523162842,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.300s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784493782.4,1784493783.1,0.6999998092651367,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.700s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784493784.4,1784493784.8,0.39999985694885254,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.400s; Det 43 was completely OFF in ±5.0s window
+1,extended_disagreement,1784493785.5,1784493804.5,19.0,43,29,29,Ph1: Det 29 ON / Det 43 OFF for 19.00s (threshold=5.0s)
+1,isolated_pulse,1784493821.8,1784493822.5,0.7000000476837158,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.700s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784494170.2,1784494170.6,0.39999985694885254,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.400s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784494178.8,1784494179.1,0.2999999523162842,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.300s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784494180.1,1784494181.1,1.0,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 1.000s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784494266.6,1784494266.9,0.3000001907348633,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.300s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784494267.3,1784494268.5,1.2000000476837158,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 1.200s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784494326.7,1784494328.9,2.200000047683716,43,29,43,Ph1: Det 43 isolated pulse ON/OFF for 2.200s; Det 29 was completely OFF in ±5.0s window
+1,isolated_pulse,1784494356.0,1784494357.6,1.5999999046325684,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 1.600s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784494363.2,1784494363.6,0.39999985694885254,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.400s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784494425.3,1784494425.6,0.2999999523162842,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.300s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784494442.3,1784494444.3,2.0,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 2.000s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784494454.8,1784494455.2,0.40000009536743164,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.400s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784494455.6,1784494455.9,0.3000001907348633,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.300s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784494457.1,1784494457.7,0.6000001430511475,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.600s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784494458.4,1784494458.7,0.2999999523162842,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.300s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784494633.1,1784494633.5,0.40000009536743164,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.400s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784494633.9,1784494635.2,1.2999999523162842,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 1.300s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784494638.3,1784494639.5,1.2000000476837158,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 1.200s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784494940.3,1784494942.0,1.7000000476837158,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 1.700s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784494942.4,1784494943.7,1.2999999523162842,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 1.300s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784494946.5,1784494947.3,0.7999999523162842,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.800s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784494947.6,1784494948.6,1.0,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 1.000s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784494949.3,1784494949.8,0.5,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.500s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784494951.8,1784494952.7,0.9000000953674316,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.900s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784495005.9,1784495006.7,0.7999999523162842,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.800s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784495009.3,1784495009.8,0.5,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.500s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784495010.6,1784495011.0,0.40000009536743164,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.400s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784495012.9,1784495013.4,0.5,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.500s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784495146.1,1784495146.5,0.40000009536743164,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.400s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784495304.1,1784495304.5,0.40000009536743164,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.400s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784495316.4,1784495316.7,0.2999999523162842,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.300s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784495318.3,1784495319.1,0.7999999523162842,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.800s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784495336.1,1784495336.5,0.40000009536743164,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.400s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784495339.5,1784495339.9,0.40000009536743164,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.400s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784495340.2,1784495340.8,0.5999999046325684,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.600s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784495341.5,1784495341.9,0.40000009536743164,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.400s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784495342.2,1784495342.5,0.2999999523162842,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.300s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784495343.2,1784495344.2,1.0,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 1.000s; Det 43 was completely OFF in ±5.0s window
+1,extended_disagreement,1784495344.6,1784495354.2,9.600000143051147,43,29,29,Ph1: Det 29 ON / Det 43 OFF for 9.60s (threshold=5.0s)
+1,isolated_pulse,1784495642.8,1784495644.3,1.5,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 1.500s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784495840.2,1784495840.6,0.39999985694885254,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.400s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784496179.4,1784496180.1,0.6999998092651367,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.700s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784496330.1,1784496330.4,0.3000001907348633,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.300s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784496337.8,1784496338.7,0.9000000953674316,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.900s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784496339.1,1784496339.7,0.6000001430511475,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.600s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784496340.5,1784496341.5,1.0,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 1.000s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784496341.9,1784496342.3,0.39999985694885254,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.400s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784497113.1,1784497115.5,2.4000000953674316,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 2.400s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784497117.5,1784497117.8,0.2999999523162842,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.300s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784497199.6,1784497200.4,0.8000001907348633,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.800s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784497810.4,1784497811.1,0.6999998092651367,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.700s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784497814.4,1784497815.1,0.6999998092651367,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.700s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784498070.9,1784498072.3,1.3999998569488525,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 1.400s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784498075.9,1784498078.3,2.3999998569488525,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 2.400s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784498080.4,1784498081.4,1.0,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 1.000s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784498167.0,1784498167.4,0.40000009536743164,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.400s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784498169.5,1784498170.2,0.7000000476837158,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.700s; Det 43 was completely OFF in ±5.0s window
+1,isolated_pulse,1784498388.4,1784498389.0,0.5999999046325684,43,29,29,Ph1: Det 29 isolated pulse ON/OFF for 0.600s; Det 43 was completely OFF in ±5.0s window
+2,isolated_pulse,1784491673.3,1784491673.5,0.20000004768371582,2,46,2,Ph2: Det 2 isolated pulse ON/OFF for 0.200s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784491673.3,1784491673.5,0.20000004768371582,2,17,2,Ph2: Det 2 isolated pulse ON/OFF for 0.200s; Det 17 was completely OFF in ±5.0s window
+2,isolated_pulse,1784491689.4,1784491689.8,0.39999985694885254,2,46,2,Ph2: Det 2 isolated pulse ON/OFF for 0.400s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784491694.3,1784491694.7,0.40000009536743164,46,17,17,Ph2: Det 17 isolated pulse ON/OFF for 0.400s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784491694.5,1784491695.0,0.5,2,46,2,Ph2: Det 2 isolated pulse ON/OFF for 0.500s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784491699.0,1784491699.2,0.20000004768371582,2,46,2,Ph2: Det 2 isolated pulse ON/OFF for 0.200s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784491700.8,1784491701.2,0.40000009536743164,2,46,2,Ph2: Det 2 isolated pulse ON/OFF for 0.400s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784491700.8,1784491701.2,0.40000009536743164,2,17,2,Ph2: Det 2 isolated pulse ON/OFF for 0.400s; Det 17 was completely OFF in ±5.0s window
+2,extended_disagreement,1784491825.9,1784491831.9,6.0,46,17,17,Ph2: Det 17 ON / Det 46 OFF for 6.00s (threshold=5.0s)
+2,extended_disagreement,1784491825.9,1784491831.9,6.0,2,46,2,Ph2: Det 2 ON / Det 46 OFF for 6.00s (threshold=5.0s)
+2,extended_disagreement,1784491973.4,1784491978.5,5.099999904632568,46,17,17,Ph2: Det 17 ON / Det 46 OFF for 5.10s (threshold=5.0s)
+2,extended_disagreement,1784491973.4,1784491978.5,5.099999904632568,2,46,2,Ph2: Det 2 ON / Det 46 OFF for 5.10s (threshold=5.0s)
+2,isolated_pulse,1784492257.3,1784492257.5,0.20000004768371582,2,46,2,Ph2: Det 2 isolated pulse ON/OFF for 0.200s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784492257.3,1784492257.5,0.20000004768371582,2,17,2,Ph2: Det 2 isolated pulse ON/OFF for 0.200s; Det 17 was completely OFF in ±5.0s window
+2,isolated_pulse,1784492269.3,1784492269.8,0.5,46,17,17,Ph2: Det 17 isolated pulse ON/OFF for 0.500s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784492798.1,1784492798.5,0.40000009536743164,46,17,17,Ph2: Det 17 isolated pulse ON/OFF for 0.400s; Det 46 was completely OFF in ±5.0s window
+2,extended_disagreement,1784492798.9,1784492856.8,57.89999985694885,46,17,17,Ph2: Det 17 ON / Det 46 OFF for 57.90s (threshold=5.0s)
+2,extended_disagreement,1784492799.2,1784492856.8,57.59999990463257,2,46,2,Ph2: Det 2 ON / Det 46 OFF for 57.60s (threshold=5.0s)
+2,extended_disagreement,1784492859.1,1784492869.5,10.400000095367432,46,17,17,Ph2: Det 17 ON / Det 46 OFF for 10.40s (threshold=5.0s)
+2,extended_disagreement,1784492859.1,1784492868.0,8.900000095367432,2,46,2,Ph2: Det 2 ON / Det 46 OFF for 8.90s (threshold=5.0s)
+2,extended_disagreement,1784493257.9,1784493266.8,8.899999856948853,46,17,17,Ph2: Det 17 ON / Det 46 OFF for 8.90s (threshold=5.0s)
+2,extended_disagreement,1784493257.9,1784493266.8,8.899999856948853,2,46,2,Ph2: Det 2 ON / Det 46 OFF for 8.90s (threshold=5.0s)
+2,extended_disagreement,1784493276.4,1784493286.7,10.299999952316284,46,17,17,Ph2: Det 17 ON / Det 46 OFF for 10.30s (threshold=5.0s)
+2,extended_disagreement,1784493276.4,1784493286.7,10.299999952316284,2,46,2,Ph2: Det 2 ON / Det 46 OFF for 10.30s (threshold=5.0s)
+2,isolated_pulse,1784493369.2,1784493369.5,0.2999999523162842,2,46,2,Ph2: Det 2 isolated pulse ON/OFF for 0.300s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784493369.2,1784493369.5,0.2999999523162842,2,17,2,Ph2: Det 2 isolated pulse ON/OFF for 0.300s; Det 17 was completely OFF in ±5.0s window
+2,isolated_pulse,1784493376.0,1784493376.2,0.20000004768371582,2,46,2,Ph2: Det 2 isolated pulse ON/OFF for 0.200s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784493376.0,1784493376.2,0.20000004768371582,2,17,2,Ph2: Det 2 isolated pulse ON/OFF for 0.200s; Det 17 was completely OFF in ±5.0s window
+2,isolated_pulse,1784493379.9,1784493380.1,0.19999980926513672,2,46,2,Ph2: Det 2 isolated pulse ON/OFF for 0.200s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784493379.9,1784493380.1,0.19999980926513672,2,17,2,Ph2: Det 2 isolated pulse ON/OFF for 0.200s; Det 17 was completely OFF in ±5.0s window
+2,isolated_pulse,1784493382.6,1784493383.4,0.8000001907348633,2,46,2,Ph2: Det 2 isolated pulse ON/OFF for 0.800s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784493382.6,1784493383.4,0.8000001907348633,2,17,2,Ph2: Det 2 isolated pulse ON/OFF for 0.800s; Det 17 was completely OFF in ±5.0s window
+2,isolated_pulse,1784493384.3,1784493384.5,0.20000004768371582,2,46,2,Ph2: Det 2 isolated pulse ON/OFF for 0.200s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784493384.3,1784493384.5,0.20000004768371582,2,17,2,Ph2: Det 2 isolated pulse ON/OFF for 0.200s; Det 17 was completely OFF in ±5.0s window
+2,isolated_pulse,1784493406.3,1784493406.6,0.2999999523162842,46,17,17,Ph2: Det 17 isolated pulse ON/OFF for 0.300s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784493406.3,1784493406.6,0.2999999523162842,2,17,17,Ph2: Det 17 isolated pulse ON/OFF for 0.300s; Det 2 was completely OFF in ±5.0s window
+2,isolated_pulse,1784493412.0,1784493412.1,0.09999990463256836,2,17,2,Ph2: Det 2 isolated pulse ON/OFF for 0.100s; Det 17 was completely OFF in ±5.0s window
+2,extended_disagreement,1784493524.0,1784493553.9,29.90000009536743,46,17,17,Ph2: Det 17 ON / Det 46 OFF for 29.90s (threshold=5.0s)
+2,extended_disagreement,1784493524.0,1784493553.9,29.90000009536743,2,46,2,Ph2: Det 2 ON / Det 46 OFF for 29.90s (threshold=5.0s)
+2,extended_disagreement,1784493862.2,1784493947.4,85.20000004768372,46,17,17,Ph2: Det 17 ON / Det 46 OFF for 85.20s (threshold=5.0s)
+2,extended_disagreement,1784493862.2,1784493947.4,85.20000004768372,2,46,2,Ph2: Det 2 ON / Det 46 OFF for 85.20s (threshold=5.0s)
+2,extended_disagreement,1784493957.1,1784494022.7,65.60000014305115,46,17,17,Ph2: Det 17 ON / Det 46 OFF for 65.60s (threshold=5.0s)
+2,extended_disagreement,1784493957.1,1784493994.4,37.30000019073486,2,46,2,Ph2: Det 2 ON / Det 46 OFF for 37.30s (threshold=5.0s)
+2,extended_disagreement,1784493994.6,1784494022.7,28.100000143051147,2,46,2,Ph2: Det 2 ON / Det 46 OFF for 28.10s (threshold=5.0s)
+2,extended_disagreement,1784494147.0,1784494158.6,11.599999904632568,46,17,17,Ph2: Det 17 ON / Det 46 OFF for 11.60s (threshold=5.0s)
+2,extended_disagreement,1784494152.1,1784494158.6,6.5,2,46,2,Ph2: Det 2 ON / Det 46 OFF for 6.50s (threshold=5.0s)
+2,extended_disagreement,1784494547.0,1784494560.1,13.099999904632568,46,17,17,Ph2: Det 17 ON / Det 46 OFF for 13.10s (threshold=5.0s)
+2,extended_disagreement,1784494547.0,1784494560.1,13.099999904632568,2,46,2,Ph2: Det 2 ON / Det 46 OFF for 13.10s (threshold=5.0s)
+2,isolated_pulse,1784494936.9,1784494937.2,0.2999999523162842,2,46,2,Ph2: Det 2 isolated pulse ON/OFF for 0.300s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784494936.9,1784494937.2,0.2999999523162842,2,17,2,Ph2: Det 2 isolated pulse ON/OFF for 0.300s; Det 17 was completely OFF in ±5.0s window
+2,isolated_pulse,1784494938.1,1784494938.2,0.10000014305114746,2,46,2,Ph2: Det 2 isolated pulse ON/OFF for 0.100s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784494938.1,1784494938.2,0.10000014305114746,2,17,2,Ph2: Det 2 isolated pulse ON/OFF for 0.100s; Det 17 was completely OFF in ±5.0s window
+2,extended_disagreement,1784495204.4,1784495214.9,10.5,46,17,17,Ph2: Det 17 ON / Det 46 OFF for 10.50s (threshold=5.0s)
+2,extended_disagreement,1784495204.4,1784495215.5,11.099999904632568,2,46,2,Ph2: Det 2 ON / Det 46 OFF for 11.10s (threshold=5.0s)
+2,isolated_pulse,1784495417.2,1784495418.1,0.8999998569488525,46,17,17,Ph2: Det 17 isolated pulse ON/OFF for 0.900s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784495417.7,1784495418.7,1.0,2,46,2,Ph2: Det 2 isolated pulse ON/OFF for 1.000s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784495430.1,1784495430.3,0.20000004768371582,2,46,2,Ph2: Det 2 isolated pulse ON/OFF for 0.200s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784495430.1,1784495430.3,0.20000004768371582,2,17,2,Ph2: Det 2 isolated pulse ON/OFF for 0.200s; Det 17 was completely OFF in ±5.0s window
+2,isolated_pulse,1784495435.3,1784495435.7,0.40000009536743164,46,17,17,Ph2: Det 17 isolated pulse ON/OFF for 0.400s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784495435.5,1784495436.2,0.7000000476837158,2,46,2,Ph2: Det 2 isolated pulse ON/OFF for 0.700s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784495577.4,1784495577.8,0.39999985694885254,2,17,2,Ph2: Det 2 isolated pulse ON/OFF for 0.400s; Det 17 was completely OFF in ±5.0s window
+2,isolated_pulse,1784495751.8,1784495752.5,0.7000000476837158,2,46,2,Ph2: Det 2 isolated pulse ON/OFF for 0.700s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784495751.8,1784495752.5,0.7000000476837158,2,17,2,Ph2: Det 2 isolated pulse ON/OFF for 0.700s; Det 17 was completely OFF in ±5.0s window
+2,isolated_pulse,1784495771.0,1784495771.1,0.09999990463256836,2,46,2,Ph2: Det 2 isolated pulse ON/OFF for 0.100s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784495771.0,1784495771.1,0.09999990463256836,2,17,2,Ph2: Det 2 isolated pulse ON/OFF for 0.100s; Det 17 was completely OFF in ±5.0s window
+2,isolated_pulse,1784496310.9,1784496311.1,0.19999980926513672,2,46,2,Ph2: Det 2 isolated pulse ON/OFF for 0.200s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784496310.9,1784496311.1,0.19999980926513672,2,17,2,Ph2: Det 2 isolated pulse ON/OFF for 0.200s; Det 17 was completely OFF in ±5.0s window
+2,isolated_pulse,1784496319.0,1784496319.2,0.20000004768371582,2,46,2,Ph2: Det 2 isolated pulse ON/OFF for 0.200s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784496319.0,1784496319.2,0.20000004768371582,2,17,2,Ph2: Det 2 isolated pulse ON/OFF for 0.200s; Det 17 was completely OFF in ±5.0s window
+2,isolated_pulse,1784496321.0,1784496321.5,0.5,2,46,2,Ph2: Det 2 isolated pulse ON/OFF for 0.500s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784496321.0,1784496321.5,0.5,2,17,2,Ph2: Det 2 isolated pulse ON/OFF for 0.500s; Det 17 was completely OFF in ±5.0s window
+2,isolated_pulse,1784496595.9,1784496596.7,0.7999999523162842,46,17,17,Ph2: Det 17 isolated pulse ON/OFF for 0.800s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784496597.0,1784496597.4,0.40000009536743164,46,17,17,Ph2: Det 17 isolated pulse ON/OFF for 0.400s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784496597.3,1784496597.5,0.20000004768371582,2,46,2,Ph2: Det 2 isolated pulse ON/OFF for 0.200s; Det 46 was completely OFF in ±5.0s window
+2,extended_disagreement,1784496659.0,1784496666.1,7.099999904632568,46,17,17,Ph2: Det 17 ON / Det 46 OFF for 7.10s (threshold=5.0s)
+2,extended_disagreement,1784496659.0,1784496666.1,7.099999904632568,2,46,2,Ph2: Det 2 ON / Det 46 OFF for 7.10s (threshold=5.0s)
+2,isolated_pulse,1784496972.8,1784496973.2,0.40000009536743164,2,46,2,Ph2: Det 2 isolated pulse ON/OFF for 0.400s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784496972.8,1784496973.2,0.40000009536743164,2,17,2,Ph2: Det 2 isolated pulse ON/OFF for 0.400s; Det 17 was completely OFF in ±5.0s window
+2,isolated_pulse,1784496975.8,1784496976.1,0.2999999523162842,2,46,2,Ph2: Det 2 isolated pulse ON/OFF for 0.300s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784496975.8,1784496976.1,0.2999999523162842,2,17,2,Ph2: Det 2 isolated pulse ON/OFF for 0.300s; Det 17 was completely OFF in ±5.0s window
+2,isolated_pulse,1784496978.3,1784496979.0,0.7000000476837158,2,46,2,Ph2: Det 2 isolated pulse ON/OFF for 0.700s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784496978.3,1784496979.0,0.7000000476837158,2,17,2,Ph2: Det 2 isolated pulse ON/OFF for 0.700s; Det 17 was completely OFF in ±5.0s window
+2,extended_disagreement,1784497046.4,1784497054.4,8.0,46,17,17,Ph2: Det 17 ON / Det 46 OFF for 8.00s (threshold=5.0s)
+2,extended_disagreement,1784497046.4,1784497069.8,23.399999856948853,2,46,2,Ph2: Det 2 ON / Det 46 OFF for 23.40s (threshold=5.0s)
+2,isolated_pulse,1784497055.5,1784497056.7,1.2000000476837158,46,17,17,Ph2: Det 17 isolated pulse ON/OFF for 1.200s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784497057.0,1784497057.9,0.9000000953674316,46,17,17,Ph2: Det 17 isolated pulse ON/OFF for 0.900s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784497058.6,1784497059.8,1.2000000476837158,46,17,17,Ph2: Det 17 isolated pulse ON/OFF for 1.200s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784497061.0,1784497061.3,0.2999999523162842,46,17,17,Ph2: Det 17 isolated pulse ON/OFF for 0.300s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784497062.1,1784497063.4,1.3000001907348633,46,17,17,Ph2: Det 17 isolated pulse ON/OFF for 1.300s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784497063.7,1784497067.5,3.799999952316284,46,17,17,Ph2: Det 17 isolated pulse ON/OFF for 3.800s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784497069.8,1784497071.8,2.0,46,17,17,Ph2: Det 17 isolated pulse ON/OFF for 2.000s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784497070.7,1784497071.6,0.8999998569488525,2,46,2,Ph2: Det 2 isolated pulse ON/OFF for 0.900s; Det 46 was completely OFF in ±5.0s window
+2,isolated_pulse,1784497071.8,1784497072.0,0.20000004768371582,2,46,2,Ph2: Det 2 isolated pulse ON/OFF for 0.200s; Det 46 was completely OFF in ±5.0s window
+2,extended_disagreement,1784497898.7,1784497906.1,7.3999998569488525,2,46,46,Ph2: Det 46 ON / Det 2 OFF for 7.40s (threshold=5.0s)
+2,extended_disagreement,1784497973.0,1784497981.4,8.400000095367432,46,17,17,Ph2: Det 17 ON / Det 46 OFF for 8.40s (threshold=5.0s)
+2,extended_disagreement,1784497973.0,1784497979.6,6.599999904632568,2,46,2,Ph2: Det 2 ON / Det 46 OFF for 6.60s (threshold=5.0s)
+3,extended_disagreement,1784491201.6,1784491295.7,94.10000014305115,3,41,3,Ph3: Det 3 ON / Det 41 OFF for 94.10s (threshold=5.0s)
+3,extended_disagreement,1784491201.6,1784491295.7,94.10000014305115,3,30,3,Ph3: Det 3 ON / Det 30 OFF for 94.10s (threshold=5.0s)
+3,isolated_pulse,1784491297.2,1784491297.8,0.5999999046325684,3,30,3,Ph3: Det 3 isolated pulse ON/OFF for 0.600s; Det 30 was completely OFF in ±5.0s window
+3,extended_disagreement,1784491438.8,1784491444.4,5.6000001430511475,3,41,3,Ph3: Det 3 ON / Det 41 OFF for 5.60s (threshold=5.0s)
+3,extended_disagreement,1784491438.8,1784491444.4,5.6000001430511475,3,30,3,Ph3: Det 3 ON / Det 30 OFF for 5.60s (threshold=5.0s)
+3,extended_disagreement,1784491448.2,1784491472.1,23.899999856948853,3,41,3,Ph3: Det 3 ON / Det 41 OFF for 23.90s (threshold=5.0s)
+3,extended_disagreement,1784491448.2,1784491455.0,6.799999952316284,3,30,3,Ph3: Det 3 ON / Det 30 OFF for 6.80s (threshold=5.0s)
+3,isolated_pulse,1784491455.0,1784491455.8,0.7999999523162842,41,30,30,Ph3: Det 30 isolated pulse ON/OFF for 0.800s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784491456.2,1784491458.6,2.3999998569488525,41,30,30,Ph3: Det 30 isolated pulse ON/OFF for 2.400s; Det 41 was completely OFF in ±5.0s window
+3,extended_disagreement,1784491458.6,1784491465.0,6.400000095367432,3,30,3,Ph3: Det 3 ON / Det 30 OFF for 6.40s (threshold=5.0s)
+3,isolated_pulse,1784491465.0,1784491466.6,1.5999999046325684,41,30,30,Ph3: Det 30 isolated pulse ON/OFF for 1.600s; Det 41 was completely OFF in ±5.0s window
+3,extended_disagreement,1784491466.6,1784491472.1,5.5,3,30,3,Ph3: Det 3 ON / Det 30 OFF for 5.50s (threshold=5.0s)
+3,isolated_pulse,1784491490.7,1784491492.8,2.0999999046325684,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 2.100s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784491490.7,1784491492.8,2.0999999046325684,3,30,3,Ph3: Det 3 isolated pulse ON/OFF for 2.100s; Det 30 was completely OFF in ±5.0s window
+3,extended_disagreement,1784491493.6,1784491503.3,9.700000047683716,3,41,3,Ph3: Det 3 ON / Det 41 OFF for 9.70s (threshold=5.0s)
+3,extended_disagreement,1784491493.6,1784491503.3,9.700000047683716,3,30,3,Ph3: Det 3 ON / Det 30 OFF for 9.70s (threshold=5.0s)
+3,isolated_pulse,1784491506.6,1784491506.8,0.20000004768371582,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 0.200s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784491506.6,1784491506.8,0.20000004768371582,3,30,3,Ph3: Det 3 isolated pulse ON/OFF for 0.200s; Det 30 was completely OFF in ±5.0s window
+3,isolated_pulse,1784491523.2,1784491523.4,0.20000004768371582,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 0.200s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784491523.2,1784491523.4,0.20000004768371582,3,30,3,Ph3: Det 3 isolated pulse ON/OFF for 0.200s; Det 30 was completely OFF in ±5.0s window
+3,extended_disagreement,1784491526.3,1784491532.3,6.0,3,41,3,Ph3: Det 3 ON / Det 41 OFF for 6.00s (threshold=5.0s)
+3,extended_disagreement,1784491526.3,1784491532.3,6.0,3,30,3,Ph3: Det 3 ON / Det 30 OFF for 6.00s (threshold=5.0s)
+3,isolated_pulse,1784491570.6,1784491571.0,0.40000009536743164,41,30,30,Ph3: Det 30 isolated pulse ON/OFF for 0.400s; Det 41 was completely OFF in ±5.0s window
+3,extended_disagreement,1784491571.6,1784491600.9,29.300000190734863,3,41,3,Ph3: Det 3 ON / Det 41 OFF for 29.30s (threshold=5.0s)
+3,isolated_pulse,1784491573.4,1784491575.0,1.5999999046325684,41,30,30,Ph3: Det 30 isolated pulse ON/OFF for 1.600s; Det 41 was completely OFF in ±5.0s window
+3,extended_disagreement,1784491575.0,1784491596.2,21.200000047683716,3,30,3,Ph3: Det 3 ON / Det 30 OFF for 21.20s (threshold=5.0s)
+3,isolated_pulse,1784491596.2,1784491598.6,2.3999998569488525,41,30,30,Ph3: Det 30 isolated pulse ON/OFF for 2.400s; Det 41 was completely OFF in ±5.0s window
+3,extended_disagreement,1784491778.2,1784491783.4,5.200000047683716,3,30,3,Ph3: Det 3 ON / Det 30 OFF for 5.20s (threshold=5.0s)
+3,extended_disagreement,1784491778.5,1784491785.3,6.799999952316284,3,41,3,Ph3: Det 3 ON / Det 41 OFF for 6.80s (threshold=5.0s)
+3,isolated_pulse,1784492013.3,1784492016.6,3.299999952316284,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 3.300s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784492013.3,1784492016.6,3.299999952316284,3,30,3,Ph3: Det 3 isolated pulse ON/OFF for 3.300s; Det 30 was completely OFF in ±5.0s window
+3,isolated_pulse,1784492024.5,1784492024.8,0.2999999523162842,41,30,30,Ph3: Det 30 isolated pulse ON/OFF for 0.300s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784492025.3,1784492025.5,0.20000004768371582,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 0.200s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784492027.5,1784492029.7,2.200000047683716,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 2.200s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784492027.7,1784492028.9,1.2000000476837158,41,30,30,Ph3: Det 30 isolated pulse ON/OFF for 1.200s; Det 41 was completely OFF in ±5.0s window
+3,extended_disagreement,1784492717.0,1784492724.9,7.900000095367432,41,30,30,Ph3: Det 30 ON / Det 41 OFF for 7.90s (threshold=5.0s)
+3,isolated_pulse,1784492722.2,1784492724.8,2.5999999046325684,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 2.600s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784492725.0,1784492726.3,1.2999999523162842,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 1.300s; Det 41 was completely OFF in ±5.0s window
+3,extended_disagreement,1784492725.3,1784492735.0,9.700000047683716,41,30,30,Ph3: Det 30 ON / Det 41 OFF for 9.70s (threshold=5.0s)
+3,isolated_pulse,1784492726.5,1784492727.2,0.7000000476837158,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 0.700s; Det 41 was completely OFF in ±5.0s window
+3,extended_disagreement,1784492727.2,1784492735.0,7.799999952316284,3,30,30,Ph3: Det 30 ON / Det 3 OFF for 7.80s (threshold=5.0s)
+3,isolated_pulse,1784492879.8,1784492882.9,3.1000001430511475,41,30,30,Ph3: Det 30 isolated pulse ON/OFF for 3.100s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784492881.3,1784492883.7,2.4000000953674316,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 2.400s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784493206.9,1784493211.4,4.5,3,30,3,Ph3: Det 3 isolated pulse ON/OFF for 4.500s; Det 30 was completely OFF in ±5.0s window
+3,isolated_pulse,1784493208.3,1784493209.3,1.0,41,30,41,Ph3: Det 41 isolated pulse ON/OFF for 1.000s; Det 30 was completely OFF in ±5.0s window
+3,isolated_pulse,1784493297.1,1784493297.9,0.8000001907348633,41,30,30,Ph3: Det 30 isolated pulse ON/OFF for 0.800s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784493298.3,1784493298.7,0.40000009536743164,41,30,30,Ph3: Det 30 isolated pulse ON/OFF for 0.400s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784493298.4,1784493298.8,0.39999985694885254,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 0.400s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784493300.1,1784493301.6,1.5,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 1.500s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784493301.8,1784493302.5,0.7000000476837158,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 0.700s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784493302.3,1784493304.3,2.0,41,30,30,Ph3: Det 30 isolated pulse ON/OFF for 2.000s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784493303.2,1784493305.2,2.0,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 2.000s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784493370.8,1784493372.2,1.4000000953674316,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 1.400s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784493370.8,1784493372.2,1.4000000953674316,3,30,3,Ph3: Det 3 isolated pulse ON/OFF for 1.400s; Det 30 was completely OFF in ±5.0s window
+3,isolated_pulse,1784493383.1,1784493383.4,0.3000001907348633,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 0.300s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784493383.1,1784493383.4,0.3000001907348633,3,30,3,Ph3: Det 3 isolated pulse ON/OFF for 0.300s; Det 30 was completely OFF in ±5.0s window
+3,isolated_pulse,1784493539.1,1784493542.5,3.4000000953674316,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 3.400s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784493539.1,1784493542.5,3.4000000953674316,3,30,3,Ph3: Det 3 isolated pulse ON/OFF for 3.400s; Det 30 was completely OFF in ±5.0s window
+3,isolated_pulse,1784493601.2,1784493602.0,0.7999999523162842,41,30,30,Ph3: Det 30 isolated pulse ON/OFF for 0.800s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784493602.8,1784493605.8,3.0,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 3.000s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784493603.2,1784493604.8,1.5999999046325684,41,30,30,Ph3: Det 30 isolated pulse ON/OFF for 1.600s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784493675.2,1784493678.0,2.799999952316284,41,30,30,Ph3: Det 30 isolated pulse ON/OFF for 2.800s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784493676.5,1784493678.8,2.299999952316284,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 2.300s; Det 41 was completely OFF in ±5.0s window
+3,extended_disagreement,1784493698.6,1784493707.2,8.600000143051147,41,30,30,Ph3: Det 30 ON / Det 41 OFF for 8.60s (threshold=5.0s)
+3,extended_disagreement,1784493700.9,1784493708.6,7.699999809265137,3,41,3,Ph3: Det 3 ON / Det 41 OFF for 7.70s (threshold=5.0s)
+3,isolated_pulse,1784493890.8,1784493893.9,3.1000001430511475,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 3.100s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784493890.8,1784493893.9,3.1000001430511475,3,30,3,Ph3: Det 3 isolated pulse ON/OFF for 3.100s; Det 30 was completely OFF in ±5.0s window
+3,isolated_pulse,1784493894.5,1784493894.6,0.09999990463256836,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 0.100s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784493894.5,1784493894.6,0.09999990463256836,3,30,3,Ph3: Det 3 isolated pulse ON/OFF for 0.100s; Det 30 was completely OFF in ±5.0s window
+3,isolated_pulse,1784493979.9,1784493980.5,0.5999999046325684,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 0.600s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784493979.9,1784493980.5,0.5999999046325684,3,30,3,Ph3: Det 3 isolated pulse ON/OFF for 0.600s; Det 30 was completely OFF in ±5.0s window
+3,isolated_pulse,1784494034.5,1784494035.3,0.7999999523162842,41,30,30,Ph3: Det 30 isolated pulse ON/OFF for 0.800s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784494035.8,1784494036.8,1.0,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 1.000s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784494037.3,1784494037.7,0.40000009536743164,41,30,30,Ph3: Det 30 isolated pulse ON/OFF for 0.400s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784494037.3,1784494038.5,1.2000000476837158,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 1.200s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784494070.9,1784494072.1,1.1999998092651367,41,30,30,Ph3: Det 30 isolated pulse ON/OFF for 1.200s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784494072.6,1784494073.6,1.0,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 1.000s; Det 41 was completely OFF in ±5.0s window
+3,extended_disagreement,1784494106.5,1784494150.0,43.5,41,30,30,Ph3: Det 30 ON / Det 41 OFF for 43.50s (threshold=5.0s)
+3,extended_disagreement,1784494109.2,1784494150.0,40.799999952316284,3,41,3,Ph3: Det 3 ON / Det 41 OFF for 40.80s (threshold=5.0s)
+3,extended_disagreement,1784494151.7,1784494160.0,8.299999952316284,41,30,41,Ph3: Det 41 ON / Det 30 OFF for 8.30s (threshold=5.0s)
+3,extended_disagreement,1784494153.4,1784494160.0,6.599999904632568,3,41,41,Ph3: Det 41 ON / Det 3 OFF for 6.60s (threshold=5.0s)
+3,isolated_pulse,1784494166.7,1784494167.4,0.7000000476837158,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 0.700s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784494166.7,1784494167.4,0.7000000476837158,3,30,3,Ph3: Det 3 isolated pulse ON/OFF for 0.700s; Det 30 was completely OFF in ±5.0s window
+3,isolated_pulse,1784494182.5,1784494186.0,3.5,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 3.500s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784494182.5,1784494186.0,3.5,3,30,3,Ph3: Det 3 isolated pulse ON/OFF for 3.500s; Det 30 was completely OFF in ±5.0s window
+3,extended_disagreement,1784494218.7,1784494224.1,5.3999998569488525,3,41,3,Ph3: Det 3 ON / Det 41 OFF for 5.40s (threshold=5.0s)
+3,extended_disagreement,1784494218.7,1784494224.1,5.3999998569488525,3,30,3,Ph3: Det 3 ON / Det 30 OFF for 5.40s (threshold=5.0s)
+3,isolated_pulse,1784494246.2,1784494248.8,2.5999999046325684,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 2.600s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784494246.2,1784494248.8,2.5999999046325684,3,30,3,Ph3: Det 3 isolated pulse ON/OFF for 2.600s; Det 30 was completely OFF in ±5.0s window
+3,extended_disagreement,1784494309.4,1784494316.4,7.0,41,30,30,Ph3: Det 30 ON / Det 41 OFF for 7.00s (threshold=5.0s)
+3,extended_disagreement,1784494352.2,1784494376.4,24.200000047683716,41,30,30,Ph3: Det 30 ON / Det 41 OFF for 24.20s (threshold=5.0s)
+3,extended_disagreement,1784494354.3,1784494376.4,22.100000143051147,3,41,3,Ph3: Det 3 ON / Det 41 OFF for 22.10s (threshold=5.0s)
+3,extended_disagreement,1784494377.5,1784494417.6,40.09999990463257,41,30,30,Ph3: Det 30 ON / Det 41 OFF for 40.10s (threshold=5.0s)
+3,extended_disagreement,1784494377.5,1784494417.6,40.09999990463257,3,41,3,Ph3: Det 3 ON / Det 41 OFF for 40.10s (threshold=5.0s)
+3,isolated_pulse,1784494455.4,1784494457.2,1.7999999523162842,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 1.800s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784494455.4,1784494457.2,1.7999999523162842,3,30,3,Ph3: Det 3 isolated pulse ON/OFF for 1.800s; Det 30 was completely OFF in ±5.0s window
+3,isolated_pulse,1784494458.8,1784494459.5,0.7000000476837158,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 0.700s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784494458.8,1784494459.5,0.7000000476837158,3,30,3,Ph3: Det 3 isolated pulse ON/OFF for 0.700s; Det 30 was completely OFF in ±5.0s window
+3,isolated_pulse,1784494461.4,1784494465.0,3.5999999046325684,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 3.600s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784494461.4,1784494465.0,3.5999999046325684,3,30,3,Ph3: Det 3 isolated pulse ON/OFF for 3.600s; Det 30 was completely OFF in ±5.0s window
+3,isolated_pulse,1784494767.5,1784494770.8,3.299999952316284,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 3.300s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784494767.5,1784494770.8,3.299999952316284,3,30,3,Ph3: Det 3 isolated pulse ON/OFF for 3.300s; Det 30 was completely OFF in ±5.0s window
+3,isolated_pulse,1784494815.5,1784494819.2,3.700000047683716,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 3.700s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784494815.5,1784494819.2,3.700000047683716,3,30,3,Ph3: Det 3 isolated pulse ON/OFF for 3.700s; Det 30 was completely OFF in ±5.0s window
+3,extended_disagreement,1784494968.2,1784495000.2,32.0,41,30,41,Ph3: Det 41 ON / Det 30 OFF for 32.00s (threshold=5.0s)
+3,extended_disagreement,1784494968.2,1784495000.2,32.0,3,30,3,Ph3: Det 3 ON / Det 30 OFF for 32.00s (threshold=5.0s)
+3,extended_disagreement,1784495058.8,1784495137.4,78.60000014305115,41,30,30,Ph3: Det 30 ON / Det 41 OFF for 78.60s (threshold=5.0s)
+3,extended_disagreement,1784495058.8,1784495137.4,78.60000014305115,3,41,3,Ph3: Det 3 ON / Det 41 OFF for 78.60s (threshold=5.0s)
+3,extended_disagreement,1784495211.7,1784495300.2,88.5,41,30,30,Ph3: Det 30 ON / Det 41 OFF for 88.50s (threshold=5.0s)
+3,extended_disagreement,1784495212.8,1784495300.2,87.40000009536743,3,41,3,Ph3: Det 3 ON / Det 41 OFF for 87.40s (threshold=5.0s)
+3,isolated_pulse,1784495317.6,1784495317.9,0.3000001907348633,41,30,41,Ph3: Det 41 isolated pulse ON/OFF for 0.300s; Det 30 was completely OFF in ±5.0s window
+3,isolated_pulse,1784495317.6,1784495317.9,0.3000001907348633,3,41,41,Ph3: Det 41 isolated pulse ON/OFF for 0.300s; Det 3 was completely OFF in ±5.0s window
+3,isolated_pulse,1784495452.1,1784495453.0,0.9000000953674316,41,30,30,Ph3: Det 30 isolated pulse ON/OFF for 0.900s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784495452.1,1784495453.0,0.9000000953674316,3,30,30,Ph3: Det 30 isolated pulse ON/OFF for 0.900s; Det 3 was completely OFF in ±5.0s window
+3,isolated_pulse,1784495507.8,1784495508.2,0.40000009536743164,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 0.400s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784495507.8,1784495508.2,0.40000009536743164,3,30,3,Ph3: Det 3 isolated pulse ON/OFF for 0.400s; Det 30 was completely OFF in ±5.0s window
+3,isolated_pulse,1784495625.1,1784495626.6,1.5,41,30,41,Ph3: Det 41 isolated pulse ON/OFF for 1.500s; Det 30 was completely OFF in ±5.0s window
+3,isolated_pulse,1784495625.1,1784495626.6,1.5,3,41,41,Ph3: Det 41 isolated pulse ON/OFF for 1.500s; Det 3 was completely OFF in ±5.0s window
+3,isolated_pulse,1784495994.1,1784495994.3,0.20000004768371582,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 0.200s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784495994.1,1784495994.3,0.20000004768371582,3,30,3,Ph3: Det 3 isolated pulse ON/OFF for 0.200s; Det 30 was completely OFF in ±5.0s window
+3,isolated_pulse,1784496557.6,1784496558.6,1.0,41,30,30,Ph3: Det 30 isolated pulse ON/OFF for 1.000s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784496557.6,1784496558.6,1.0,3,30,30,Ph3: Det 30 isolated pulse ON/OFF for 1.000s; Det 3 was completely OFF in ±5.0s window
+3,extended_disagreement,1784496636.9,1784496644.2,7.299999952316284,41,30,41,Ph3: Det 41 ON / Det 30 OFF for 7.30s (threshold=5.0s)
+3,extended_disagreement,1784496639.0,1784496645.1,6.099999904632568,3,41,41,Ph3: Det 41 ON / Det 3 OFF for 6.10s (threshold=5.0s)
+3,extended_disagreement,1784496756.5,1784496762.7,6.200000047683716,3,41,3,Ph3: Det 3 ON / Det 41 OFF for 6.20s (threshold=5.0s)
+3,isolated_pulse,1784496925.8,1784496926.0,0.20000004768371582,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 0.200s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784496925.8,1784496926.0,0.20000004768371582,3,30,3,Ph3: Det 3 isolated pulse ON/OFF for 0.200s; Det 30 was completely OFF in ±5.0s window
+3,extended_disagreement,1784497130.7,1784497191.9,61.200000047683716,41,30,30,Ph3: Det 30 ON / Det 41 OFF for 61.20s (threshold=5.0s)
+3,extended_disagreement,1784497132.1,1784497191.9,59.80000019073486,3,41,3,Ph3: Det 3 ON / Det 41 OFF for 59.80s (threshold=5.0s)
+3,isolated_pulse,1784497204.8,1784497205.6,0.7999999523162842,41,30,41,Ph3: Det 41 isolated pulse ON/OFF for 0.800s; Det 30 was completely OFF in ±5.0s window
+3,isolated_pulse,1784497718.3,1784497721.5,3.200000047683716,41,30,41,Ph3: Det 41 isolated pulse ON/OFF for 3.200s; Det 30 was completely OFF in ±5.0s window
+3,isolated_pulse,1784497718.3,1784497721.5,3.200000047683716,3,41,41,Ph3: Det 41 isolated pulse ON/OFF for 3.200s; Det 3 was completely OFF in ±5.0s window
+3,extended_disagreement,1784497755.5,1784497797.1,41.59999990463257,41,30,30,Ph3: Det 30 ON / Det 41 OFF for 41.60s (threshold=5.0s)
+3,extended_disagreement,1784497755.8,1784497762.1,6.299999952316284,3,41,3,Ph3: Det 3 ON / Det 41 OFF for 6.30s (threshold=5.0s)
+3,extended_disagreement,1784497762.3,1784497767.4,5.1000001430511475,3,41,3,Ph3: Det 3 ON / Det 41 OFF for 5.10s (threshold=5.0s)
+3,isolated_pulse,1784497768.5,1784497769.1,0.5999999046325684,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 0.600s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784497772.0,1784497773.2,1.2000000476837158,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 1.200s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784497773.6,1784497773.8,0.20000004768371582,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 0.200s; Det 41 was completely OFF in ±5.0s window
+3,extended_disagreement,1784497773.8,1784497779.1,5.299999952316284,3,30,30,Ph3: Det 30 ON / Det 3 OFF for 5.30s (threshold=5.0s)
+3,isolated_pulse,1784497779.1,1784497781.1,2.0,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 2.000s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784497781.6,1784497782.0,0.40000009536743164,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 0.400s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784497782.8,1784497783.3,0.5,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 0.500s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784497784.1,1784497784.5,0.40000009536743164,3,41,3,Ph3: Det 3 isolated pulse ON/OFF for 0.400s; Det 41 was completely OFF in ±5.0s window
+3,extended_disagreement,1784497784.5,1784497797.1,12.599999904632568,3,30,30,Ph3: Det 30 ON / Det 3 OFF for 12.60s (threshold=5.0s)
+3,extended_disagreement,1784497949.5,1784497964.2,14.700000047683716,41,30,41,Ph3: Det 41 ON / Det 30 OFF for 14.70s (threshold=5.0s)
+3,extended_disagreement,1784497951.9,1784497964.2,12.299999952316284,3,41,41,Ph3: Det 41 ON / Det 3 OFF for 12.30s (threshold=5.0s)
+3,extended_disagreement,1784497980.1,1784497986.8,6.700000047683716,3,41,3,Ph3: Det 3 ON / Det 41 OFF for 6.70s (threshold=5.0s)
+3,isolated_pulse,1784497982.8,1784497984.2,1.4000000953674316,41,30,30,Ph3: Det 30 isolated pulse ON/OFF for 1.400s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784497986.5,1784497987.9,1.4000000953674316,41,30,30,Ph3: Det 30 isolated pulse ON/OFF for 1.400s; Det 41 was completely OFF in ±5.0s window
+3,extended_disagreement,1784497987.8,1784497993.9,6.1000001430511475,3,41,3,Ph3: Det 3 ON / Det 41 OFF for 6.10s (threshold=5.0s)
+3,isolated_pulse,1784497988.9,1784497990.2,1.2999999523162842,41,30,30,Ph3: Det 30 isolated pulse ON/OFF for 1.300s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784497990.5,1784497991.2,0.7000000476837158,41,30,30,Ph3: Det 30 isolated pulse ON/OFF for 0.700s; Det 41 was completely OFF in ±5.0s window
+3,extended_disagreement,1784498000.3,1784498008.6,8.299999952316284,3,41,3,Ph3: Det 3 ON / Det 41 OFF for 8.30s (threshold=5.0s)
+3,isolated_pulse,1784498002.2,1784498002.5,0.2999999523162842,41,30,30,Ph3: Det 30 isolated pulse ON/OFF for 0.300s; Det 41 was completely OFF in ±5.0s window
+3,isolated_pulse,1784498004.9,1784498006.2,1.2999999523162842,41,30,30,Ph3: Det 30 isolated pulse ON/OFF for 1.300s; Det 41 was completely OFF in ±5.0s window
+3,extended_disagreement,1784498370.2,1784498377.3,7.099999904632568,41,30,41,Ph3: Det 41 ON / Det 30 OFF for 7.10s (threshold=5.0s)
+3,extended_disagreement,1784498370.2,1784498376.7,6.5,3,30,3,Ph3: Det 3 ON / Det 30 OFF for 6.50s (threshold=5.0s)
+4,extended_disagreement,1784491773.9,1784491853.6,79.69999980926514,39,22,39,Ph4: Det 39 ON / Det 22 OFF for 79.70s (threshold=5.0s)
+4,extended_disagreement,1784491773.9,1784491853.6,79.69999980926514,4,39,39,Ph4: Det 39 ON / Det 4 OFF for 79.70s (threshold=5.0s)
+4,isolated_pulse,1784492068.1,1784492070.9,2.8000001907348633,39,22,22,Ph4: Det 22 isolated pulse ON/OFF for 2.800s; Det 39 was completely OFF in ±5.0s window
+4,isolated_pulse,1784492070.0,1784492072.4,2.4000000953674316,4,39,4,Ph4: Det 4 isolated pulse ON/OFF for 2.400s; Det 39 was completely OFF in ±5.0s window
+4,extended_disagreement,1784492121.7,1784492245.8,124.09999990463257,39,22,39,Ph4: Det 39 ON / Det 22 OFF for 124.10s (threshold=5.0s)
+4,extended_disagreement,1784492121.7,1784492245.8,124.09999990463257,4,39,39,Ph4: Det 39 ON / Det 4 OFF for 124.10s (threshold=5.0s)
+4,isolated_pulse,1784492450.2,1784492450.8,0.5999999046325684,39,22,39,Ph4: Det 39 isolated pulse ON/OFF for 0.600s; Det 22 was completely OFF in ±5.0s window
+4,isolated_pulse,1784492450.2,1784492450.8,0.5999999046325684,4,39,39,Ph4: Det 39 isolated pulse ON/OFF for 0.600s; Det 4 was completely OFF in ±5.0s window
+4,isolated_pulse,1784493004.3,1784493006.6,2.299999952316284,39,22,39,Ph4: Det 39 isolated pulse ON/OFF for 2.300s; Det 22 was completely OFF in ±5.0s window
+4,isolated_pulse,1784493004.3,1784493006.6,2.299999952316284,4,39,39,Ph4: Det 39 isolated pulse ON/OFF for 2.300s; Det 4 was completely OFF in ±5.0s window
+4,isolated_pulse,1784493158.1,1784493158.3,0.20000004768371582,4,22,4,Ph4: Det 4 isolated pulse ON/OFF for 0.200s; Det 22 was completely OFF in ±5.0s window
+4,isolated_pulse,1784493158.1,1784493158.3,0.20000004768371582,4,39,4,Ph4: Det 4 isolated pulse ON/OFF for 0.200s; Det 39 was completely OFF in ±5.0s window
+4,isolated_pulse,1784493217.4,1784493218.4,1.0,39,22,39,Ph4: Det 39 isolated pulse ON/OFF for 1.000s; Det 22 was completely OFF in ±5.0s window
+4,isolated_pulse,1784493217.4,1784493218.4,1.0,4,39,39,Ph4: Det 39 isolated pulse ON/OFF for 1.000s; Det 4 was completely OFF in ±5.0s window
+4,extended_disagreement,1784493471.3,1784493576.7,105.40000009536743,39,22,39,Ph4: Det 39 ON / Det 22 OFF for 105.40s (threshold=5.0s)
+4,extended_disagreement,1784493471.3,1784493576.7,105.40000009536743,4,39,39,Ph4: Det 39 ON / Det 4 OFF for 105.40s (threshold=5.0s)
+4,extended_disagreement,1784494041.3,1784494049.8,8.5,4,39,4,Ph4: Det 4 ON / Det 39 OFF for 8.50s (threshold=5.0s)
+4,extended_disagreement,1784494042.5,1784494049.8,7.299999952316284,4,22,4,Ph4: Det 4 ON / Det 22 OFF for 7.30s (threshold=5.0s)
+4,isolated_pulse,1784494159.3,1784494160.4,1.1000001430511475,4,39,39,Ph4: Det 39 isolated pulse ON/OFF for 1.100s; Det 4 was completely OFF in ±5.0s window
+4,isolated_pulse,1784494160.1,1784494160.5,0.40000009536743164,4,22,22,Ph4: Det 22 isolated pulse ON/OFF for 0.400s; Det 4 was completely OFF in ±5.0s window
+4,isolated_pulse,1784494615.0,1784494615.4,0.40000009536743164,4,22,22,Ph4: Det 22 isolated pulse ON/OFF for 0.400s; Det 4 was completely OFF in ±5.0s window
+4,extended_disagreement,1784494754.0,1784494759.1,5.099999904632568,39,22,39,Ph4: Det 39 ON / Det 22 OFF for 5.10s (threshold=5.0s)
+4,extended_disagreement,1784494754.0,1784494759.1,5.099999904632568,4,39,39,Ph4: Det 39 ON / Det 4 OFF for 5.10s (threshold=5.0s)
+4,extended_disagreement,1784494818.3,1784494823.4,5.1000001430511475,39,22,39,Ph4: Det 39 ON / Det 22 OFF for 5.10s (threshold=5.0s)
+4,extended_disagreement,1784494818.3,1784494823.4,5.1000001430511475,4,39,39,Ph4: Det 39 ON / Det 4 OFF for 5.10s (threshold=5.0s)
+4,isolated_pulse,1784495134.5,1784495135.4,0.9000000953674316,39,22,39,Ph4: Det 39 isolated pulse ON/OFF for 0.900s; Det 22 was completely OFF in ±5.0s window
+4,isolated_pulse,1784495134.5,1784495135.4,0.9000000953674316,4,39,39,Ph4: Det 39 isolated pulse ON/OFF for 0.900s; Det 4 was completely OFF in ±5.0s window
+4,isolated_pulse,1784495135.6,1784495135.8,0.20000004768371582,39,22,39,Ph4: Det 39 isolated pulse ON/OFF for 0.200s; Det 22 was completely OFF in ±5.0s window
+4,isolated_pulse,1784495135.6,1784495135.8,0.20000004768371582,4,39,39,Ph4: Det 39 isolated pulse ON/OFF for 0.200s; Det 4 was completely OFF in ±5.0s window
+4,isolated_pulse,1784495145.4,1784495145.7,0.2999999523162842,39,22,22,Ph4: Det 22 isolated pulse ON/OFF for 0.300s; Det 39 was completely OFF in ±5.0s window
+4,isolated_pulse,1784495145.4,1784495145.7,0.2999999523162842,4,22,22,Ph4: Det 22 isolated pulse ON/OFF for 0.300s; Det 4 was completely OFF in ±5.0s window
+4,extended_disagreement,1784495157.4,1784495170.9,13.5,39,22,39,Ph4: Det 39 ON / Det 22 OFF for 13.50s (threshold=5.0s)
+4,extended_disagreement,1784495157.4,1784495171.6,14.199999809265137,4,39,39,Ph4: Det 39 ON / Det 4 OFF for 14.20s (threshold=5.0s)
+4,extended_disagreement,1784495174.6,1784495188.4,13.800000190734863,39,22,39,Ph4: Det 39 ON / Det 22 OFF for 13.80s (threshold=5.0s)
+4,extended_disagreement,1784495177.4,1784495188.9,11.5,4,39,39,Ph4: Det 39 ON / Det 4 OFF for 11.50s (threshold=5.0s)
+4,extended_disagreement,1784495192.6,1784495287.1,94.5,39,22,39,Ph4: Det 39 ON / Det 22 OFF for 94.50s (threshold=5.0s)
+4,extended_disagreement,1784495194.1,1784495287.1,93.0,4,39,39,Ph4: Det 39 ON / Det 4 OFF for 93.00s (threshold=5.0s)
+4,extended_disagreement,1784495298.7,1784495415.4,116.70000004768372,39,22,39,Ph4: Det 39 ON / Det 22 OFF for 116.70s (threshold=5.0s)
+4,extended_disagreement,1784495298.7,1784495415.4,116.70000004768372,4,39,39,Ph4: Det 39 ON / Det 4 OFF for 116.70s (threshold=5.0s)
+4,extended_disagreement,1784495724.3,1784495737.9,13.600000143051147,39,22,39,Ph4: Det 39 ON / Det 22 OFF for 13.60s (threshold=5.0s)
+4,extended_disagreement,1784495724.3,1784495737.9,13.600000143051147,4,39,39,Ph4: Det 39 ON / Det 4 OFF for 13.60s (threshold=5.0s)
+4,extended_disagreement,1784496054.8,1784496077.1,22.299999952316284,39,22,39,Ph4: Det 39 ON / Det 22 OFF for 22.30s (threshold=5.0s)
+4,extended_disagreement,1784496054.8,1784496078.3,23.5,4,39,39,Ph4: Det 39 ON / Det 4 OFF for 23.50s (threshold=5.0s)
+4,extended_disagreement,1784496078.4,1784496085.0,6.599999904632568,39,22,22,Ph4: Det 22 ON / Det 39 OFF for 6.60s (threshold=5.0s)
+4,isolated_pulse,1784496709.6,1784496710.0,0.40000009536743164,39,22,22,Ph4: Det 22 isolated pulse ON/OFF for 0.400s; Det 39 was completely OFF in ±5.0s window
+4,isolated_pulse,1784496710.0,1784496710.2,0.20000004768371582,4,39,4,Ph4: Det 4 isolated pulse ON/OFF for 0.200s; Det 39 was completely OFF in ±5.0s window
+4,extended_disagreement,1784496856.3,1784496878.6,22.299999952316284,39,22,39,Ph4: Det 39 ON / Det 22 OFF for 22.30s (threshold=5.0s)
+4,extended_disagreement,1784496856.3,1784496878.6,22.299999952316284,4,39,39,Ph4: Det 39 ON / Det 4 OFF for 22.30s (threshold=5.0s)
+4,isolated_pulse,1784496891.2,1784496895.0,3.799999952316284,39,22,22,Ph4: Det 22 isolated pulse ON/OFF for 3.800s; Det 39 was completely OFF in ±5.0s window
+4,isolated_pulse,1784496893.2,1784496893.6,0.39999985694885254,4,39,4,Ph4: Det 4 isolated pulse ON/OFF for 0.400s; Det 39 was completely OFF in ±5.0s window
+4,isolated_pulse,1784496893.9,1784496894.2,0.2999999523162842,4,39,4,Ph4: Det 4 isolated pulse ON/OFF for 0.300s; Det 39 was completely OFF in ±5.0s window
+4,isolated_pulse,1784496994.4,1784496995.1,0.6999998092651367,39,22,22,Ph4: Det 22 isolated pulse ON/OFF for 0.700s; Det 39 was completely OFF in ±5.0s window
+4,isolated_pulse,1784496994.4,1784496995.1,0.6999998092651367,4,22,22,Ph4: Det 22 isolated pulse ON/OFF for 0.700s; Det 4 was completely OFF in ±5.0s window
+4,extended_disagreement,1784497067.8,1784497088.9,21.100000143051147,39,22,39,Ph4: Det 39 ON / Det 22 OFF for 21.10s (threshold=5.0s)
+4,extended_disagreement,1784497067.8,1784497088.9,21.100000143051147,4,39,39,Ph4: Det 39 ON / Det 4 OFF for 21.10s (threshold=5.0s)
+4,extended_disagreement,1784497572.5,1784497577.6,5.099999904632568,4,39,39,Ph4: Det 39 ON / Det 4 OFF for 5.10s (threshold=5.0s)
+4,extended_disagreement,1784497737.6,1784497782.3,44.700000047683716,39,22,39,Ph4: Det 39 ON / Det 22 OFF for 44.70s (threshold=5.0s)
+4,extended_disagreement,1784497737.6,1784497782.3,44.700000047683716,4,39,39,Ph4: Det 39 ON / Det 4 OFF for 44.70s (threshold=5.0s)
+4,isolated_pulse,1784497972.5,1784497972.7,0.20000004768371582,39,22,39,Ph4: Det 39 isolated pulse ON/OFF for 0.200s; Det 22 was completely OFF in ±5.0s window
+4,isolated_pulse,1784497972.5,1784497972.7,0.20000004768371582,4,39,39,Ph4: Det 39 isolated pulse ON/OFF for 0.200s; Det 4 was completely OFF in ±5.0s window
+6,extended_disagreement,1784491786.4,1784491798.7,12.299999952316284,33,26,26,Ph6: Det 26 ON / Det 33 OFF for 12.30s (threshold=5.0s)
+6,extended_disagreement,1784492449.9,1784492472.6,22.699999809265137,33,26,33,Ph6: Det 33 ON / Det 26 OFF for 22.70s (threshold=5.0s)
+6,extended_disagreement,1784492474.9,1784492495.4,20.5,33,26,33,Ph6: Det 33 ON / Det 26 OFF for 20.50s (threshold=5.0s)
+6,extended_disagreement,1784494514.1,1784494524.8,10.700000047683716,33,26,26,Ph6: Det 26 ON / Det 33 OFF for 10.70s (threshold=5.0s)
+6,extended_disagreement,1784495069.0,1784495076.8,7.799999952316284,33,26,26,Ph6: Det 26 ON / Det 33 OFF for 7.80s (threshold=5.0s)
+6,extended_disagreement,1784496311.9,1784496346.8,34.89999985694885,33,26,33,Ph6: Det 33 ON / Det 26 OFF for 34.90s (threshold=5.0s)
+6,isolated_pulse,1784496640.3,1784496641.9,1.6000001430511475,33,26,26,Ph6: Det 26 isolated pulse ON/OFF for 1.600s; Det 33 was completely OFF in ±5.0s window
+6,extended_disagreement,1784496688.4,1784496696.4,8.0,33,26,26,Ph6: Det 26 ON / Det 33 OFF for 8.00s (threshold=5.0s)
+6,extended_disagreement,1784498307.5,1784498314.2,6.700000047683716,33,26,26,Ph6: Det 26 ON / Det 33 OFF for 6.70s (threshold=5.0s)
+7,extended_disagreement,1784491201.6,1784491299.6,98.0,7,24,7,Ph7: Det 7 ON / Det 24 OFF for 98.00s (threshold=5.0s)
+7,extended_disagreement,1784491201.6,1784491299.6,98.0,7,38,7,Ph7: Det 7 ON / Det 38 OFF for 98.00s (threshold=5.0s)
+7,isolated_pulse,1784491299.8,1784491303.1,3.299999952316284,7,24,7,Ph7: Det 7 isolated pulse ON/OFF for 3.300s; Det 24 was completely OFF in ±5.0s window
+7,isolated_pulse,1784491302.2,1784491305.6,3.3999998569488525,38,24,38,Ph7: Det 38 isolated pulse ON/OFF for 3.400s; Det 24 was completely OFF in ±5.0s window
+7,isolated_pulse,1784491304.8,1784491305.6,0.7999999523162842,7,24,7,Ph7: Det 7 isolated pulse ON/OFF for 0.800s; Det 24 was completely OFF in ±5.0s window
+7,extended_disagreement,1784494774.2,1784494792.2,18.0,7,24,24,Ph7: Det 24 ON / Det 7 OFF for 18.00s (threshold=5.0s)
+7,extended_disagreement,1784494774.2,1784494792.2,18.0,7,38,38,Ph7: Det 38 ON / Det 7 OFF for 18.00s (threshold=5.0s)
+7,extended_disagreement,1784495044.3,1784495134.1,89.79999995231628,38,24,24,Ph7: Det 24 ON / Det 38 OFF for 89.80s (threshold=5.0s)
+7,extended_disagreement,1784495044.3,1784495134.1,89.79999995231628,7,38,7,Ph7: Det 7 ON / Det 38 OFF for 89.80s (threshold=5.0s)
+7,extended_disagreement,1784495669.2,1784495691.3,22.09999990463257,7,24,24,Ph7: Det 24 ON / Det 7 OFF for 22.10s (threshold=5.0s)
+7,extended_disagreement,1784495669.2,1784495691.3,22.09999990463257,7,38,38,Ph7: Det 38 ON / Det 7 OFF for 22.10s (threshold=5.0s)
+7,extended_disagreement,1784495697.0,1784495736.6,39.59999990463257,7,24,24,Ph7: Det 24 ON / Det 7 OFF for 39.60s (threshold=5.0s)
+7,extended_disagreement,1784495697.0,1784495736.6,39.59999990463257,7,38,38,Ph7: Det 38 ON / Det 7 OFF for 39.60s (threshold=5.0s)
+7,isolated_pulse,1784496710.3,1784496711.0,0.7000000476837158,38,24,24,Ph7: Det 24 isolated pulse ON/OFF for 0.700s; Det 38 was completely OFF in ±5.0s window
+7,isolated_pulse,1784496710.3,1784496711.0,0.7000000476837158,7,24,24,Ph7: Det 24 isolated pulse ON/OFF for 0.700s; Det 7 was completely OFF in ±5.0s window
+7,isolated_pulse,1784497517.9,1784497518.4,0.5,38,24,24,Ph7: Det 24 isolated pulse ON/OFF for 0.500s; Det 38 was completely OFF in ±5.0s window
+7,isolated_pulse,1784497518.1,1784497518.6,0.5,7,38,7,Ph7: Det 7 isolated pulse ON/OFF for 0.500s; Det 38 was completely OFF in ±5.0s window
+8,isolated_pulse,1784491224.1,1784491228.7,4.6000001430511475,8,31,8,Ph8: Det 8 isolated pulse ON/OFF for 4.600s; Det 31 was completely OFF in ±5.0s window
+8,isolated_pulse,1784491224.1,1784491228.7,4.6000001430511475,8,42,8,Ph8: Det 8 isolated pulse ON/OFF for 4.600s; Det 42 was completely OFF in ±5.0s window
+8,extended_disagreement,1784491485.2,1784491492.8,7.599999904632568,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 7.60s (threshold=5.0s)
+8,extended_disagreement,1784491485.2,1784491492.8,7.599999904632568,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 7.60s (threshold=5.0s)
+8,extended_disagreement,1784491587.2,1784491592.6,5.3999998569488525,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 5.40s (threshold=5.0s)
+8,extended_disagreement,1784491587.2,1784491592.6,5.3999998569488525,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 5.40s (threshold=5.0s)
+8,isolated_pulse,1784491593.4,1784491594.0,0.5999999046325684,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 0.600s; Det 42 was completely OFF in ±5.0s window
+8,extended_disagreement,1784491594.5,1784491602.7,8.200000047683716,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 8.20s (threshold=5.0s)
+8,isolated_pulse,1784491598.4,1784491599.0,0.5999999046325684,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 0.600s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784491599.4,1784491600.1,0.6999998092651367,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 0.700s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784491601.1,1784491602.1,1.0,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 1.000s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784491603.1,1784491604.0,0.9000000953674316,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 0.900s; Det 42 was completely OFF in ±5.0s window
+8,extended_disagreement,1784491663.7,1784491669.4,5.700000047683716,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 5.70s (threshold=5.0s)
+8,extended_disagreement,1784491663.7,1784491669.4,5.700000047683716,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 5.70s (threshold=5.0s)
+8,extended_disagreement,1784491733.7,1784491741.3,7.599999904632568,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 7.60s (threshold=5.0s)
+8,extended_disagreement,1784491733.7,1784491741.3,7.599999904632568,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 7.60s (threshold=5.0s)
+8,isolated_pulse,1784491784.7,1784491785.3,0.5999999046325684,42,31,42,Ph8: Det 42 isolated pulse ON/OFF for 0.600s; Det 31 was completely OFF in ±5.0s window
+8,extended_disagreement,1784491784.7,1784491790.7,6.0,8,42,42,Ph8: Det 42 ON / Det 8 OFF for 6.00s (threshold=5.0s)
+8,extended_disagreement,1784491785.3,1784491790.7,5.400000095367432,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 5.40s (threshold=5.0s)
+8,extended_disagreement,1784491805.3,1784491819.7,14.400000095367432,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 14.40s (threshold=5.0s)
+8,isolated_pulse,1784491806.8,1784491807.7,0.9000000953674316,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 0.900s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784491810.7,1784491811.1,0.39999985694885254,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 0.400s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784491813.7,1784491814.1,0.39999985694885254,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 0.400s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784491814.4,1784491814.8,0.39999985694885254,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 0.400s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784491815.2,1784491816.4,1.2000000476837158,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 1.200s; Det 42 was completely OFF in ±5.0s window
+8,extended_disagreement,1784491848.6,1784491853.8,5.200000047683716,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 5.20s (threshold=5.0s)
+8,extended_disagreement,1784491848.6,1784491853.8,5.200000047683716,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 5.20s (threshold=5.0s)
+8,extended_disagreement,1784492012.4,1784492018.3,5.8999998569488525,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 5.90s (threshold=5.0s)
+8,extended_disagreement,1784492012.4,1784492018.3,5.8999998569488525,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 5.90s (threshold=5.0s)
+8,isolated_pulse,1784492039.2,1784492040.6,1.3999998569488525,8,42,8,Ph8: Det 8 isolated pulse ON/OFF for 1.400s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784492040.3,1784492040.8,0.5,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 0.500s; Det 42 was completely OFF in ±5.0s window
+8,extended_disagreement,1784492281.2,1784492297.1,15.899999856948853,42,31,31,Ph8: Det 31 ON / Det 42 OFF for 15.90s (threshold=5.0s)
+8,extended_disagreement,1784492281.2,1784492297.1,15.899999856948853,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 15.90s (threshold=5.0s)
+8,isolated_pulse,1784492525.3,1784492525.8,0.5,8,31,8,Ph8: Det 8 isolated pulse ON/OFF for 0.500s; Det 31 was completely OFF in ±5.0s window
+8,extended_disagreement,1784492527.4,1784492538.2,10.799999952316284,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 10.80s (threshold=5.0s)
+8,isolated_pulse,1784492528.6,1784492531.6,3.0,42,31,42,Ph8: Det 42 isolated pulse ON/OFF for 3.000s; Det 31 was completely OFF in ±5.0s window
+8,extended_disagreement,1784492531.6,1784492538.2,6.6000001430511475,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 6.60s (threshold=5.0s)
+8,isolated_pulse,1784492540.0,1784492540.4,0.40000009536743164,8,31,8,Ph8: Det 8 isolated pulse ON/OFF for 0.400s; Det 31 was completely OFF in ±5.0s window
+8,isolated_pulse,1784492540.0,1784492540.4,0.40000009536743164,8,42,8,Ph8: Det 8 isolated pulse ON/OFF for 0.400s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784492691.6,1784492691.9,0.3000001907348633,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 0.300s; Det 42 was completely OFF in ±5.0s window
+8,extended_disagreement,1784492692.2,1784492698.1,5.8999998569488525,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 5.90s (threshold=5.0s)
+8,extended_disagreement,1784492692.2,1784492698.1,5.8999998569488525,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 5.90s (threshold=5.0s)
+8,isolated_pulse,1784492870.2,1784492871.0,0.7999999523162842,42,31,42,Ph8: Det 42 isolated pulse ON/OFF for 0.800s; Det 31 was completely OFF in ±5.0s window
+8,isolated_pulse,1784492870.8,1784492871.6,0.7999999523162842,8,31,8,Ph8: Det 8 isolated pulse ON/OFF for 0.800s; Det 31 was completely OFF in ±5.0s window
+8,isolated_pulse,1784492872.0,1784492876.2,4.200000047683716,8,31,8,Ph8: Det 8 isolated pulse ON/OFF for 4.200s; Det 31 was completely OFF in ±5.0s window
+8,extended_disagreement,1784493288.0,1784493296.2,8.200000047683716,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 8.20s (threshold=5.0s)
+8,isolated_pulse,1784493288.5,1784493288.9,0.40000009536743164,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 0.400s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784493292.9,1784493294.3,1.3999998569488525,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 1.400s; Det 42 was completely OFF in ±5.0s window
+8,extended_disagreement,1784493369.3,1784493375.0,5.700000047683716,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 5.70s (threshold=5.0s)
+8,extended_disagreement,1784493369.3,1784493375.0,5.700000047683716,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 5.70s (threshold=5.0s)
+8,isolated_pulse,1784493404.3,1784493408.3,4.0,8,42,8,Ph8: Det 8 isolated pulse ON/OFF for 4.000s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784493405.6,1784493408.1,2.5,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 2.500s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784493408.4,1784493409.1,0.6999998092651367,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 0.700s; Det 42 was completely OFF in ±5.0s window
+8,extended_disagreement,1784493554.3,1784493559.6,5.299999952316284,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 5.30s (threshold=5.0s)
+8,isolated_pulse,1784493557.4,1784493557.8,0.39999985694885254,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 0.400s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784493559.4,1784493559.8,0.39999985694885254,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 0.400s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784493560.5,1784493560.7,0.20000004768371582,8,42,8,Ph8: Det 8 isolated pulse ON/OFF for 0.200s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784493592.6,1784493597.0,4.400000095367432,8,42,8,Ph8: Det 8 isolated pulse ON/OFF for 4.400s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784493595.4,1784493596.4,1.0,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 1.000s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784493597.4,1784493597.7,0.2999999523162842,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 0.300s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784493660.8,1784493661.5,0.7000000476837158,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 0.700s; Det 42 was completely OFF in ±5.0s window
+8,extended_disagreement,1784493661.8,1784493667.5,5.700000047683716,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 5.70s (threshold=5.0s)
+8,extended_disagreement,1784493661.8,1784493667.5,5.700000047683716,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 5.70s (threshold=5.0s)
+8,extended_disagreement,1784493671.7,1784493677.8,6.099999904632568,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 6.10s (threshold=5.0s)
+8,extended_disagreement,1784493671.7,1784493677.8,6.099999904632568,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 6.10s (threshold=5.0s)
+8,extended_disagreement,1784493803.1,1784493815.5,12.400000095367432,42,31,31,Ph8: Det 31 ON / Det 42 OFF for 12.40s (threshold=5.0s)
+8,extended_disagreement,1784493803.1,1784493815.5,12.400000095367432,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 12.40s (threshold=5.0s)
+8,extended_disagreement,1784493824.1,1784493829.4,5.300000190734863,42,31,42,Ph8: Det 42 ON / Det 31 OFF for 5.30s (threshold=5.0s)
+8,extended_disagreement,1784493947.5,1784493953.1,5.599999904632568,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 5.60s (threshold=5.0s)
+8,isolated_pulse,1784493947.8,1784493948.5,0.7000000476837158,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 0.700s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784493949.4,1784493950.5,1.0999999046325684,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 1.100s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784493968.6,1784493973.2,4.6000001430511475,8,42,8,Ph8: Det 8 isolated pulse ON/OFF for 4.600s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784493971.9,1784493973.9,2.0,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 2.000s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784494023.7,1784494023.9,0.20000004768371582,42,31,42,Ph8: Det 42 isolated pulse ON/OFF for 0.200s; Det 31 was completely OFF in ±5.0s window
+8,extended_disagreement,1784494024.9,1784494030.6,5.699999809265137,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 5.70s (threshold=5.0s)
+8,extended_disagreement,1784494024.9,1784494030.6,5.699999809265137,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 5.70s (threshold=5.0s)
+8,isolated_pulse,1784494060.6,1784494061.2,0.6000001430511475,42,31,42,Ph8: Det 42 isolated pulse ON/OFF for 0.600s; Det 31 was completely OFF in ±5.0s window
+8,isolated_pulse,1784494060.6,1784494061.2,0.6000001430511475,8,42,42,Ph8: Det 42 isolated pulse ON/OFF for 0.600s; Det 8 was completely OFF in ±5.0s window
+8,isolated_pulse,1784494061.5,1784494061.6,0.09999990463256836,42,31,42,Ph8: Det 42 isolated pulse ON/OFF for 0.100s; Det 31 was completely OFF in ±5.0s window
+8,isolated_pulse,1784494061.5,1784494061.6,0.09999990463256836,8,42,42,Ph8: Det 42 isolated pulse ON/OFF for 0.100s; Det 8 was completely OFF in ±5.0s window
+8,isolated_pulse,1784494062.3,1784494063.2,0.9000000953674316,42,31,42,Ph8: Det 42 isolated pulse ON/OFF for 0.900s; Det 31 was completely OFF in ±5.0s window
+8,isolated_pulse,1784494062.3,1784494063.2,0.9000000953674316,8,42,42,Ph8: Det 42 isolated pulse ON/OFF for 0.900s; Det 8 was completely OFF in ±5.0s window
+8,isolated_pulse,1784494072.2,1784494073.9,1.7000000476837158,8,31,8,Ph8: Det 8 isolated pulse ON/OFF for 1.700s; Det 31 was completely OFF in ±5.0s window
+8,isolated_pulse,1784494072.2,1784494073.9,1.7000000476837158,8,42,8,Ph8: Det 8 isolated pulse ON/OFF for 1.700s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784494085.6,1784494087.3,1.7000000476837158,8,31,8,Ph8: Det 8 isolated pulse ON/OFF for 1.700s; Det 31 was completely OFF in ±5.0s window
+8,isolated_pulse,1784494085.6,1784494087.3,1.7000000476837158,8,42,8,Ph8: Det 8 isolated pulse ON/OFF for 1.700s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784494090.3,1784494090.7,0.40000009536743164,8,31,8,Ph8: Det 8 isolated pulse ON/OFF for 0.400s; Det 31 was completely OFF in ±5.0s window
+8,isolated_pulse,1784494090.3,1784494090.7,0.40000009536743164,8,42,8,Ph8: Det 8 isolated pulse ON/OFF for 0.400s; Det 42 was completely OFF in ±5.0s window
+8,extended_disagreement,1784494149.1,1784494159.5,10.400000095367432,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 10.40s (threshold=5.0s)
+8,isolated_pulse,1784494237.3,1784494242.2,4.900000095367432,8,31,8,Ph8: Det 8 isolated pulse ON/OFF for 4.900s; Det 31 was completely OFF in ±5.0s window
+8,isolated_pulse,1784494237.3,1784494242.2,4.900000095367432,8,42,8,Ph8: Det 8 isolated pulse ON/OFF for 4.900s; Det 42 was completely OFF in ±5.0s window
+8,extended_disagreement,1784494277.7,1784494348.1,70.39999985694885,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 70.40s (threshold=5.0s)
+8,extended_disagreement,1784494281.1,1784494348.1,67.0,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 67.00s (threshold=5.0s)
+8,extended_disagreement,1784494506.4,1784494583.6,77.19999980926514,8,42,42,Ph8: Det 42 ON / Det 8 OFF for 77.20s (threshold=5.0s)
+8,extended_disagreement,1784494506.9,1784494583.6,76.69999980926514,42,31,42,Ph8: Det 42 ON / Det 31 OFF for 76.70s (threshold=5.0s)
+8,extended_disagreement,1784494584.5,1784494590.7,6.200000047683716,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 6.20s (threshold=5.0s)
+8,extended_disagreement,1784494584.5,1784494590.7,6.200000047683716,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 6.20s (threshold=5.0s)
+8,extended_disagreement,1784494713.8,1784494721.7,7.900000095367432,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 7.90s (threshold=5.0s)
+8,isolated_pulse,1784494715.1,1784494715.4,0.3000001907348633,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 0.300s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784494717.6,1784494718.9,1.3000001907348633,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 1.300s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784494719.3,1784494719.7,0.40000009536743164,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 0.400s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784494720.2,1784494721.3,1.0999999046325684,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 1.100s; Det 42 was completely OFF in ±5.0s window
+8,extended_disagreement,1784494752.3,1784494757.5,5.200000047683716,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 5.20s (threshold=5.0s)
+8,extended_disagreement,1784494752.3,1784494757.5,5.200000047683716,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 5.20s (threshold=5.0s)
+8,isolated_pulse,1784494774.7,1784494775.0,0.2999999523162842,42,31,42,Ph8: Det 42 isolated pulse ON/OFF for 0.300s; Det 31 was completely OFF in ±5.0s window
+8,extended_disagreement,1784494775.3,1784494780.9,5.6000001430511475,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 5.60s (threshold=5.0s)
+8,extended_disagreement,1784494775.3,1784494780.9,5.6000001430511475,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 5.60s (threshold=5.0s)
+8,isolated_pulse,1784494889.9,1784494890.0,0.09999990463256836,42,31,42,Ph8: Det 42 isolated pulse ON/OFF for 0.100s; Det 31 was completely OFF in ±5.0s window
+8,extended_disagreement,1784494890.8,1784494897.3,6.5,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 6.50s (threshold=5.0s)
+8,extended_disagreement,1784494890.8,1784494897.3,6.5,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 6.50s (threshold=5.0s)
+8,isolated_pulse,1784494918.4,1784494918.5,0.09999990463256836,42,31,42,Ph8: Det 42 isolated pulse ON/OFF for 0.100s; Det 31 was completely OFF in ±5.0s window
+8,extended_disagreement,1784494919.1,1784494925.5,6.400000095367432,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 6.40s (threshold=5.0s)
+8,extended_disagreement,1784494919.1,1784494925.5,6.400000095367432,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 6.40s (threshold=5.0s)
+8,isolated_pulse,1784495126.2,1784495126.5,0.2999999523162842,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 0.300s; Det 42 was completely OFF in ±5.0s window
+8,extended_disagreement,1784495126.4,1784495131.6,5.199999809265137,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 5.20s (threshold=5.0s)
+8,extended_disagreement,1784495126.5,1784495131.6,5.099999904632568,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 5.10s (threshold=5.0s)
+8,extended_disagreement,1784495226.8,1784495232.3,5.5,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 5.50s (threshold=5.0s)
+8,extended_disagreement,1784495226.8,1784495232.3,5.5,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 5.50s (threshold=5.0s)
+8,extended_disagreement,1784495235.8,1784495241.7,5.900000095367432,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 5.90s (threshold=5.0s)
+8,extended_disagreement,1784495235.8,1784495241.7,5.900000095367432,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 5.90s (threshold=5.0s)
+8,extended_disagreement,1784495443.6,1784495449.1,5.5,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 5.50s (threshold=5.0s)
+8,extended_disagreement,1784495443.6,1784495449.1,5.5,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 5.50s (threshold=5.0s)
+8,isolated_pulse,1784495496.2,1784495500.7,4.5,8,42,8,Ph8: Det 8 isolated pulse ON/OFF for 4.500s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784495500.4,1784495500.8,0.39999985694885254,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 0.400s; Det 42 was completely OFF in ±5.0s window
+8,extended_disagreement,1784495589.1,1784495607.0,17.90000009536743,42,31,42,Ph8: Det 42 ON / Det 31 OFF for 17.90s (threshold=5.0s)
+8,extended_disagreement,1784495589.1,1784495608.1,19.0,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 19.00s (threshold=5.0s)
+8,extended_disagreement,1784495980.7,1784495985.9,5.200000047683716,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 5.20s (threshold=5.0s)
+8,extended_disagreement,1784495980.7,1784495985.9,5.200000047683716,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 5.20s (threshold=5.0s)
+8,extended_disagreement,1784496045.6,1784496051.9,6.300000190734863,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 6.30s (threshold=5.0s)
+8,extended_disagreement,1784496045.6,1784496051.9,6.300000190734863,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 6.30s (threshold=5.0s)
+8,isolated_pulse,1784496277.5,1784496278.9,1.4000000953674316,42,31,42,Ph8: Det 42 isolated pulse ON/OFF for 1.400s; Det 31 was completely OFF in ±5.0s window
+8,extended_disagreement,1784496278.6,1784496284.4,5.800000190734863,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 5.80s (threshold=5.0s)
+8,extended_disagreement,1784496278.9,1784496284.4,5.5,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 5.50s (threshold=5.0s)
+8,extended_disagreement,1784496351.0,1784496357.2,6.200000047683716,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 6.20s (threshold=5.0s)
+8,extended_disagreement,1784496351.0,1784496357.2,6.200000047683716,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 6.20s (threshold=5.0s)
+8,isolated_pulse,1784496527.9,1784496528.3,0.39999985694885254,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 0.400s; Det 42 was completely OFF in ±5.0s window
+8,extended_disagreement,1784496528.9,1784496534.7,5.799999952316284,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 5.80s (threshold=5.0s)
+8,isolated_pulse,1784496531.3,1784496531.6,0.2999999523162842,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 0.300s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784496531.9,1784496532.9,1.0,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 1.000s; Det 42 was completely OFF in ±5.0s window
+8,extended_disagreement,1784496549.4,1784496554.5,5.099999904632568,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 5.10s (threshold=5.0s)
+8,extended_disagreement,1784496549.4,1784496554.6,5.199999809265137,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 5.20s (threshold=5.0s)
+8,isolated_pulse,1784496554.5,1784496554.9,0.40000009536743164,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 0.400s; Det 42 was completely OFF in ±5.0s window
+8,extended_disagreement,1784496697.0,1784496703.2,6.200000047683716,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 6.20s (threshold=5.0s)
+8,extended_disagreement,1784496697.0,1784496703.2,6.200000047683716,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 6.20s (threshold=5.0s)
+8,extended_disagreement,1784496765.0,1784496770.2,5.200000047683716,42,31,31,Ph8: Det 31 ON / Det 42 OFF for 5.20s (threshold=5.0s)
+8,extended_disagreement,1784496770.6,1784496794.0,23.40000009536743,42,31,31,Ph8: Det 31 ON / Det 42 OFF for 23.40s (threshold=5.0s)
+8,extended_disagreement,1784496770.6,1784496794.0,23.40000009536743,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 23.40s (threshold=5.0s)
+8,extended_disagreement,1784497084.7,1784497091.3,6.599999904632568,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 6.60s (threshold=5.0s)
+8,isolated_pulse,1784497086.1,1784497086.8,0.7000000476837158,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 0.700s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784497090.5,1784497090.9,0.40000009536743164,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 0.400s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784497091.3,1784497092.1,0.7999999523162842,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 0.800s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784497092.5,1784497093.3,0.7999999523162842,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 0.800s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784497153.6,1784497153.8,0.20000004768371582,42,31,42,Ph8: Det 42 isolated pulse ON/OFF for 0.200s; Det 31 was completely OFF in ±5.0s window
+8,extended_disagreement,1784497154.4,1784497159.7,5.299999952316284,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 5.30s (threshold=5.0s)
+8,extended_disagreement,1784497154.4,1784497159.7,5.299999952316284,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 5.30s (threshold=5.0s)
+8,isolated_pulse,1784497160.1,1784497160.9,0.8000001907348633,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 0.800s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784497174.5,1784497174.6,0.09999990463256836,42,31,42,Ph8: Det 42 isolated pulse ON/OFF for 0.100s; Det 31 was completely OFF in ±5.0s window
+8,extended_disagreement,1784497175.4,1784497180.8,5.3999998569488525,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 5.40s (threshold=5.0s)
+8,extended_disagreement,1784497175.4,1784497180.8,5.3999998569488525,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 5.40s (threshold=5.0s)
+8,extended_disagreement,1784497371.1,1784497377.5,6.400000095367432,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 6.40s (threshold=5.0s)
+8,isolated_pulse,1784497378.3,1784497378.9,0.6000001430511475,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 0.600s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784497523.3,1784497527.7,4.400000095367432,8,31,8,Ph8: Det 8 isolated pulse ON/OFF for 4.400s; Det 31 was completely OFF in ±5.0s window
+8,isolated_pulse,1784497523.3,1784497527.7,4.400000095367432,8,42,8,Ph8: Det 8 isolated pulse ON/OFF for 4.400s; Det 42 was completely OFF in ±5.0s window
+8,extended_disagreement,1784497575.9,1784497584.0,8.099999904632568,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 8.10s (threshold=5.0s)
+8,isolated_pulse,1784497577.0,1784497577.7,0.7000000476837158,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 0.700s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784497579.0,1784497581.3,2.299999952316284,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 2.300s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784497581.7,1784497582.3,0.5999999046325684,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 0.600s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784497582.6,1784497583.0,0.40000009536743164,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 0.400s; Det 42 was completely OFF in ±5.0s window
+8,extended_disagreement,1784497601.4,1784497607.2,5.799999952316284,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 5.80s (threshold=5.0s)
+8,extended_disagreement,1784497601.4,1784497607.2,5.799999952316284,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 5.80s (threshold=5.0s)
+8,extended_disagreement,1784497658.3,1784497663.9,5.6000001430511475,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 5.60s (threshold=5.0s)
+8,extended_disagreement,1784497658.3,1784497663.9,5.6000001430511475,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 5.60s (threshold=5.0s)
+8,isolated_pulse,1784497722.2,1784497722.9,0.7000000476837158,42,31,42,Ph8: Det 42 isolated pulse ON/OFF for 0.700s; Det 31 was completely OFF in ±5.0s window
+8,extended_disagreement,1784497723.0,1784497729.1,6.099999904632568,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 6.10s (threshold=5.0s)
+8,extended_disagreement,1784497723.0,1784497729.1,6.099999904632568,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 6.10s (threshold=5.0s)
+8,isolated_pulse,1784497730.3,1784497730.9,0.6000001430511475,42,31,42,Ph8: Det 42 isolated pulse ON/OFF for 0.600s; Det 31 was completely OFF in ±5.0s window
+8,isolated_pulse,1784497731.1,1784497731.4,0.3000001907348633,8,31,8,Ph8: Det 8 isolated pulse ON/OFF for 0.300s; Det 31 was completely OFF in ±5.0s window
+8,extended_disagreement,1784497732.0,1784497741.6,9.599999904632568,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 9.60s (threshold=5.0s)
+8,isolated_pulse,1784497734.7,1784497734.9,0.20000004768371582,42,31,42,Ph8: Det 42 isolated pulse ON/OFF for 0.200s; Det 31 was completely OFF in ±5.0s window
+8,extended_disagreement,1784497734.9,1784497741.6,6.699999809265137,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 6.70s (threshold=5.0s)
+8,isolated_pulse,1784497747.2,1784497749.4,2.200000047683716,8,31,8,Ph8: Det 8 isolated pulse ON/OFF for 2.200s; Det 31 was completely OFF in ±5.0s window
+8,isolated_pulse,1784497747.2,1784497749.4,2.200000047683716,8,42,8,Ph8: Det 8 isolated pulse ON/OFF for 2.200s; Det 42 was completely OFF in ±5.0s window
+8,extended_disagreement,1784497935.3,1784497941.4,6.1000001430511475,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 6.10s (threshold=5.0s)
+8,isolated_pulse,1784497939.9,1784497940.2,0.2999999523162842,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 0.300s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784497940.6,1784497941.3,0.7000000476837158,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 0.700s; Det 42 was completely OFF in ±5.0s window
+8,isolated_pulse,1784498132.4,1784498132.8,0.39999985694885254,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 0.400s; Det 42 was completely OFF in ±5.0s window
+8,extended_disagreement,1784498133.4,1784498138.5,5.099999904632568,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 5.10s (threshold=5.0s)
+8,extended_disagreement,1784498133.4,1784498139.4,6.0,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 6.00s (threshold=5.0s)
+8,isolated_pulse,1784498138.5,1784498141.3,2.799999952316284,42,31,31,Ph8: Det 31 isolated pulse ON/OFF for 2.800s; Det 42 was completely OFF in ±5.0s window
+8,extended_disagreement,1784498140.9,1784498147.5,6.599999904632568,8,42,8,Ph8: Det 8 ON / Det 42 OFF for 6.60s (threshold=5.0s)
+8,extended_disagreement,1784498141.3,1784498147.5,6.200000047683716,8,31,8,Ph8: Det 8 ON / Det 31 OFF for 6.20s (threshold=5.0s)
+8,isolated_pulse,1784498378.2,1784498380.4,2.200000047683716,42,31,42,Ph8: Det 42 isolated pulse ON/OFF for 2.200s; Det 31 was completely OFF in ±5.0s window
+8,isolated_pulse,1784498378.2,1784498380.4,2.200000047683716,8,42,42,Ph8: Det 42 isolated pulse ON/OFF for 2.200s; Det 8 was completely OFF in ±5.0s window
+8,isolated_pulse,1784498382.4,1784498384.7,2.299999952316284,42,31,42,Ph8: Det 42 isolated pulse ON/OFF for 2.300s; Det 31 was completely OFF in ±5.0s window
+8,isolated_pulse,1784498382.4,1784498384.7,2.299999952316284,8,42,42,Ph8: Det 42 isolated pulse ON/OFF for 2.300s; Det 8 was completely OFF in ±5.0s window

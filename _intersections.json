@@ -1,0 +1,173 @@
+{
+  "201": {
+    "intersection_id": "201",
+    "description": "SH-55_and_Banks-Lowman_Rd",
+    "controller_ip": "10.37.23.200",
+    "snmp_port": 501,
+    "snmp_community": "administrator",
+    "poll_interval_sec": 0.2,
+    "timezone": "US/Mountain",
+    "cameras": {
+      "fisheye": {
+        "url": "rtsp://root:WesternSystems1!@10.37.23.204/axis-media/media.amp?camera=1&videocodec=h264",
+        "description": "full intersection",
+        "pre_roll_sec": 5,
+        "post_roll_sec": 5
+      }
+    },
+    "detectors": {
+      "43": {
+        "type": "radar",
+        "phase": 1,
+        "description": "Phase 1 Evo Radar",
+        "paired_detector_id": "29",
+        "camera_id": "fisheye",
+        "lag_threshold_sec": 5
+      },
+      "29": {
+        "type": "video",
+        "phase": 1,
+        "description": "Phase 1 ITSPlus Video",
+        "paired_detector_id": "43",
+        "camera_id": "fisheye",
+        "lag_threshold_sec": 5
+      },
+      "46": {
+        "type": "radar",
+        "phase": 2,
+        "description": "Phase 2 Evo Radar",
+        "paired_detector_id": "17",
+        "camera_id": "fisheye",
+        "lag_threshold_sec": 5
+      },
+      "17": {
+        "type": "video",
+        "phase": 2,
+        "description": "Phase 2 ITSPlus Video",
+        "paired_detector_id": "2",
+        "camera_id": "fisheye",
+        "lag_threshold_sec": 5
+      },
+      "2": {
+        "type": "video",
+        "phase": 2,
+        "description": "Phase 2 Currux Video",
+        "paired_detector_id": "46",
+        "camera_id": "fisheye",
+        "lag_threshold_sec": 5
+      },
+      "41": {
+        "type": "radar",
+        "phase": 3,
+        "description": "Phase 3 Evo Radar",
+        "paired_detector_id": "30",
+        "camera_id": "fisheye",
+        "lag_threshold_sec": 5
+      },
+      "30": {
+        "type": "video",
+        "phase": 3,
+        "description": "Phase 3 ITSPlus Video",
+        "paired_detector_id": "3",
+        "camera_id": "fisheye",
+        "lag_threshold_sec": 5
+      },
+      "3": {
+        "type": "video",
+        "phase": 3,
+        "description": "Phase 3 Currux Video",
+        "paired_detector_id": "41",
+        "camera_id": "fisheye",
+        "lag_threshold_sec": 5
+      },
+      "39": {
+        "type": "radar",
+        "phase": 4,
+        "description": "Phase 4 Evo Radar",
+        "paired_detector_id": "22",
+        "camera_id": "fisheye",
+        "lag_threshold_sec": 5
+      },
+      "22": {
+        "type": "video",
+        "phase": 4,
+        "description": "Phase 4 ITSPlus Video",
+        "paired_detector_id": "4",
+        "camera_id": "fisheye",
+        "lag_threshold_sec": 5
+      },
+      "4": {
+        "type": "video",
+        "phase": 4,
+        "description": "Phase 4 Currux Video",
+        "paired_detector_id": "39",
+        "camera_id": "fisheye",
+        "lag_threshold_sec": 5
+      },
+      "33": {
+        "type": "radar",
+        "phase": 6,
+        "description": "Phase 6 Evo Radar",
+        "paired_detector_id": "26",
+        "camera_id": "fisheye",
+        "lag_threshold_sec": 5
+      },
+      "26": {
+        "type": "video",
+        "phase": 6,
+        "description": "Phase 6 ITSPlus Video",
+        "paired_detector_id": "33",
+        "camera_id": "fisheye",
+        "lag_threshold_sec": 5
+      },
+      "38": {
+        "type": "radar",
+        "phase": 7,
+        "description": "Phase 7 Evo Radar",
+        "paired_detector_id": "24",
+        "camera_id": "fisheye",
+        "lag_threshold_sec": 5
+      },
+      "24": {
+        "type": "video",
+        "phase": 7,
+        "description": "Phase 7 ITSPlus Video",
+        "paired_detector_id": "7",
+        "camera_id": "fisheye",
+        "lag_threshold_sec": 5
+      },
+      "7": {
+        "type": "video",
+        "phase": 7,
+        "description": "Phase 7 Currux Video",
+        "paired_detector_id": "38",
+        "camera_id": "fisheye",
+        "lag_threshold_sec": 5
+      },
+      "42": {
+        "type": "radar",
+        "phase": 8,
+        "description": "Phase 8 Evo Radar",
+        "paired_detector_id": "31",
+        "camera_id": "fisheye",
+        "lag_threshold_sec": 5
+      },
+      "31": {
+        "type": "video",
+        "phase": 8,
+        "description": "Phase 8 ITSPlus Video",
+        "paired_detector_id": "8",
+        "camera_id": "fisheye",
+        "lag_threshold_sec": 5
+      },
+      "8": {
+        "type": "video",
+        "phase": 8,
+        "description": "Phase 8 Currux Video",
+        "paired_detector_id": "42",
+        "camera_id": "fisheye",
+        "lag_threshold_sec": 5
+      }
+    }
+  }
+}
