@@ -533,3 +533,23 @@ decided. Entries after this point are logged as the decision lands.
   verdict, re-measure with `__capture_ntcip.py`/`__correlate_channels.py`
   (protocol in ROADMAP 4a). Runner-up considered and deferred to Opus:
   Item 8 (remux manager lock — real but rare-trigger hazard).
+
+- 2026-07-19 — **Closing Fable handoff: pre-decided designs for the
+  post-Fable roadmap.** Spent the final Fable budget on planning artifacts
+  rather than execution, so cheaper models inherit decided designs instead of
+  open questions: (1) **SCOPE_sampling_floor.md / ROADMAP #9** — the engine
+  must not evaluate evidence finer than its sampling resolution: runtime
+  sweep-time self-measurement in DetectorMonitor, floor injection into the
+  discrepancy engine via system_runner (`set_sampling_floor`, preserving the
+  no-cross-import boundary), Rule 2 refusal of below-2×-floor pulses,
+  per-pair high-duty advisory (suppression opt-in), and a concrete
+  pass/fail re-baseline protocol. (2) **4a fallback design** (in ROADMAP 4a)
+  — if the Cobalt rejects multi-OID PDUs: N independent clients/threads for
+  fixed group subsets writing latest-bitmask slots, single emitter thread
+  preserved; probe to be extended with a `--concurrency` phase first since a
+  weak controller CPU may serialize concurrent UDP. (3) **Item 8 retargeted
+  Fable→Opus** with execution guidance: one lock, pure-bookkeeping critical
+  sections, never stop()/join()/I-O under the lock (Timer-thread re-entry
+  deadlock), snapshot `_draining` under lock, multi-camera warn-only, stubbed
+  ClipRemuxer test. Post-Fable routing note added to the ROADMAP intro
+  (order: 4a round trip → 8 → 9 → 4d → 4f → 4b/5).

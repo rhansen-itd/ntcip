@@ -29,17 +29,41 @@ highest used so far.
 
 ---
 
-> **Fable last-day priority order (2026-07-19).** For the final Fable session
-> block, tackle in this order: **~~7~~ (✅ done 2026-07-19, see
-> DESIGN_HISTORY) → 4d → 8 → 4f**, then mechanical filler **4a / 4b / 5** if
-> time remains. Rationale: 4d stands up the `tests/` breadth everything else
-> leans on (Item 7 already established the layout precedent); 8 fixes a
-> genuine edge-runtime concurrency hazard; 4f closes a real security gap. See
-> the per-item entries below.
+> **Post-Fable routing (2026-07-19, final Fable session).** Fable access has
+> ended; the remaining items were deliberately left in a state where their
+> *thinking* is pre-done and cheaper models execute:
+> **8 → Opus** (race analysis + the deadlock trap are written in the item);
+> **9 → Opus** (full design in [[SCOPE_sampling_floor.md]]);
+> **4a remainder → no model** (owner runs the probe, flips a config key);
+> **4a fallback (if probe fails) → Opus** (threading design decided inline
+> below); **4f → Opus**; **4d / 4b / 5 → Sonnet** (mechanical, precedents
+> set). Suggested order: 4a round trip → 8 → 9 → 4d → 4f → 4b/5.
 
 ---
 
-## 8 — remux VideoBufferManager thread-safety + multi-camera assumption (Target: Fable)
+## 9 — Sampling-floor awareness + post-4a accuracy re-baseline (Target: Opus)
+
+Full decided design in [[SCOPE_sampling_floor.md]] (written 2026-07-19 from
+the measured 1.53 s sweep / 7–42 % edge-capture findings). Summary: the
+engine must not evaluate evidence finer than its own sampling resolution.
+(A) `DetectorMonitor` self-measures its effective cycle (EMA, exposed via
+stats); (B) `system_runner` injects that floor into `DiscrepancyMonitor.
+set_sampling_floor()` (keeps the package boundary clean); Rule 2 refuses
+orphan pulses shorter than 2× floor; per-pair high-duty advisory warning
+(suppression opt-in only); (C) the pass/fail re-baseline protocol with
+concrete numbers. Items A+B are useful even before 4a's round trip.
+
+Suggested prompt:
+> [Opus] In the ntcip project, do Item 9 of ROADMAP.md by implementing
+> SCOPE_sampling_floor.md items A and B exactly as specified (C is an
+> owner-run protocol, just leave it documented). Extend
+> video_engine/tests/test_discrepancy_rules.py and
+> ntcip_monitor/tests/test_snmp_batching.py per the scope's test list.
+> DESIGN_HISTORY entry + check off.
+
+---
+
+## 8 — remux VideoBufferManager thread-safety + multi-camera assumption (Target: Opus)
 
 Found 2026-07-19 while reviewing `video_engine/remux_video_buffer.py`.
 
@@ -65,14 +89,31 @@ Found 2026-07-19 while reviewing `video_engine/remux_video_buffer.py`.
   trigger resolves to >1 camera and document the single-camera assumption in the
   schema; defer true per-camera writers until a second camera is deployed.
 
+**Execution guidance (2026-07-19, so Opus doesn't rediscover it):**
+- ONE lock for all three fields; critical sections are pure bookkeeping
+  (dict/list pop/append, timer cancel). **Never call `writer.stop()`,
+  `thread.join()`, semaphore acquire, or any I/O while holding the lock** —
+  `_auto_stop` runs on a Timer thread and `_stop_trigger` can be re-entered
+  from it; holding the lock across a join deadlocks the reap path. Pattern:
+  under the lock, pop/collect what to act on; release; then act.
+- `stop()` and `_reap_finished` iterate `_draining` — snapshot the list under
+  the lock (`list(...)`), mutate only under the lock.
+- Multi-camera: log one WARNING when `target_cams` resolves to >1 camera and
+  record `cameras_recorded: [cam_id]` vs `cameras_requested` in the CSV/log;
+  document the single-camera assumption in `config_manager.py`'s trigger
+  schema docstring. Do NOT implement per-camera writers (no second camera
+  exists to test against).
+- Test economically: stub `ClipRemuxer` (no PyAV, no streams) and drive
+  start/auto-stop/stop/reap sequences from two threads; follow
+  `video_engine/tests/test_discrepancy_rules.py`'s unittest layout. Skip
+  real-stream replay verification.
+
 Suggested prompt:
-> [Fable] In the ntcip project, do Item 8 of ROADMAP.md: guard
-> `remux_video_buffer.VideoBufferManager`'s `_active_writers`/`_stop_timers`/
-> `_draining` bookkeeping with a single lock to close the poll-loop vs
-> Timer-callback vs stop() races, and handle the multi-camera trigger case
-> (warn + document the single-camera assumption, or implement per-camera
-> writers). Add a regression test if Item 4d/7 scaffolding exists. DESIGN_HISTORY
-> entry + check off.
+> [Opus] In the ntcip project, do Item 8 of ROADMAP.md following the item's
+> execution guidance exactly: single lock around the manager's
+> writer/timer/draining bookkeeping (no I/O or joins under the lock),
+> multi-camera warn + schema docstring note, and a stubbed-remuxer
+> bookkeeping test in video_engine/tests/. DESIGN_HISTORY entry + check off.
 
 ---
 
@@ -188,6 +229,22 @@ What remains needs the controller, but **no Claude session**:
    and the edge-capture-ratio check that sweep time and edge capture improved
    (baseline 2026-07-19: median sweep 1.53 s, 7–42 % of edges seen). Then
    move this item to DESIGN_HISTORY.
+
+**Fallback design if the probe verdict is dirty (decided 2026-07-19, Fable —
+implement only if needed, one Opus session):** concurrent per-group polling.
+Key constraints already worked out: `EconoliteSNMPClient.get()` serializes on
+an internal lock, so concurrency requires **N clients** (own `SnmpEngine` +
+socket each), one worker thread per client, each polling a fixed subset of
+the needed groups (2 workers × 3 groups halves the sweep; 6 × 1 ≈ one-RTT
+sweeps). Workers only write their group's latest bitmask + read-timestamp
+into a shared array (tiny lock or per-slot atomic tuple assignment);
+**`DetectorMonitor._poll` stays the single edge-emitting thread**, consuming
+snapshots — this preserves the one-emitter ordering guarantee the
+discrepancy-engine callbacks rely on. Before implementing, extend
+`__probe_snmp_batch.py` with a `--concurrency N` phase (N simultaneous
+single-OID clients hammering distinct groups) and re-run it in the same
+owner round trip — a weak Cobalt CPU may serialize or drop concurrent UDP
+requests, and that must be measured, not assumed.
 
 ### 4b. Unused-import cleanup (one mechanical sweep, zero behavior risk)
 
