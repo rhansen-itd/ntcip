@@ -155,15 +155,41 @@ the groups the config actually uses (6 of 8 at intersection 201) and
 consider per-group threads. Until one of these lands, treat discrepancy
 triggers on high-duty channels as unreliable.
 
-Suggested prompt:
-> [Opus] In the ntcip project, do Item 4a of ROADMAP.md: batch the per-OID
-> polling loops in `output_monitor.py:54` and `detector_monitor.py:66` into a
-> single `get(*oids)` call each, matching `phase_monitor.py`; then, against
-> real hardware, test whether the 8 detector-group OIDs survive a single PDU
-> (raise the chunk size for that call only) and measure the sweep time with
-> `video_engine/tools/__capture_ntcip.py`. Check whether anything (e.g.
-> `/api/stats`) depends on `stats['reads']` counting per-OID before changing
-> its meaning. DESIGN_HISTORY entry + check off.
+**Two-machine workflow (2026-07-19):** Claude Code cannot run on the
+controller-reachable machine, so the hardware evidence is gathered by a
+self-contained probe, `video_engine/tools/__probe_snmp_batch.py` (already
+written and self-tested; read-only GETs, safe on a live controller). The 4a
+loop is:
+
+1. **[Owner, controller machine]** `git pull`, then
+   `python3 video_engine/tools/__probe_snmp_batch.py --config
+   _intersections.json --intersection 201` (~2–4 min). Commit and push the
+   `snmp_batch_probe_*.json` it writes.
+2. **[Claude session, this machine]** read the probe JSON; implement per the
+   verdict: chunk clean at N>1 → raise the chunk *for the group-sweep call
+   only* (global `CHUNK_SIZE=1` stays, per CLAUDE.md) + batch the
+   `output_monitor.py:54` / `detector_monitor.py:66` call sites; chunk dirty →
+   fall back to polling only the config's needed groups (6 of 8) and consider
+   per-group threading. Check `/api/stats` `stats['reads']` semantics.
+3. **[Owner, controller machine]** pull the change, rerun
+   `__capture_ntcip.py` for ~10 min alongside a fresh datZ pull, push both.
+4. **[Claude session]** verify with `__correlate_channels.py` + the edge-
+   capture-ratio check that sweep time and edge capture actually improved
+   (baseline 2026-07-19: median sweep 1.53 s, 7–42 % of edges seen).
+
+With the probe results in hand, step 2 is mostly mechanical — Sonnet is
+acceptable there; Opus if the probe verdict is messy (flaky chunks, partial
+failures).
+
+Suggested prompt (step 2):
+> [Opus] In the ntcip project, do Item 4a of ROADMAP.md, step 2 of the
+> two-machine workflow: read the committed `snmp_batch_probe_*.json`, then
+> batch the per-OID polling loops in `output_monitor.py:54` and
+> `detector_monitor.py:66` into single `get(*oids)` calls, and apply the
+> probe's verdict (raise the detector-group sweep's chunk if clean, else
+> poll only needed groups). Do not change the global `CHUNK_SIZE`. Check
+> whether anything (e.g. `/api/stats`) depends on `stats['reads']` counting
+> per-OID. DESIGN_HISTORY entry + check off steps in the 4a workflow.
 
 ### 4b. Unused-import cleanup (one mechanical sweep, zero behavior risk)
 
