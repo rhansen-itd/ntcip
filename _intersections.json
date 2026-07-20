@@ -5,6 +5,7 @@
     "controller_ip": "10.37.23.200",
     "snmp_port": 501,
     "snmp_community": "administrator",
+    "snmp_chunk_size": 8,
     "poll_interval_sec": 0.2,
     "timezone": "US/Mountain",
     "cameras": {
