@@ -180,10 +180,16 @@ the 2026-07-15 DESIGN_HISTORY entry.
   microseconds — they only mutate a few scalar fields under a lock. Don't add
   I/O, file writes, or blocking calls inside a callback; do that work on the
   background evaluator thread instead.
-- `EconoliteSNMPClient` uses `CHUNK_SIZE = 1` (`ntcip_monitor/core/snmp_client.py`)
-  to avoid "Too Big" SNMP errors on Econolite Cobalt/EOS dense tables. **Do not
-  change this** without confirming against real hardware — it looks
-  inefficient but is a deliberate workaround.
+- `EconoliteSNMPClient` sends `chunk_size` OIDs per PDU (constructor param,
+  **default 1** — the verified-safe Cobalt/EOS setting that avoids "Too Big"
+  errors). **Do not raise the default**; raise it per-deployment only via the
+  intersection config's `snmp_chunk_size` key (standalone app:
+  `controller.chunk_size`) after a green `__probe_snmp_batch.py` run on that
+  controller. Monitor poll loops are batched into one `get(*oids)` call per
+  sweep (order-preserving; wire behavior at chunk 1 is identical to the old
+  per-OID loops), and `system_runner` polls only the detector groups the
+  config's detectors occupy. `stats['reads']` counts poll cycles, not OIDs.
+  Tests: `ntcip_monitor/tests/test_snmp_batching.py` (stubbed pysnmp).
 - **Measured 2026-07-19 (load-bearing):** because of `CHUNK_SIZE = 1`, one
   detector sweep = 8 sequential SNMP round trips, so the **effective sampling
   cycle is ~1.0–1.5 s wall-clock** regardless of `poll_interval` (which is

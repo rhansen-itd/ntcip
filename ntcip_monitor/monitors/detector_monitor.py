@@ -61,12 +61,17 @@ class DetectorMonitor(BaseMonitor):
     def _poll(self):
         """Poll detectors and emit events on changes."""
         try:
-            # Read all required detector groups ONE AT A TIME to ensure correct pairing
+            # One batched get() for every required group. The client itself
+            # splits the request into PDUs of its configured chunk_size
+            # (default 1, identical wire behavior to the old per-group loop)
+            # and preserves value order, so pairing is safe. See ROADMAP 4a.
+            oids = [DETECTOR_GROUPS[g] for g in self._groups_to_poll]
+            values = self.snmp_client.get(*oids)
+            if len(oids) == 1:
+                values = [values]
+
             all_detectors = []
-            for group_idx in self._groups_to_poll:
-                oid = DETECTOR_GROUPS[group_idx]
-                bitmask = self.snmp_client.get(oid)
-                
+            for group_idx, bitmask in zip(self._groups_to_poll, values):
                 start_detector = group_idx * 8 + 1
                 detectors = parse_detectors_from_bitmask(bitmask, start_detector)
                 all_detectors.extend(detectors)

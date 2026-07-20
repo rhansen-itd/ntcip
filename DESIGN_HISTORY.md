@@ -505,3 +505,31 @@ decided. Entries after this point are logged as the decision lands.
   treated as unreliable; (c) `config_manager`'s "<0.5 s poll" warning is
   misleading — the sweep itself already exceeds it. Committed evidence:
   the capture CSV, the datZ, and its extracted event CSV.
+
+- 2026-07-19 — **4a software half landed probe-ready (final Fable session,
+  chosen as highest-leverage remaining work).** With the controller round
+  trip impossible before Fable access ended, the code was restructured so
+  applying the eventual probe verdict is a config flip, not a model session:
+  (1) `EconoliteSNMPClient` now takes `chunk_size` (default 1 — the
+  verified-safe Cobalt wire behavior; the old hardcoded `CHUNK_SIZE=1` is the
+  class default). (2) `detector_monitor._poll` and `output_monitor._poll`
+  batch their per-OID loops into one `get(*oids)` each (the client re-chunks
+  internally and preserves order, so wire behavior at chunk 1 is byte-
+  identical to before; `stats['reads']` now counts poll cycles, not OIDs —
+  commented for `/api/stats`). (3) `system_runner._build_ntcip_monitor`
+  derives `detector_range` from the intersection's configured detectors
+  instead of hardcoding (1, 65) — at 201 that's groups 1–6 instead of 8, a
+  guaranteed ~25 % sweep cut with zero risk — and passes a new
+  `snmp_chunk_size` intersection-config key (default 1) through to the
+  client; the standalone app gained `controller.chunk_size`. (4) First
+  ntcip_monitor tests: `ntcip_monitor/tests/test_snmp_batching.py`, 10 cases
+  against a stubbed `pysnmp.hlapi` whose fake `getCmd` logs per-PDU OID
+  counts — pinning chunk splitting/ordering, scalar single-OID return,
+  batched polls emitting correct edges, and range→groups derivation.
+  **Why:** the 2026-07-19 correlation work proved the RTT-bound sweep
+  (median 1.53 s, 7–42 % edge capture) is the dominant accuracy defect; this
+  change banks the risk-free part now and reduces the remaining hardware
+  work to: run `__probe_snmp_batch.py`, set `snmp_chunk_size` per its
+  verdict, re-measure with `__capture_ntcip.py`/`__correlate_channels.py`
+  (protocol in ROADMAP 4a). Runner-up considered and deferred to Opus:
+  Item 8 (remux manager lock — real but rare-trigger hazard).

@@ -15,15 +15,28 @@ class EconoliteSNMPClient:
     Includes thread safety, chunking for large requests, and specific type handling.
     """
     
-    def __init__(self, ip, port=501, community='administrator', timeout=2, retries=2):
+    #: Verified-safe default for Econolite Cobalt/EOS: one OID per PDU.
+    #: Raise per-instance via ``chunk_size=`` ONLY on the strength of a green
+    #: hardware probe (video_engine/tools/__probe_snmp_batch.py — ROADMAP 4a);
+    #: the "Too Big" failures were observed on dense tables, and whether small
+    #: multi-OID PDUs are safe is a per-controller empirical question.
+    DEFAULT_CHUNK_SIZE = 1
+
+    def __init__(self, ip, port=501, community='administrator', timeout=2,
+                 retries=2, chunk_size=None):
         self.ip = ip
         self.port = port
         self.community = community
         self.timeout = timeout
         self.retries = retries
+        self.chunk_size = max(1, int(chunk_size or self.DEFAULT_CHUNK_SIZE))
         self.engine = SnmpEngine()
         self._lock = threading.Lock()  # Thread safety lock
-        
+
+        # NOTE: 'reads' counts get() CALLS, not OIDs on the wire. Since the
+        # 2026-07-19 call-site batching a detector sweep is one call (was 8),
+        # so this counter's rate dropped ~8x with unchanged wire traffic at
+        # chunk_size=1. /api/stats consumers should read it as "poll cycles".
         self.stats = {
             'reads': 0,
             'writes': 0,
@@ -33,16 +46,15 @@ class EconoliteSNMPClient:
     def get(self, *oids):
         """
         Perform SNMP GET on one or more OIDs.
-        Includes Chunking (Size=1) to prevent 'Too Big' errors on Econolite controllers.
+        The request is split into PDUs of at most ``self.chunk_size`` OIDs
+        (default 1 — prevents 'Too Big' errors on Econolite controllers).
         Thread-safe.
         """
         with self._lock:
             self.stats['reads'] += 1
-            
-            # --- CHUNK SIZE CONFIGURATION ---
-            # Set to 1 to force the controller to answer one item at a time.
-            CHUNK_SIZE = 1
-            
+
+            CHUNK_SIZE = self.chunk_size
+
             all_values = []
             
             # Convert all OID strings to ObjectType objects once

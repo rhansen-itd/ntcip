@@ -489,6 +489,19 @@ class SystemRunner:
         poll_interval: float = float(
             self._intersection_cfg.get("poll_interval_sec", 1.0)
         )
+        # ROADMAP 4a: each detector group is one SNMP round trip at
+        # chunk_size=1, so the sweep is RTT-bound (~1.0-1.5 s measured
+        # 2026-07-19). Two config-driven mitigations:
+        #  - poll only the groups the configured detectors occupy (the
+        #    derived range below) instead of all 8;
+        #  - "snmp_chunk_size" (default 1) raises OIDs-per-PDU — set it >1
+        #    ONLY after a green __probe_snmp_batch.py run on this controller.
+        chunk_size: int = int(self._intersection_cfg.get("snmp_chunk_size", 1))
+        det_ids = [
+            int(d) for d in self._intersection_cfg.get("detectors", {})
+            if str(d).isdigit()
+        ]
+        detector_range = (min(det_ids), max(det_ids) + 1) if det_ids else (1, 65)
 
         log.info(
             "Building NTCIP monitor",
@@ -496,6 +509,8 @@ class SystemRunner:
                 "controller_ip": ctrl_ip,
                 "snmp_port": snmp_port,
                 "poll_interval_sec": poll_interval,
+                "snmp_chunk_size": chunk_size,
+                "detector_range": list(detector_range),
             },
         )
 
@@ -505,12 +520,13 @@ class SystemRunner:
             community=community,
             timeout=2,
             retries=2,
+            chunk_size=chunk_size,
         )
 
         return DetectorMonitor(
             snmp_client,
             poll_interval=poll_interval,
-            detector_range=(1, 65),
+            detector_range=detector_range,
         )
 
     def _wire_ntcip_events(self) -> None:

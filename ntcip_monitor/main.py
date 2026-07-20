@@ -124,16 +124,22 @@ class NTCIPMonitorApp:
         community = self.config_loader.get('controller.community', 'administrator')
         timeout = self.config_loader.get('controller.timeout', 2)
         retries = self.config_loader.get('controller.retries', 2)
-        
+        # OIDs per PDU; keep the default 1 unless a hardware probe
+        # (__probe_snmp_batch.py, ROADMAP 4a) proved this controller accepts
+        # multi-OID PDUs.
+        chunk_size = self.config_loader.get('controller.chunk_size', 1)
+
         self.snmp_client = EconoliteSNMPClient(
             ip=ip,
             port=port,
             community=community,
             timeout=timeout,
-            retries=retries
+            retries=retries,
+            chunk_size=chunk_size
         )
-        
-        print(f"SNMP Client: {ip}:{port} (community: {community})")
+
+        print(f"SNMP Client: {ip}:{port} (community: {community}, "
+              f"chunk_size: {self.snmp_client.chunk_size})")
     
     def _test_connection(self):
         """Test connection to controller."""

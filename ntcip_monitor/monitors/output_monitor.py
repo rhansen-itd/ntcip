@@ -46,18 +46,21 @@ class OutputMonitor(BaseMonitor):
     def _poll(self):
         """Poll outputs and emit events on changes."""
         try:
-            # Determine which outputs to read
+            # One batched get() for the whole range. The client splits the
+            # request into PDUs of its configured chunk_size (default 1 —
+            # identical wire behavior to the old per-output loop) and
+            # preserves value order, so pairing is safe. See ROADMAP 4a.
             start, end = self.output_range
-            outputs_to_read = range(start, end)
-            
-            # Read outputs ONE AT A TIME to ensure correct pairing
-            for output_num in outputs_to_read:
-                oid = OUTPUT_OIDS[output_num - 1]
-                value = self.snmp_client.get(oid)
-                
+            outputs_to_read = list(range(start, end))
+            oids = [OUTPUT_OIDS[n - 1] for n in outputs_to_read]
+            values = self.snmp_client.get(*oids)
+            if len(oids) == 1:
+                values = [values]
+
+            for output_num, value in zip(outputs_to_read, values):
                 new_state = OutputState.ON if value == 1 else OutputState.OFF
                 old_state = self._last_outputs.get(output_num)
-                
+
                 if old_state != new_state:
                     self._emit_output_change_events(output_num, old_state, new_state)
                     self._last_outputs[output_num] = new_state
