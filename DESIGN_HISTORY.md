@@ -475,3 +475,33 @@ decided. Entries after this point are logged as the decision lands.
   package `__init__` eagerly imports pysnmp, which `--simulate` must not
   require. Next step: capture a few minutes live and correlate per-channel
   edge streams against pyatspm channels (argmax similarity → true map).
+
+- 2026-07-19 — **Channel mapping CONFIRMED; root cause of the phase-2/6/7
+  discrepancy storms is RTT-bound SNMP sampling, not the config.** Correlated
+  the 10-min raw NTCIP capture against the controller's own high-res log
+  (datZ `ECON_10.37.23.200_2026_07_19_1730.datZ`, decoded with pyatspm's
+  `parse_datz_bytes`; 489 s overlap) using the new
+  `video_engine/tools/__correlate_channels.py` — Matthews-correlation scoring
+  of per-channel ON/OFF waveforms (Jaccard was first tried and rejected:
+  high-duty channels cross-match by chance), two-pass clock-skew alignment
+  (+1.08 s NTCIP-behind-controller measured), margin-aware verdicts so
+  co-located partners (which co-actuate by design) aren't misread as remaps.
+  **Result: every verifiable channel in `_intersections.json` matches its own
+  number.** The real defect, measured from the same capture: with
+  `CHUNK_SIZE=1` the 8 detector-group reads are sequential round trips, so
+  the **effective detector sweep is 1.0–1.5 s wall-clock** (median 1.53 s;
+  `poll_interval` is only the inter-sweep sleep), and NTCIP catches only
+  **~7–42 % of true detector edges** (ch 26: 6 of 64 edges in the overlap;
+  ch 38: 3 of 43; ch 33: 29 of 153). Phases 2/6/7 are high-duty (80–94 % ON)
+  presence zones with frequent sub-second gaps — aliased differently per
+  technology, they *look* like constant disagreement to the engine while the
+  controller's 0.1 s data shows agreement; phases 1/3/8 have sparse
+  multi-second pulses that survive the sampling, which is why they matched
+  ground truth. **Implications:** (a) ROADMAP 4a (batch the per-OID SNMP
+  reads — test whether 8 small group OIDs fit one PDU despite the Cobalt
+  "Too Big" history) is now the highest-leverage accuracy fix (~8× sweep
+  speedup if it works); (b) until then, discrepancy rules on high-duty
+  channels operate below the sampling floor and their triggers should be
+  treated as unreliable; (c) `config_manager`'s "<0.5 s poll" warning is
+  misleading — the sweep itself already exceeds it. Committed evidence:
+  the capture CSV, the datZ, and its extracted event CSV.

@@ -140,13 +140,30 @@ note: `self.stats['reads']` currently increments once per OID; after batching
 it increments once per `get()` call, which changes what that stat means if
 anything depends on it (e.g. the web UI `/api/stats` endpoint).
 
+**Priority upgrade (2026-07-19, measured):** this is now the
+highest-leverage accuracy item, not just hygiene. The channel-correlation
+work (see DESIGN_HISTORY) measured the real cost of `CHUNK_SIZE=1`: one
+detector sweep = 8 sequential round trips = **1.0–1.5 s effective sampling
+cycle** (median 1.53 s), so NTCIP sees only ~7–42 % of true detector edges —
+the direct cause of the phase-2/6/7 false-trigger storms. Batching the call
+sites (the original scope) fixes none of that on its own; the win requires a
+**hardware test**: try the 8 single-byte detector-group OIDs in one PDU
+against the Cobalt (the "Too Big" failures were on *dense tables*, which this
+is not). If one PDU works, sweep time drops ~8× to ~0.15–0.2 s and the
+0.2 s `poll_interval` becomes real. If it fails, fall back to polling only
+the groups the config actually uses (6 of 8 at intersection 201) and
+consider per-group threads. Until one of these lands, treat discrepancy
+triggers on high-duty channels as unreliable.
+
 Suggested prompt:
 > [Opus] In the ntcip project, do Item 4a of ROADMAP.md: batch the per-OID
 > polling loops in `output_monitor.py:54` and `detector_monitor.py:66` into a
-> single `get(*oids)` call each, matching `phase_monitor.py`. Do not change
-> `CHUNK_SIZE`. Check whether anything (e.g. `/api/stats`) depends on
-> `stats['reads']` counting per-OID before changing its meaning. DESIGN_HISTORY
-> entry + check off.
+> single `get(*oids)` call each, matching `phase_monitor.py`; then, against
+> real hardware, test whether the 8 detector-group OIDs survive a single PDU
+> (raise the chunk size for that call only) and measure the sweep time with
+> `video_engine/tools/__capture_ntcip.py`. Check whether anything (e.g.
+> `/api/stats`) depends on `stats['reads']` counting per-OID before changing
+> its meaning. DESIGN_HISTORY entry + check off.
 
 ### 4b. Unused-import cleanup (one mechanical sweep, zero behavior risk)
 

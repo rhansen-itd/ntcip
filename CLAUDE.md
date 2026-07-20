@@ -184,8 +184,19 @@ the 2026-07-15 DESIGN_HISTORY entry.
   to avoid "Too Big" SNMP errors on Econolite Cobalt/EOS dense tables. **Do not
   change this** without confirming against real hardware — it looks
   inefficient but is a deliberate workaround.
+- **Measured 2026-07-19 (load-bearing):** because of `CHUNK_SIZE = 1`, one
+  detector sweep = 8 sequential SNMP round trips, so the **effective sampling
+  cycle is ~1.0–1.5 s wall-clock** regardless of `poll_interval` (which is
+  only the inter-sweep sleep). NTCIP therefore catches only ~7–42 % of true
+  detector edges on fast-cycling channels; discrepancy rules on high-duty
+  presence zones (intersection 201 phases 2/6/7) operate below this sampling
+  floor and mass-produce false triggers. The per-channel *mapping* in
+  `_intersections.json` was verified correct against controller high-res data
+  (`__correlate_channels.py`) — do not "fix" accuracy problems by remapping
+  channels; fix the sweep speed (ROADMAP 4a) or gate the rules.
 - Poll interval is configurable per-intersection; a warning is logged if it
-  drops below 0.5s (`config_manager.py`).
+  drops below 0.5s (`config_manager.py`) — note this warning understates
+  reality given the sweep-time floor above.
 - Econolite Cobalt specifics baked into the code: SNMP **v1** (not v2c), port
   **501** (not 161), community string = controller username, Phase 1 = bit 0.
 
@@ -232,8 +243,10 @@ As of this writing:
   (engine-log vs ATSPM-export precision/recall report), `__capture_ntcip.py`
   (raw NTCIP detector-edge capture, all 64 channels, ATSPM 82/81 event codes —
   for channel-mapping audits against the pyatspm DB; reuses the production
-  SNMP client/OID math, `--simulate` for offline smoke tests), plus
-  `simulate_playback.py`. `video_engine/tests/` holds the unit tests
+  SNMP client/OID math, `--simulate` for offline smoke tests),
+  `__correlate_channels.py` (MCC waveform correlation of a capture against a
+  controller high-res export — verifies the channel map; see the 2026-07-19
+  DESIGN_HISTORY entries), plus `simulate_playback.py`. `video_engine/tests/` holds the unit tests
   (`test_discrepancy_rules.py`, stdlib `unittest` — the layout precedent for
   ROADMAP 4d) and `video_engine/tests/fixtures/` the captured test data
   (`sample.ts` + its `.packets.jsonl` profile). The four tools that import
