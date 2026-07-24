@@ -308,8 +308,8 @@ pure/deterministic — no mocking needed — making a reasonable first
   (Jules's finding cites this as `get_safe_timezone` at line 194 — that name/
   line is stale; it's the same function, just renamed/moved since. Still
   genuinely untested: feed it an invalid IANA name and assert it falls back
-  to `pytz.utc` and logs a warning — no mocking needed, `pytest`'s `caplog`
-  fixture covers the log assertion.)
+  to `pytz.utc` and logs a warning — no mocking needed,
+  `unittest.TestCase.assertLogs` covers the log assertion.)
 
 **Sequencing (2026-07-19):** Item 7 has landed and established the layout
 precedent: per-package tests (`video_engine/tests/test_discrepancy_rules.py`),
@@ -324,7 +324,8 @@ hence the Sonnet target below, not Opus.
 
 Suggested prompt:
 > [Sonnet] In the ntcip project, do Item 4d of ROADMAP.md: cover the six
-> pure/deterministic functions listed there with `pytest`. Do NOT invent a new
+> pure/deterministic functions listed there with stdlib `unittest` (pytest is
+> not installed). Do NOT invent a new
 > test layout — follow the `tests/` layout Item 7 already established (check
 > `video_engine/tests/` and the DESIGN_HISTORY entry from 7) and place the
 > `ntcip_monitor` tests in the matching per-package location. No mocking needed.
@@ -336,7 +337,7 @@ Suggested prompt:
 The remaining "lacks test coverage" findings all need a mocked `snmp_client`,
 a Flask test client, an in-memory SQLite DB, or similar fixtures — a much
 bigger lift than 4d's pure functions. Worth a real test-strategy session once
-4d's `pytest` scaffolding exists, not ad hoc: `DetectorMonitor`, `OutputMonitor`,
+4d's `unittest` scaffolding exists, not ad hoc: `DetectorMonitor`, `OutputMonitor`,
 `PhaseMonitor`, `ControllerControl`, `NTCIPMonitorApp`, `WebUI`,
 `DiscrepancyEngine.__init__` error handling, `RoutineScheduler`,
 `ConfigProvider`/`JsonFileConfigProvider`/`SqliteCentralConfigProvider`,
