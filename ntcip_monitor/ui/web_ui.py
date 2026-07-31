@@ -42,7 +42,12 @@ over a camera background, recolored from the live monitor state. Its four
   ``--web-host 0.0.0.0`` to reach the dashboard would not expect to have
   published the camera with it. The two video routes additionally accept the
   token as a ``?token=`` query parameter, because an ``<img>`` tag — how the
-  MJPEG stream of Item 11c is consumed — cannot set a request header.
+  MJPEG stream is consumed — cannot set a request header.
+
+With ``background: "live"`` (Item 11c) the camera is decoded once and shared:
+every viewer of ``/api/overlay/stream`` and every ``/api/overlay/background``
+hit attaches to the same decoder thread, which is opened on the first viewer
+and torn down shortly after the last one leaves.
 """
 
 from flask import Flask, Response, render_template, jsonify, request
@@ -64,7 +69,7 @@ logger = logging.getLogger(__name__)
 #: Request header carrying the shared secret for ``/api/control/*``.
 CONTROL_TOKEN_HEADER = 'X-NTCIP-Control-Token'
 
-#: Multipart boundary for ``/api/overlay/stream`` (ROADMAP Item 11c).
+#: Multipart boundary for ``/api/overlay/stream``.
 MJPEG_BOUNDARY = b'ntcipframe'
 
 #: Hostnames that resolve to the loopback interface but aren't IP literals.
@@ -408,7 +413,12 @@ class WebUI:
 
         @self.flask_app.route('/api/overlay/stream')
         def overlay_stream():
-            """MJPEG stream — live source only (ROADMAP Item 11c)."""
+            """MJPEG stream — live source only.
+
+            Holds its worker thread for the life of the connection; Flask's
+            dev server runs threaded, so the dashboard's 250 ms polling is
+            unaffected by a viewer sitting on this route.
+            """
             denied = self._check_video_access()
             if denied:
                 return denied

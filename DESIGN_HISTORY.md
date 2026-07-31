@@ -954,3 +954,59 @@ decided. Entries after this point are logged as the decision lands.
   Flask), `supports_stream()` gates the route, `create_background_source()`
   raises `NotImplementedError` for `"live"`, and the page already branches on
   `SOURCE_KIND`.
+
+- 2026-07-31 — **ROADMAP 11c landed: `RtspMjpegSource` — one shared decoder
+  per camera, MJPEG to every viewer.** `ntcip_monitor/ui/overlay/source.py`
+  gained the live source 11b left seams for; `create_background_source()` now
+  builds it for `background: "live"` instead of raising. No new dependency:
+  PyAV decodes h264 and re-encodes MJPEG (`av.CodecContext.create('mjpeg','w')`),
+  and the import is guarded by `try/except ImportError` so the overlay package
+  still loads — and its tests still run — on an interpreter without `av`.
+  **One decoder thread per source, ref-counted, not one per client.** Viewers
+  attach as subscribers: an `/api/overlay/stream` generator for its lifetime, an
+  `/api/overlay/background` request for the length of one frame wait. The thread
+  opens lazily on the first subscriber and retires `idle_grace_sec` (10 s) after
+  the last one leaves. **Why:** an idle page must cost the intersection no RTSP
+  session at all, N tabs must cost one stream rather than N, and the grace
+  period keeps a page reload from tearing the camera session down and rebuilding
+  it. The same property makes `/api/overlay/background` work on a live source —
+  it returns the latest decoded frame, so the still endpoint serves both kinds.
+  **The start/stop race is closed with a per-thread liveness token**
+  (`_DecoderSession`), the same shape as the generation counter on the remux
+  manager's stop timers: the retiring thread commits `session.running = False`
+  and clears `self._session` *under the lock*, so a subscriber arriving before
+  the commit keeps the thread alive and one arriving after it starts a fresh
+  thread — and a thread that is shutting down can never stop its successor.
+  Lock discipline follows CLAUDE.md's remux rule: the condition is held only to
+  publish a finished JPEG (a reference assignment plus `notify_all`) or to read
+  bookkeeping, never across a connect, a decode, an encode, or a socket write.
+  **Decode every frame, encode at `stream_fps`** (default 5, from a 10 fps
+  source). Encoding is the expensive half and the shapes' own resolution is the
+  ~1–1.5 s SNMP sweep, so publishing faster would buy nothing. JPEG quality is
+  set through the encoder's quantiser bounds (`qmin`/`qmax`, new optional
+  `overlay.stream_quality`, default 12 ≈ 56 KB/frame at 720×720) — FFmpeg's
+  `-q:v`/`qscale` options are silently ignored by this encoder, which was
+  verified, not assumed.
+  **A stalled stream re-sends the last good frame** every `keepalive_sec` (2 s)
+  rather than letting the viewer's `<img>` break, and reconnects with 1 s→30 s
+  exponential backoff on both a failed open and a mid-stream drop; a clean EOF
+  is treated as a drop. The page additionally retries the request itself after
+  3 s on an `<img>` error, which covers the monitor restarting underneath it.
+  **Verified** with 86 stdlib-`unittest` cases (66 from 11a/11b + 20 new): the
+  PyAV seams (`_open_container`/`_decode`/`_encode_jpeg`) are stubbed so
+  subscriber counting, shared sessions, idle teardown, re-open after teardown,
+  fps capping, keepalive re-send, backoff on failed open, mid-stream reconnect,
+  and `close()` are all covered on a bare interpreter, plus two real-PyAV tests
+  that skip when `av` or the fixture is absent. End-to-end through the actual
+  Flask routes with `video_engine/tests/fixtures/sample.ts` standing in for the
+  camera (a data file — no `video_engine` import): two concurrent MJPEG clients
+  received **byte-identical frames from a single container open** at ~5 fps,
+  `/api/overlay/background` returned a valid 720×720 JPEG of the intersection,
+  the decoder retired ~10 s after both clients left, and an unreachable
+  `rtsp://` URL degraded to a 503 on that one route while `/overlay`,
+  `/api/overlay/shapes` and `/api/overlay/state` stayed 200. The 11b access
+  interlock still applies unchanged: on a `0.0.0.0` bind with no token, both
+  video routes answer 403 and `state` answers 200.
+  **`config.json` stays on `background: "file"`** — `camera_url` is still empty
+  by design (11d authors it from `video_engine/intersections.json`), so
+  switching to live is a two-key edit once that lands.

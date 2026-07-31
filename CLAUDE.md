@@ -286,22 +286,42 @@ the deployment story changes. There's still no in-repo route test (a
 Flask-test-client case is ROADMAP 4e), though `flask` and `pysnmp` were
 installed here during 11b and the routes were verified from a scratch harness.
 
-## Live video overlay (2026-07-31, ROADMAP 11a+11b — load-bearing)
+## Live video overlay (2026-07-31, ROADMAP 11a–11c — load-bearing)
 
 `GET /overlay` draws pyatspm-calibrated detector loops and stopbars on a
 `<canvas>` over a camera image, recolored from the live monitor state. Config
 lives in `config.json`'s `overlay` section (`enabled`, `shapes_csv`,
-`background`, `image_path`, `camera_url`, `stream_fps`); absent or
-`enabled: false` means every overlay route answers 404. Deployment data for
-intersection 201 is in `overlay/` at the repo root.
+`background`, `image_path`, `camera_url`, `stream_fps`, plus the optional
+`stream_quality` and `rtsp_transport`); absent or `enabled: false` means every
+overlay route answers 404. Deployment data for intersection 201 is in
+`overlay/` at the repo root. The shipped config uses `background: "file"`
+because `camera_url` is empty until ROADMAP 11d authors it.
 
 - **`ntcip_monitor/ui/overlay/` imports nothing heavy.** `shapes.py` (vendored
   from pyatspm — see the module docstring for the four deliberate deviations),
-  `status.py`, and `source.py` are stdlib-only: no Flask, no cv2, no `atspm`,
-  no `video_engine`, no monitor imports. That is what keeps 66 unit tests
-  runnable on a bare interpreter (`python3 ntcip_monitor/tests/test_overlay_shapes.py`).
-  Flask lives only in `web_ui.py` — including the MJPEG multipart framing, so
-  11c's live source stays testable.
+  `status.py`, and `source.py` are stdlib-only apart from one guarded
+  `import av` in `source.py` (`try/except ImportError`, touched only on the
+  live path): no Flask, no cv2, no `atspm`, no `video_engine`, no monitor
+  imports. That is what keeps 86 unit tests runnable on a bare interpreter
+  (`python3 ntcip_monitor/tests/test_overlay_shapes.py`) — the live source's
+  three PyAV seams (`_open_container` / `_decode` / `_encode_jpeg`) are
+  overridable precisely so its threading is testable without a camera. Flask
+  lives only in `web_ui.py`, including the MJPEG multipart framing.
+- **The live source shares one decoder per camera** (`RtspMjpegSource`,
+  `background: "live"`). Viewers are **ref-counted subscribers** — a stream
+  generator for its lifetime, a `/api/overlay/background` request for one
+  frame — and the decoder thread opens on the first and retires
+  `idle_grace_sec` (10 s) after the last. N tabs cost the intersection one
+  RTSP session, an idle page costs none. Bookkeeping follows the same lock
+  discipline as the remux manager (decide/collect under the lock, act after
+  releasing; never hold it across a connect, decode, encode, or socket write),
+  and each decoder thread carries a `_DecoderSession` liveness token so a
+  retiring thread can never stop its successor. Frames are decoded at the
+  source rate but encoded only at `stream_fps` — encoding is the expensive
+  half. JPEG quality comes from the encoder's `qmin`/`qmax`
+  (`overlay.stream_quality`, 1 best–31 worst, default 12); FFmpeg's
+  `-q:v`/`qscale` options are ignored by this encoder (verified, don't retry
+  them).
 - **Shape CSV colors are BGR** (OpenCV order, as pyatspm authors them):
   `"255,0,0"` is *blue*. `shapes.bgr_to_rgb()` reverses the triple exactly
   once, inside `shapes_payload()` on the way to `/api/overlay/shapes`; the
@@ -318,10 +338,11 @@ intersection 201 is in `overlay/` at the repo root.
   coordinates; canvas and background are stacked at `width:100%`. No
   coordinate math in the page — don't add any.
 - **Every failure degrades to a 503 on one route**, never a crash: a missing
-  CSV, an unreadable image, or `background: "live"` (not implemented until
-  11c) leaves the dashboard and the rest of the page working.
-  `FileImageSource` re-reads on mtime/size change, so swapping the calibration
-  still needs no restart.
+  CSV, an unreadable image, or an unreachable camera leaves the dashboard and
+  the rest of the page working. `FileImageSource` re-reads on mtime/size
+  change, so swapping the calibration still needs no restart; the live source
+  reconnects with 1 s→30 s backoff and keeps re-sending the last good frame
+  every 2 s so a viewer's `<img>` doesn't break mid-outage.
 - The page **labels its own resolution** — SNMP sampling is ~1–1.5 s effective
   (see the NTCIP rules above), far coarser than the video. Keep that caveat if
   you touch the template.

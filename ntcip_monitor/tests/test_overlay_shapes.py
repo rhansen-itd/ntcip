@@ -1,11 +1,15 @@
 """Unit tests for the live video overlay's shape loader, status resolution
-(ROADMAP Item 11a), wire payload and background sources (Item 11b).
+(ROADMAP Item 11a), wire payload and background sources (Items 11b/11c).
 
 Every module under test is deliberately dependency-free — no Flask, no
 OpenCV, no ``atspm``, no monitor imports — so this suite runs on a bare stdlib
-Python with nothing installed. That is also why the Flask routes in
-``web_ui.py`` are not covered here: they need a Flask test client, which is
-ROADMAP 4e's work. Test CSVs are generated into a temporary
+Python with nothing installed. The live MJPEG source's PyAV seams
+(``_open_container`` / ``_decode`` / ``_encode_jpeg``) are stubbed for the same
+reason, so its subscriber, teardown and reconnect behavior is covered without a
+camera; the two tests that drive real PyAV skip themselves when it or the
+captured stream is missing. That dependency-free rule is also why the Flask
+routes in ``web_ui.py`` are not covered here: they need a Flask test client,
+which is ROADMAP 4e's work. Test CSVs are generated into a temporary
 directory rather than committed as fixtures, so the suite is hermetic; the one
 test that reads the owner's real calibration file skips itself when that file
 is absent.
@@ -21,6 +25,7 @@ import logging
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -37,6 +42,8 @@ from ntcip_monitor.ui.overlay.shapes import (  # noqa: E402
 )
 from ntcip_monitor.ui.overlay.source import (  # noqa: E402
     FileImageSource,
+    RtspMjpegSource,
+    av,
     create_background_source,
 )
 from ntcip_monitor.ui.overlay.status import (  # noqa: E402
@@ -51,6 +58,10 @@ SHAPES_LOGGER = "ntcip_monitor.ui.overlay.shapes"
 SOURCE_LOGGER = "ntcip_monitor.ui.overlay.source"
 
 REAL_CSV = Path("/home/hansrkid/vid_cfg720.csv")
+
+#: Captured stream from the overlay's camera, used as a stand-in for RTSP.
+SAMPLE_STREAM = (Path(__file__).resolve().parents[2]
+                 / "video_engine" / "tests" / "fixtures" / "sample.ts")
 
 
 # ---------------------------------------------------------------------------
@@ -668,16 +679,328 @@ class TestCreateBackgroundSource(unittest.TestCase):
         with self.assertRaises(ValueError):
             create_background_source({"background": "file"})
 
-    def test_live_is_not_implemented_yet(self):
-        # ROADMAP 11c. web_ui turns this into a logged 503, not a crash.
-        with self.assertRaises(NotImplementedError):
-            create_background_source({
-                "background": "live", "camera_url": "rtsp://example/stream",
-            })
+    def test_live_source(self):
+        source = create_background_source({
+            "background": "live",
+            "camera_url": "rtsp://example/stream",
+            "stream_fps": 3,
+            "stream_quality": 20,
+        })
+        self.assertIsInstance(source, RtspMjpegSource)
+        self.assertEqual(source.kind, "live")
+        self.assertEqual(source.url, "rtsp://example/stream")
+        self.assertEqual(source.stream_fps, 3.0)
+        self.assertEqual(source.quality, 20)
+        # Constructing must not connect — an enabled overlay on an unreachable
+        # camera has to leave the dashboard working.
+        self.assertFalse(source.stats()["running"])
+
+    def test_live_defaults(self):
+        source = create_background_source({
+            "background": "live", "camera_url": "rtsp://example/stream",
+        })
+        self.assertEqual(source.stream_fps, 5.0)
+        self.assertEqual(source.quality, 12)
+        self.assertEqual(source.rtsp_transport, "tcp")
+
+    def test_live_without_camera_url_raises(self):
+        # web_ui turns this into a logged 503, not a crash.
+        with self.assertRaises(ValueError):
+            create_background_source({"background": "live"})
 
     def test_unknown_background_raises(self):
         with self.assertRaises(ValueError):
             create_background_source({"background": "webcam"})
+
+
+# ---------------------------------------------------------------------------
+# Live MJPEG source (ROADMAP 11c)
+# ---------------------------------------------------------------------------
+
+class _FakeFrame:
+    """Stands in for an ``av.VideoFrame``; only the size matters here."""
+
+    def __init__(self, index, width=8, height=8):
+        self.index = index
+        self.width = width
+        self.height = height
+
+
+class _FakeContainer:
+    """Records that the decoder closed its container."""
+
+    def __init__(self):
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+class _FakeLiveSource(RtspMjpegSource):
+    """:class:`RtspMjpegSource` with the three PyAV seams replaced.
+
+    Keeps the subscriber bookkeeping, throttling, teardown and reconnect logic
+    under test on a bare interpreter — no PyAV, no camera, no real socket.
+
+    Attributes:
+        containers: Every container handed out, in open order.
+        decoded: Frames yielded by the fake decoder so far.
+        fail_opens: Remaining open attempts that will raise.
+        frames_per_connection: Frames a connection yields before ``drop_error``
+            (``None`` for an endless stream).
+    """
+
+    def __init__(self, fail_opens=0, frames_per_connection=None,
+                 drop_error=True, frame_interval=0.002, **kwargs):
+        kwargs.setdefault("idle_grace_sec", 0.05)
+        kwargs.setdefault("keepalive_sec", 0.05)
+        kwargs.setdefault("first_frame_timeout_sec", 2.0)
+        kwargs.setdefault("base_backoff_sec", 0.01)
+        kwargs.setdefault("max_backoff_sec", 0.02)
+        super().__init__("rtsp://fake/stream", **kwargs)
+        self.containers = []
+        self.decoded = 0
+        self.fail_opens = fail_opens
+        self.frames_per_connection = frames_per_connection
+        self.drop_error = drop_error
+        self.frame_interval = frame_interval
+
+    def _open_container(self):
+        if self.fail_opens > 0:
+            self.fail_opens -= 1
+            raise OSError("connection refused")
+        container = _FakeContainer()
+        self.containers.append(container)
+        return container, object()
+
+    def _decode(self, container, stream):
+        emitted = 0
+        while True:
+            if (self.frames_per_connection is not None
+                    and emitted >= self.frames_per_connection):
+                if self.drop_error:
+                    raise OSError("stream dropped")
+                return
+            time.sleep(self.frame_interval)
+            self.decoded += 1
+            emitted += 1
+            yield _FakeFrame(self.decoded)
+
+    def _encode_jpeg(self, frame):
+        return f"jpeg-{frame.index}".encode()
+
+
+def _wait_until(predicate, timeout=3.0):
+    """Poll *predicate* until it is true or *timeout* elapses.
+
+    Args:
+        predicate: Zero-argument callable.
+        timeout: Maximum seconds to wait.
+
+    Returns:
+        bool: The predicate's final value.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return predicate()
+
+
+class TestRtspMjpegSource(unittest.TestCase):
+    """The shared-decoder live background."""
+
+    def make(self, **kwargs):
+        """Build a fake live source that is torn down when the test ends.
+
+        Args:
+            **kwargs: Passed through to :class:`_FakeLiveSource`.
+
+        Returns:
+            _FakeLiveSource: The source under test.
+        """
+        source = _FakeLiveSource(**kwargs)
+        self.addCleanup(source.close)
+        return source
+
+    def test_supports_streaming(self):
+        source = self.make()
+        self.assertTrue(source.supports_stream())
+        self.assertEqual(source.kind, "live")
+
+    def test_quality_is_clamped_to_the_encoder_range(self):
+        self.assertEqual(self.make(quality=0).quality,
+                         RtspMjpegSource.MIN_QUALITY)
+        self.assertEqual(self.make(quality=99).quality,
+                         RtspMjpegSource.MAX_QUALITY)
+
+    def test_nothing_opens_until_a_subscriber_arrives(self):
+        source = self.make()
+        time.sleep(0.05)
+        self.assertEqual(source.containers, [])
+        self.assertFalse(source.stats()["running"])
+
+    def test_get_image_opens_the_stream_and_returns_a_jpeg(self):
+        source = self.make()
+        image = source.get_image()
+        self.assertIsNotNone(image)
+        data, content_type = image
+        self.assertTrue(data.startswith(b"jpeg-"))
+        self.assertEqual(content_type, "image/jpeg")
+        self.assertEqual(len(source.containers), 1)
+
+    def test_get_image_returns_none_when_no_frame_arrives(self):
+        # A camera that accepts the connection but never sends anything.
+        source = self.make(frame_interval=5.0, first_frame_timeout_sec=0.1)
+        self.assertIsNone(source.get_image())
+
+    def test_two_streams_share_one_decoder(self):
+        source = self.make()
+        first, second = source.mjpeg_frames(), source.mjpeg_frames()
+        self.addCleanup(second.close)
+        self.addCleanup(first.close)
+
+        self.assertTrue(next(first).startswith(b"jpeg-"))
+        self.assertTrue(next(second).startswith(b"jpeg-"))
+        # One RTSP session for both viewers — the point of the whole class.
+        self.assertEqual(len(source.containers), 1)
+        self.assertEqual(source.stats()["subscribers"], 2)
+
+    def test_decoder_survives_one_of_two_viewers_leaving(self):
+        source = self.make()
+        first, second = source.mjpeg_frames(), source.mjpeg_frames()
+        self.addCleanup(second.close)
+        next(first)
+        next(second)
+
+        first.close()
+        time.sleep(source.idle_grace_sec * 3)
+        self.assertTrue(source.stats()["running"])
+        self.assertEqual(source.stats()["subscribers"], 1)
+        self.assertFalse(source.containers[0].closed)
+
+    def test_decoder_tears_down_after_the_last_viewer_plus_grace(self):
+        source = self.make()
+        stream = source.mjpeg_frames()
+        next(stream)
+        self.assertTrue(source.stats()["running"])
+
+        stream.close()
+        self.assertTrue(_wait_until(lambda: not source.stats()["running"]))
+        self.assertTrue(_wait_until(lambda: source.containers[0].closed))
+        self.assertEqual(source.stats()["subscribers"], 0)
+
+    def test_a_later_viewer_reopens_the_stream(self):
+        source = self.make()
+        stream = source.mjpeg_frames()
+        next(stream)
+        stream.close()
+        self.assertTrue(_wait_until(lambda: not source.stats()["running"]))
+
+        self.assertIsNotNone(source.get_image())
+        self.assertEqual(len(source.containers), 2)
+
+    def test_publish_rate_is_capped_at_stream_fps(self):
+        # Decode everything, encode a couple of frames a second.
+        source = self.make(stream_fps=2.0)
+        stream = source.mjpeg_frames()
+        self.addCleanup(stream.close)
+        next(stream)
+        time.sleep(0.4)
+        published = source.stats()["frames"]
+        self.assertGreaterEqual(source.decoded, 20)
+        self.assertLessEqual(published, 3)
+
+    def test_stalled_stream_resends_the_last_good_frame(self):
+        # One frame, then silence: the <img> must not break.
+        source = self.make(frames_per_connection=1, drop_error=False,
+                           base_backoff_sec=5.0, max_backoff_sec=5.0)
+        stream = source.mjpeg_frames()
+        self.addCleanup(stream.close)
+        first = next(stream)
+        second = next(stream)
+        self.assertEqual(first, second)
+        self.assertEqual(source.stats()["frames"], 1)
+
+    def test_reconnects_with_backoff_after_a_failed_open(self):
+        source = self.make(fail_opens=2)
+        with self.assertLogs(SOURCE_LOGGER, level="WARNING") as captured:
+            image = source.get_image()
+        self.assertIsNotNone(image)
+        self.assertEqual(len(source.containers), 1)
+        self.assertEqual(len(captured.records), 2)
+
+    def test_reconnects_after_the_stream_drops(self):
+        source = self.make(frames_per_connection=1)
+        stream = source.mjpeg_frames()
+        self.addCleanup(stream.close)
+        with self.assertLogs(SOURCE_LOGGER, level="WARNING"):
+            next(stream)
+            self.assertTrue(_wait_until(lambda: len(source.containers) >= 2))
+        # Each dropped connection is closed, not leaked.
+        self.assertTrue(source.containers[0].closed)
+
+    def test_close_ends_streams_and_stops_the_decoder(self):
+        source = self.make()
+        stream = source.mjpeg_frames()
+        next(stream)
+
+        source.close()
+        with self.assertRaises(StopIteration):
+            next(stream)
+        self.assertTrue(_wait_until(lambda: not source.stats()["running"]))
+        self.assertTrue(source.containers[0].closed)
+
+    def test_close_is_idempotent(self):
+        source = self.make()
+        source.get_image()
+        source.close()
+        source.close()
+        self.assertFalse(source.stats()["running"])
+
+    def test_get_image_after_close_returns_none(self):
+        source = self.make()
+        source.close()
+        self.assertIsNone(source.get_image())
+        self.assertEqual(source.containers, [])
+
+
+@unittest.skipUnless(av is not None, "PyAV is not installed")
+@unittest.skipUnless(SAMPLE_STREAM.exists(), f"{SAMPLE_STREAM} is absent")
+class TestRtspMjpegSourceWithPyAV(unittest.TestCase):
+    """The real PyAV path, fed by the captured camera stream.
+
+    ``sample.ts`` is a recording from the same 720x720 camera the calibration
+    targets, so pointing the source at it exercises open/decode/encode exactly
+    as a live RTSP URL would. It is read as a data file — this test does not
+    import ``video_engine``.
+    """
+
+    def test_decodes_and_encodes_a_real_jpeg(self):
+        source = RtspMjpegSource(str(SAMPLE_STREAM), stream_fps=5,
+                                 idle_grace_sec=0.05,
+                                 first_frame_timeout_sec=15.0)
+        self.addCleanup(source.close)
+        image = source.get_image()
+        self.assertIsNotNone(image)
+        data, content_type = image
+        self.assertEqual(content_type, "image/jpeg")
+        self.assertEqual(data[:2], b"\xff\xd8")  # JPEG SOI
+        self.assertEqual(data[-2:], b"\xff\xd9")  # JPEG EOI
+
+    def test_quality_setting_changes_the_frame_size(self):
+        sizes = {}
+        for quality in (4, 28):
+            source = RtspMjpegSource(str(SAMPLE_STREAM), quality=quality,
+                                     idle_grace_sec=0.05,
+                                     first_frame_timeout_sec=15.0)
+            self.addCleanup(source.close)
+            image = source.get_image()
+            self.assertIsNotNone(image)
+            sizes[quality] = len(image[0])
+            source.close()
+        self.assertGreater(sizes[4], sizes[28])
 
 
 if __name__ == "__main__":

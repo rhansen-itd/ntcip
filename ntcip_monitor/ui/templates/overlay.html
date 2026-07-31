@@ -180,6 +180,8 @@
         // How often the still background is re-fetched, so swapping the
         // calibration image on disk shows up without a reload.
         const BACKGROUND_REFRESH_INTERVAL = 5000;
+        // How long to wait before re-opening a live MJPEG request that failed.
+        const LIVE_RETRY_INTERVAL = 3000;
 
         const SOURCE_KIND = '{{ source_kind }}';
         const CONTROL_TOKEN_HEADER = '{{ control_token_header|default("X-NTCIP-Control-Token") }}';
@@ -358,8 +360,23 @@
         function startBackground() {
             if (SOURCE_KIND === 'live') {
                 // MJPEG: one long-lived request driven by the <img> itself.
-                document.getElementById('background').src =
-                    videoUrl('/api/overlay/stream');
+                // The server re-sends the last good frame while a camera
+                // reconnect is in flight, so an error here means the request
+                // itself failed (monitor restarted, token rejected) — retry
+                // slowly rather than leaving a broken image on screen.
+                const img = document.getElementById('background');
+                const connect = (bust) => {
+                    const url = videoUrl('/api/overlay/stream');
+                    img.src = bust
+                        ? url + (url.includes('?') ? '&' : '?') + 't=' + Date.now()
+                        : url;
+                };
+                img.onerror = () => {
+                    showError('Camera stream interrupted — reconnecting…');
+                    setTimeout(() => connect(true), LIVE_RETRY_INTERVAL);
+                };
+                img.onload = () => showError('');
+                connect(false);
                 return;
             }
             refreshBackground();

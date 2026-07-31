@@ -39,8 +39,8 @@ highest used so far.
 > re-baseline). Don't capture twice.
 >
 > **Ready to start now, no hardware:** **4d / 4b / 5** (Sonnet — mechanical,
-> precedents set), **6** (Opus, fold into 5), **11c** (Opus — `sample.ts` can
-> stand in for a camera), **11d** (Sonnet), **2**, **3**, **10**.
+> precedents set), **6** (Opus, fold into 5), **11d** (Sonnet), **2**, **3**,
+> **10**.
 >
 > **Suggested order:** 4d → 4b/5 → 6, with the owner's round trip
 > (4a 3–4, then 9C) slotted in whenever the controller is available.
@@ -49,8 +49,9 @@ highest used so far.
 > Items **8** (remux manager thread-safety + the single-camera assumption) and
 > **4f** (web UI: loopback default + shared-secret control endpoints) landed
 > 2026-07-31 — see DESIGN_HISTORY.  Item **11** was scoped 2026-07-31 into
-> four sub-items; **11a** and **11b** landed the same day, so `/overlay` now
-> renders live shapes over a still image; **11c** (live MJPEG) is next.
+> four sub-items; **11a**, **11b** and **11c** all landed the same day, so
+> `/overlay` renders live shapes over a still image *or* a live MJPEG feed
+> from the camera.  Only **11d** (deploy-time config sync) is left.
 >
 > Model routing follows the Fable-era principle: the *thinking* for the
 > remaining items is pre-done in the item text, so the Target line says who
@@ -721,9 +722,9 @@ the access gate, the `?token=` fallback for `<img>`, and the page's
 - `/api/overlay/background` returns the latest decoded frame when the
   source is `live`, so the still endpoint works for both source types.
 
-- [ ] `RtspMjpegSource` with ref-counted shared decoder
-- [ ] two tabs open → one RTSP session; both closed → teardown
-- [ ] reconnect/backoff on drop
+- [x] `RtspMjpegSource` with ref-counted shared decoder
+- [x] two tabs open → one RTSP session; both closed → teardown
+- [x] reconnect/backoff on drop
 
 Suggested prompt:
 > [Opus] In the ntcip project, do Item 11c of ROADMAP.md: add the live
@@ -732,6 +733,11 @@ Suggested prompt:
 > ref-counted subscribers — not one session per client.  Follow the lock
 > discipline CLAUDE.md documents for the remux manager.  DESIGN_HISTORY
 > entry + check off.
+> *(Done 2026-07-31.  Also added: an optional `overlay.stream_quality`
+> (1–31, default 12) because this encoder ignores `-q:v`/`qscale`, a guarded
+> `import av` so the overlay package still loads without PyAV, and a 3 s
+> `<img>` retry on the page.  `config.json` stays on `background: "file"`
+> until 11d authors `camera_url`.)*
 
 ### 11d. Config sync + calibration workflow (Target: Sonnet, mechanical)
 
@@ -794,8 +800,9 @@ Suggested prompt:
   in this environment.~~  Superseded 2026-07-31: `flask` and `pysnmp` were
   installed during 11b, and the routes were verified with a Flask test
   client + stub monitors (38 checks) — but only from a scratch script, so
-  the in-repo route test is still **4e**'s work.  11a/11b logic that can be
-  tested without Flask is in `test_overlay_shapes.py` (66 cases).
+  the in-repo route test is still **4e**'s work.  11a/11b/11c logic that can
+  be tested without Flask is in `test_overlay_shapes.py` (86 cases; the live
+  source's PyAV seams are stubbed, so even 11c runs on a bare interpreter).
 - **Calibration staleness.**  `vid_cfg720.csv` matches the fixture's
   720×720, but the fixture is from 2026-07-15.  If the camera has been
   re-aimed or reconfigured since, shapes will be subtly misplaced.  The
