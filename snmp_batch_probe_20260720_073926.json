@@ -1,0 +1,2772 @@
+{
+  "probe_version": 1,
+  "target": "10.37.23.200",
+  "timeout_sec": 2.0,
+  "retries": 0,
+  "reps": 25,
+  "started_local": "2026-07-20T07:39:26",
+  "phases": [
+    {
+      "phase": "detector_groups_chunk1",
+      "chunk": 1,
+      "n_oids": 8,
+      "reps": 25,
+      "successes": 25,
+      "success_rate": 1.0,
+      "median_ms": 547.0,
+      "p90_ms": 657.0,
+      "max_ms": 812.0,
+      "order_ok": true,
+      "byte_range_ok": true,
+      "first_error": "",
+      "sweeps": [
+        {
+          "ok": true,
+          "elapsed_ms": 812.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            2,
+            0,
+            1,
+            10,
+            7,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 719.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            2,
+            0,
+            1,
+            10,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 671.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            2,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 657.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            2,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 625.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            4,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 546.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            10,
+            7,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 594.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            10,
+            3,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 562.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            10,
+            1,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 578.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            10,
+            4,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 500.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 516.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            2,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 562.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            10,
+            11,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 562.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            10,
+            13,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 547.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            10,
+            7,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 547.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            10,
+            3,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 547.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            10,
+            1,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 531.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            10,
+            4,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 547.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            10,
+            12,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 531.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            10,
+            7,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 562.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            10,
+            3,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 531.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            10,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 562.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            10,
+            1,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 516.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            10,
+            3,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 547.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            10,
+            6,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 547.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            10,
+            2,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        }
+      ]
+    },
+    {
+      "phase": "detector_groups_chunk2",
+      "chunk": 2,
+      "n_oids": 8,
+      "reps": 25,
+      "successes": 25,
+      "success_rate": 1.0,
+      "median_ms": 375.0,
+      "p90_ms": 453.0,
+      "max_ms": 484.0,
+      "order_ok": true,
+      "byte_range_ok": true,
+      "first_error": "",
+      "sweeps": [
+        {
+          "ok": true,
+          "elapsed_ms": 265.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            10,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 266.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 266.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            1,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 297.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            10,
+            1,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 297.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            10,
+            1,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 281.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            10,
+            2,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 282.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            10,
+            2,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 282.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            10,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 281.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            10,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 453.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            1,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 328.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            10,
+            1,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 375.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            10,
+            1,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 469.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            10,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 391.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            10,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 453.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            10,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 406.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            10,
+            1,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 422.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            10,
+            1,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 391.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            10,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 421.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            10,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 375.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            10,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 344.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 484.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 406.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 422.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 484.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        }
+      ]
+    },
+    {
+      "phase": "detector_groups_chunk4",
+      "chunk": 4,
+      "n_oids": 8,
+      "reps": 25,
+      "successes": 25,
+      "success_rate": 1.0,
+      "median_ms": 234.0,
+      "p90_ms": 297.0,
+      "max_ms": 344.0,
+      "order_ok": true,
+      "byte_range_ok": true,
+      "first_error": "",
+      "sweeps": [
+        {
+          "ok": true,
+          "elapsed_ms": 219.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 329.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 266.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 219.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 203.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 250.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            128,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 219.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            128,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 187.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 203.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 281.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 203.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 281.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 266.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 344.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            64,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 297.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            64,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 234.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 188.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 188.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 219.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 219.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 266.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 234.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 250.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 266.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 312.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        }
+      ]
+    },
+    {
+      "phase": "detector_groups_chunk8",
+      "chunk": 8,
+      "n_oids": 8,
+      "reps": 25,
+      "successes": 25,
+      "success_rate": 1.0,
+      "median_ms": 94.0,
+      "p90_ms": 109.0,
+      "max_ms": 110.0,
+      "order_ok": true,
+      "byte_range_ok": true,
+      "first_error": "",
+      "sweeps": [
+        {
+          "ok": true,
+          "elapsed_ms": 94.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 109.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 109.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 110.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 94.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 94.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            128,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 93.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            128,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 78.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            128,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 78.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 78.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 78.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 94.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 78.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 94.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 93.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            32,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 94.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            32,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 94.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            1,
+            8,
+            0,
+            32,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 109.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            1,
+            8,
+            0,
+            32,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 94.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            1,
+            8,
+            0,
+            32,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 93.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            1,
+            8,
+            0,
+            32,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 94.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            2,
+            0,
+            1,
+            8,
+            0,
+            32,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 94.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            2,
+            0,
+            1,
+            8,
+            0,
+            32,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 109.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            2,
+            0,
+            1,
+            8,
+            0,
+            32,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 94.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            2,
+            0,
+            1,
+            8,
+            0,
+            32,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 62.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            2,
+            0,
+            1,
+            8,
+            0,
+            32,
+            0,
+            0
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        }
+      ]
+    },
+    {
+      "phase": "outputs_chunk1",
+      "chunk": 1,
+      "n_oids": 16,
+      "reps": 25,
+      "successes": 0,
+      "success_rate": 0.0,
+      "median_ms": null,
+      "p90_ms": null,
+      "max_ms": null,
+      "order_ok": true,
+      "byte_range_ok": true,
+      "first_error": "errorStatus: noSuchName at index 1",
+      "sweeps": [
+        {
+          "ok": false,
+          "elapsed_ms": 78.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 78.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 63.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 93.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 63.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 78.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 78.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 94.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 78.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 78.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 94.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 110.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 109.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 78.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 93.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 110.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 125.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 125.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 94.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 110.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 94.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 109.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 109.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 93.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 110.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        }
+      ]
+    },
+    {
+      "phase": "outputs_chunk16",
+      "chunk": 16,
+      "n_oids": 16,
+      "reps": 25,
+      "successes": 0,
+      "success_rate": 0.0,
+      "median_ms": null,
+      "p90_ms": null,
+      "max_ms": null,
+      "order_ok": true,
+      "byte_range_ok": true,
+      "first_error": "errorStatus: noSuchName at index 1",
+      "sweeps": [
+        {
+          "ok": false,
+          "elapsed_ms": 78.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 78.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 109.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 94.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 109.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 109.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 109.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 109.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 125.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 110.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 110.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 78.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 94.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 78.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 78.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 78.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 94.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 79.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 94.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 125.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 109.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 94.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 78.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 78.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        },
+        {
+          "ok": false,
+          "elapsed_ms": 109.0,
+          "error_class": "errorStatus",
+          "error_detail": "noSuchName at index 1",
+          "values": [],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": false
+        }
+      ]
+    },
+    {
+      "phase": "production_6groups_chunk8",
+      "chunk": 8,
+      "n_oids": 6,
+      "reps": 25,
+      "successes": 25,
+      "success_rate": 1.0,
+      "median_ms": 93.0,
+      "p90_ms": 110.0,
+      "max_ms": 110.0,
+      "order_ok": true,
+      "byte_range_ok": true,
+      "first_error": "",
+      "sweeps": [
+        {
+          "ok": true,
+          "elapsed_ms": 78.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            1,
+            8,
+            0,
+            32
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 78.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            1,
+            8,
+            0,
+            32
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 110.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            1,
+            8,
+            0,
+            32
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 94.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            0,
+            0,
+            1,
+            8,
+            0,
+            32
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 78.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            2,
+            0,
+            1,
+            8,
+            0,
+            32
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 93.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            2,
+            0,
+            1,
+            8,
+            0,
+            32
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 94.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            2,
+            0,
+            1,
+            8,
+            0,
+            32
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 78.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            2,
+            0,
+            1,
+            8,
+            0,
+            32
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 94.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            2,
+            0,
+            1,
+            8,
+            0,
+            32
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 78.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            2,
+            0,
+            1,
+            8,
+            0,
+            32
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 78.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            2,
+            0,
+            1,
+            8,
+            0,
+            32
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 94.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            2,
+            0,
+            1,
+            8,
+            0,
+            32
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 79.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            2,
+            0,
+            1,
+            8,
+            0,
+            32
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 110.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            2,
+            0,
+            1,
+            8,
+            0,
+            32
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 78.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            2,
+            0,
+            1,
+            8,
+            0,
+            32
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 78.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            2,
+            0,
+            1,
+            8,
+            0,
+            32
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 94.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            2,
+            0,
+            1,
+            8,
+            0,
+            32
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 94.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            2,
+            0,
+            1,
+            8,
+            0,
+            32
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 93.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            2,
+            0,
+            1,
+            8,
+            0,
+            32
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 94.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            2,
+            0,
+            1,
+            8,
+            0,
+            32
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 78.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            2,
+            0,
+            1,
+            8,
+            0,
+            32
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 79.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            2,
+            0,
+            1,
+            8,
+            0,
+            32
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 110.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            2,
+            0,
+            1,
+            8,
+            0,
+            32
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 110.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            2,
+            0,
+            1,
+            8,
+            0,
+            32
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        },
+        {
+          "ok": true,
+          "elapsed_ms": 109.0,
+          "error_class": "",
+          "error_detail": "",
+          "values": [
+            2,
+            0,
+            1,
+            8,
+            0,
+            32
+          ],
+          "oids_echoed_in_order": true,
+          "values_in_byte_range": true
+        }
+      ]
+    }
+  ]
+}
