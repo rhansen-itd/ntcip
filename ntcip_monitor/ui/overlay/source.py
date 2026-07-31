@@ -397,7 +397,10 @@ class RtspMjpegSource(BackgroundSource):
 
         Returns:
             dict: ``subscribers``, ``running`` (a decoder thread is alive),
-            ``frames`` (published so far), and ``has_frame``.
+            ``frames`` (published so far), ``has_frame``, and ``resolution``
+            (``(width, height)`` of the last encoded frame, or None). The
+            resolution is read without the lock — it is a tuple reference the
+            decoder thread rebinds, so a stale read is the worst case.
         """
         with self._cond:
             return {
@@ -405,6 +408,7 @@ class RtspMjpegSource(BackgroundSource):
                 "running": self._session is not None,
                 "frames": self._latest_seq,
                 "has_frame": self._latest is not None,
+                "resolution": self._encoder_size,
             }
 
     # -- subscriber bookkeeping -------------------------------------------

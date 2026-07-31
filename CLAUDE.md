@@ -347,6 +347,33 @@ because `camera_url` is empty until ROADMAP 11d authors it.
   (see the NTCIP rules above), far coarser than the video. Keep that caveat if
   you touch the template.
 
+### Deploy-time tooling and the calibration workflow (ROADMAP 11d)
+
+`tools/` at the repo root holds **deploy-time** scripts that belong to neither
+package — the same role `video_engine/system_runner.py` plays at runtime.
+They may import `ntcip_monitor`; they are never imported by it, and nothing in
+them relaxes the rule that the two packages don't import each other.
+
+- **`tools/sync_ui_config.py`** is the de-duplication mechanism for values that
+  live in both config files. `video_engine/intersections.json` is the
+  authoring source; the script writes `controller.ip/port/community/chunk_size`
+  and `overlay.camera_url` into `config.json`. **Dry run by default** (`--apply`
+  to write), credentials masked in its output, atomic replace, idempotent.
+  Poll intervals, timezone and `web_ui.*` are deliberately *not* synced — the
+  monitor tunes four monitors separately, and bind host/port/token are
+  properties of the host you run the UI on, not of the intersection.
+- **`tools/grab_calibration_still.py`** saves one frame as a JPEG, resolving
+  the URL from a `--intersection`/`--camera` pair or taking it directly. It
+  grabs through the overlay's own `RtspMjpegSource`, so a successful grab is
+  also proof the live overlay path can reach that camera.
+- **Calibration workflow** (no ntcip code involved in step 2): grab a still →
+  run pyatspm's `atspm video-calibrate-shapes --camera <name> --video <still>`
+  against it (only the first frame is used; record a short clip with
+  `video_engine/tools/__capture_rtsp.py` if OpenCV won't open the JPEG) → copy
+  the CSV it writes to `overlay.shapes_csv`. 11a's reader accepts either format
+  pyatspm produces. A browser-based calibrator would drop the pyatspm/Tkinter
+  dependency entirely; it's parked in ROADMAP's Future section.
+
 ## Style conventions already in use
 
 - **Logging**: structured JSON-lines via a shared `_JsonFormatter` pattern
@@ -378,6 +405,10 @@ As of this writing:
   (2026-07-15), retiring them is ROADMAP #5 — don't wire either into
   `system_runner.py`.
 - `ntcip_monitor/monitors/ring_monitor.py` — new, not yet committed to git.
+- `tools/` (repo root) is **not** clutter and is distinct from
+  `video_engine/tools/`: it holds the deploy-time scripts described above
+  (`sync_ui_config.py`, `grab_calibration_still.py`), which belong to neither
+  package. Package-specific debug tools still go under `video_engine/tools/`.
 - `overlay/` (repo root) is **not** clutter: it's the overlay's per-deployment
   data for intersection 201 — `201_fisheye_shapes.csv` (a copy of the owner's
   `~/vid_cfg720.csv` calibration) and `201_fisheye.jpg` (a still extracted

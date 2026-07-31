@@ -1010,3 +1010,59 @@ decided. Entries after this point are logged as the decision lands.
   **`config.json` stays on `background: "file"`** — `camera_url` is still empty
   by design (11d authors it from `video_engine/intersections.json`), so
   switching to live is a two-key edit once that lands.
+
+- 2026-07-31 — **ROADMAP 11d landed: `tools/` at the repo root — deploy-time
+  config sync and a calibration-still grabber. Item 11 is complete.** New
+  `tools/sync_ui_config.py` and `tools/grab_calibration_still.py`; both are
+  standalone CLIs that run at deploy time and are imported by nothing.
+  **Why a third top-level directory.** The values that drift — the controller's
+  SNMP endpoint and the camera URL — are one fact about one intersection stored
+  in two config files, because `ntcip_monitor` reads `config.json` and
+  `video_engine` reads `intersections.json` and neither may import the other.
+  Merging the files would break that boundary; a runtime read of the engine's
+  config from the monitor would break it too. A deploy-time script that treats
+  `intersections.json` as the authoring source removes the hand-copying without
+  touching the runtime independence at all — the same role `system_runner.py`
+  plays for the two packages at runtime, which is why it sits beside them
+  rather than inside either.
+  **`sync_ui_config.py` syncs five keys and refuses to guess at the rest**:
+  `controller.ip/port/community/chunk_size` and `overlay.camera_url`. Poll
+  intervals are **not** synced (the monitor tunes four monitors separately
+  under `monitors.*`; one engine-side `poll_interval_sec` doesn't map onto
+  them), nor is `timezone` (the engine's CSV log has no monitor equivalent),
+  nor anything under `web_ui` (bind host, port and control token are properties
+  of the machine you run the UI on, not of the intersection). **Dry run by
+  default** — `--apply` writes, atomically, and re-running is a no-op. Camera
+  credentials are **masked** in the printed diff (`rtsp://root:***@...`,
+  `--show-secrets` to override): a deploy step that echoes a password into a
+  terminal scrollback or a CI log is a small leak with no upside. Missing keys
+  are reported as `(unset)` and created; the file is re-serialised at two-space
+  indent, which is the trade `--apply` being opt-in pays for.
+  **`grab_calibration_still.py` grabs through `RtspMjpegSource`** rather than
+  its own PyAV plumbing. **Why:** JPEG encoding then lives in exactly one place,
+  and a successful grab doubles as proof that the *live overlay path* can reach
+  that camera, decode it, and encode from it — one fewer thing to debug when
+  someone later flips `background` to `"live"`. `--settle` (default 1 s) takes a
+  later frame so auto-exposure has stabilised, `--quality` defaults to 3 (sharp;
+  the overlay's own default is 12) because a calibration still is drawn on, and
+  `--intersection`/`--camera` resolve the URL from the same authoring source the
+  sync script uses. `RtspMjpegSource.stats()` gained `resolution` to report it.
+  **The calibration workflow is documented, not built** (CLAUDE.md): grab a
+  still → `atspm video-calibrate-shapes --camera <name> --video <still>` →
+  copy the CSV to `overlay.shapes_csv`. Note pyatspm's calibrator takes
+  `--video` and uses its first frame; OpenCV normally opens a JPEG as a
+  single-frame video, and `video_engine/tools/__capture_rtsp.py` records a short
+  clip if it doesn't. A **browser-based calibrator** would remove pyatspm,
+  Tkinter and cv2 from the workflow entirely — parked in ROADMAP's Future
+  section rather than built, because `calibrate.py`'s draw/edit/undo/snap
+  interaction is ~380 lines of event handling to reimplement.
+  **Verified** against both real config files: 201 (one camera, auto-selected)
+  and 701 (four cameras — correctly demands `--camera`); `--apply` on a copy
+  produced the three expected changes, left every other section intact, and
+  re-ran clean; unknown ID, missing file and missing camera URL all fail with a
+  one-line message instead of a traceback. The grabber wrote a sharp 720×720
+  still of the intersection from `sample.ts`, refused to overwrite without
+  `--force`, and reported the unreachable real camera as a timeout, not a crash.
+  **ROADMAP Item 11 was replaced by a done-stub** per the workflow rule for
+  finished items, keeping the pyatspm reference map, the verified-facts list and
+  the two live risks (calibration staleness, sampling floor) that outlive it.
