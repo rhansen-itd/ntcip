@@ -39,14 +39,17 @@ highest used so far.
 > re-baseline). Don't capture twice.
 >
 > **Ready to start now, no hardware:** **4d / 4b / 5** (Sonnet — mechanical,
-> precedents set), **6** (Opus, fold into 5), **2**, **3**, **10**.
+> precedents set), **6** (Opus, fold into 5), **11a** (Opus — pure, stdlib
+> only, no camera needed), **2**, **3**, **10**.
 >
 > **Suggested order:** 4d → 4b/5 → 6, with the owner's round trip
 > (4a 3–4, then 9C) slotted in whenever the controller is available.
+> Item **11** runs on its own track, 11a → 11b → 11c → 11d, one per session.
 >
 > Items **8** (remux manager thread-safety + the single-camera assumption) and
 > **4f** (web UI: loopback default + shared-secret control endpoints) landed
-> 2026-07-31 — see DESIGN_HISTORY.
+> 2026-07-31 — see DESIGN_HISTORY.  Item **11** was scoped 2026-07-31 into
+> four sub-items; no code yet.
 >
 > Model routing follows the Fable-era principle: the *thinking* for the
 > remaining items is pre-done in the item text, so the Target line says who
@@ -397,14 +400,21 @@ Suggested prompt:
 
 ---
 
-## 11 — Live Video Overlay (Target: needs planning pass)
+## 11 — Live Video Overlay (Target: Opus; scoped 2026-07-31 into 11a–11d)
 
 **Vision:** A real-time version of pyatspm's video overlay.  Embed a live
-RTSP camera feed (or a still frame if the stream is unavailable) in the
-ntcip web UI, with detector loops and stopbars drawn on top and recolored
-by the live SNMP-polled phase/detector/overlap state — the same visual
-output as pyatspm's `atspm video-overlay` command, but driven by the live
-monitor data instead of a recorded event database.
+RTSP camera feed (or a still image from file) in the ntcip web UI, with
+detector loops and stopbars drawn on top and recolored by the live
+SNMP-polled phase/detector/overlap state — the same visual output as
+pyatspm's `atspm video-overlay` command, but driven by the live monitor
+data instead of a recorded event database.
+
+**Planning pass complete (2026-07-31).**  Design questions A–E are settled
+(see *Decisions* below) and the work is split into four session-sized
+sub-items, **11a → 11b → 11c → 11d**, in that order.  11a is pure and
+dependency-free; 11a+11b together give a working overlay against a still
+image; 11c adds live video; 11d removes the manual config copying.
+Rationale for each decision is in DESIGN_HISTORY (2026-07-31).
 
 ### What pyatspm does (the reference implementation)
 
@@ -488,58 +498,269 @@ recorded events → rendered video with overlaid shapes.  The pieces:
   (L12-19) has `cameras.fisheye.url` (RTSP URL) per intersection.
   Detectors (L20-100) have `phase`, `paired_detector_id`, `camera_id`.
 
-### What this feature needs (design questions for the planning pass)
+### Verified during the planning pass — don't re-derive these
 
-**A. Shape config sharing / import.**  The pyatspm `ShapeConfig`
-(`data/video.py`) is a standalone class with CSV round-trip and no heavy
-deps (just `csv`, `pathlib`).  Options:
-- (a) Copy/vendor `ShapeConfig` + `overlay.py` into the ntcip project.
-- (b) Import `atspm.data.video.ShapeConfig` directly (pyatspm is
-  pip-installable from `~/pyatspm`).
-- (c) Just read the CSV format directly — it's simple enough.
+- **The camera stream is 720×720 h264 @ 10 fps**
+  (`video_engine/tests/fixtures/sample.ts`), matching `~/vid_cfg720.csv`'s
+  recorded `720,720`.  The existing calibration targets this exact view —
+  no dewarp mismatch, no rescaling needed.  `sample.ts` also supplies a
+  real frame from this camera, so the overlay is testable with no camera
+  reachable.
+- **Shape `input` values (17, 24, 26, 33, 38, 46, …) match intersection
+  201's detector IDs exactly.**  Same numbering space; no channel
+  remapping.  (Consistent with the 2026-07-19 `__correlate_channels.py`
+  verification — see CLAUDE.md's NTCIP rules.)
+- **`~/vid_cfg720.csv` is in pyatspm's *legacy* CSV format** — per-row
+  `video_width`/`video_height`, a `direction` column, no `name`.  Current
+  `ShapeConfig.load` expects the two-section layout and crashes on it
+  (`int("stopbar")`).  The reader must accept both.
+- **CSV colors are BGR, not RGB** (pyatspm writes OpenCV order).
+  `"255,0,0"` is *blue*, `"0,0,255"` is *red*.  Anything rendering these
+  in a browser must reverse the triple — the bug looks plausible on
+  screen, so it needs an explicit test.
+- **`/api/status` already returns phases, overlaps, and detectors** as
+  state names; no new state plumbing into the monitors is required.
+- **PyAV encodes MJPEG natively**
+  (`av.CodecContext.create('mjpeg','w')` verified) — the live path needs
+  no new dependency.  `av` is already in `requirements.txt`.
+- **This environment lacks `cv2`, `flask`, `numpy`, and `atspm`** (`av`
+  and `pytz` are present).  11a is deliberately dependency-free so it is
+  fully testable here; 11b+ need `pip install -r requirements.txt`.
 
-The calibration UI (`calibrate.py`) needs OpenCV+Tkinter (both already
-present on the deployment machine via the video_engine's deps).  Could
-import `calibrate_shapes()` directly or vendor it.
+### Decisions (settled 2026-07-31 — A–E from the original planning pass)
 
-**B. Live rendering architecture.**  Two broad approaches:
-- **Server-side rendering:** Backend reads RTSP frame with OpenCV, draws
-  overlays using the same `draw_loop_overlay`/`draw_stopbar_overlay`
-  functions, serves the composited frame as MJPEG or via WebSocket.
-  Pro: reuses pyatspm's drawing code exactly.  Con: server-side
-  RTSP decode + per-frame re-encode CPU cost.
-- **Client-side rendering:** Frontend receives the raw RTSP stream (via
-  a proxy or re-stream as HLS/DASH/MJPEG) + a JSON feed of shape
-  configs + live status.  Frontend draws overlays on a `<canvas>` over
-  the `<video>` element.  Pro: offloads rendering to client.  Con: more
-  JS, RTSP→browser format conversion needed, coordinate systems.
+| Question | Decision |
+|---|---|
+| **B.** Rendering | Client-side `<canvas>` over a background image.  Server resolves shape→status; JS only recolors. |
+| Background source | Pluggable: `file` (static image) **and** `live` (MJPEG from RTSP).  Both feed the same canvas. |
+| **D.** Host + config | `ntcip_monitor/ui/`, driven by a new `overlay` section in `config.json`.  **No `video_engine` import.** |
+| Config drift | Offline, deploy-time sync script — not a runtime dependency. |
+| **A.** pyatspm | **Vendor** the CSV reader (~80 lines, stdlib).  pyatspm's calibrator stays the authoring tool. |
+| **E.** Calibration | Use pyatspm's existing `atspm video-calibrate-shapes` externally; a web calibrator is a separate future item. |
+| **C.** Mapping | As originally sketched; the status table is in 11a below. |
 
-**C. Mapping pyatspm shape semantics to ntcip live state.**
-- Loop shapes have an `input` (detector channel number).  Map to
-  `detector_monitor.get_current_detector_state(input)` → `ACTIVE`/
-  `INACTIVE` → filled/outlined.
-- Stopbar shapes have a `phase` (int or overlap code).  Map to
-  `phase_monitor.get_current_phase_state(phase)` or
-  `get_current_overlap_state(overlap_num)` → `SignalState.GREEN`/
-  `YELLOW`/`RED`/`DARK` → G/Y/R/na color.
+Two constraints drove these and should not be quietly reversed:
 
-**D. Where the shape config lives.**  Per-intersection, per-camera.
-Currently pyatspm stores them at
-`intersections/<folder>/video/<camera>_shapes.csv`.  ntcip could:
-- Store in the same CSV format alongside the intersection JSON config.
-- Embed shape data in the intersection JSON (translating CSV → JSON).
-- Reference the pyatspm intersection directory's shapes.
+- **The UI runs on a remote host, not the J1900 edge box.**  CLAUDE.md's
+  hardware constraints govern the video *buffering* path only.  Decode
+  cost is not a concern for this feature, which is why live MJPEG is in
+  scope at all.
+- **ntcip and pyatspm must be independently distributable**, and
+  `ntcip_monitor` and `video_engine` must stay independent of each other.
+  That rules out importing `atspm` and rules out a runtime read of
+  `video_engine/intersections.json`.  Vendoring ~80 lines beats extracting
+  a shared third package at this size.
 
-**E. Calibration workflow.**  The existing `calibrate_shapes()` function
-works interactively via OpenCV window.  For the ntcip app this could:
-- Be a CLI command (like pyatspm's `atspm video-calibrate-shapes`).
-- Be a web-based calibration UI (more work, but no Tkinter needed).
-- Just use pyatspm's CLI directly and import the resulting CSV.
+### 11a. Vendored shape loader + status resolution (Target: Opus)
 
-### Key files to read for the planning session
+Pure, stdlib-only, fully testable in this environment.  No Flask, no
+camera, no monitor imports.
+
+**New:** `ntcip_monitor/ui/overlay/{__init__,shapes,status}.py`,
+`ntcip_monitor/tests/test_overlay_shapes.py`
+
+`shapes.py` — vendored from `pyatspm/src/atspm/data/video.py` L50-234:
+`OVERLAP_LETTER_MAP` (`OLA`–`OLP` → 1–16), `resolve_stopbar_target()`, and
+a `ShapeConfig` with `.shapes` / `.video_width` / `.video_height` /
+`.load()`.  Two deliberate deviations from pyatspm:
+
+- **Tolerant loader** — sniff row 1.  `video_width,video_height` →
+  two-section format; `type,points,...` → legacy format (width/height from
+  the first data row, ignore `direction`).  Reads both.
+- **Drop `validate_resolution()`** — it exists to refuse rescaling a
+  recorded video.  The canvas scales safely (11b), so it doesn't apply.
+  Keep the metadata itself.
+
+`status.py` — pure functions mapping the `/api/status` payload shape onto
+shapes, returning a list parallel to `config.shapes`:
+
+| Shape | Source | Result |
+|---|---|---|
+| `loop` | `detectors[input]` | `"ACTIVE"` → on, else off |
+| `stopbar`, int phase | `phases[n]` | `GREEN`→`G`, `YELLOW`→`Y`, `RED`→`R`, `DARK`/missing→`na` |
+| `stopbar`, `OLx` | `overlaps[n]` | same mapping |
+
+**Edge case to handle explicitly:** `PhaseMonitor` monitors overlaps 1–8,
+but the format permits `OLA`–`OLP` (1–16).  `vid_cfg720.csv` uses
+`OLB`/`OLC`/`OLD`/`OLF`, all in range, but a shape referencing `OLI`+ would
+render permanently grey with no explanation.  Resolve to `na` at request
+time (not an error), and log a one-time WARNING at load naming the
+offending shapes.
+
+Tests — stdlib `unittest`, following `ntcip_monitor/tests/test_snmp_batching.py`:
+both CSV formats produce identical shape lists; malformed points/colors;
+overlap letter mapping incl. out-of-range; phase bounds; every row of the
+status table; missing detector → off; missing phase → `na`; the overlap >8
+warning fires once.
+
+- [ ] `shapes.py` reads both CSV formats
+- [ ] `status.py` resolution table
+- [ ] tests green: `python3 ntcip_monitor/tests/test_overlay_shapes.py`
+
+Suggested prompt:
+> [Opus] In the ntcip project, do Item 11a of ROADMAP.md: vendor the
+> pyatspm shape-config reader into `ntcip_monitor/ui/overlay/` and add the
+> pure status-resolution functions, with stdlib `unittest` coverage
+> (pytest/cv2/flask/numpy are NOT installed — 11a must stay
+> dependency-free).  Read item 11's "Verified during the planning pass"
+> list first and don't re-derive it.  Follow the `tests/` layout Item 7
+> established.  Then verify against the real file:
+> `ShapeConfig.load('/home/hansrkid/vid_cfg720.csv')` must yield
+> `720 720` and 38 shapes.  DESIGN_HISTORY one-liner + check off.
+
+### 11b. Overlay page, shape/state routes, file background (Target: Opus)
+
+First end-to-end visible result.  Depends on 11a.
+
+**Modified:** `ntcip_monitor/ui/web_ui.py`, `config.json`, `run.py`,
+`ntcip_monitor/ui/templates/dashboard.html` (link only)
+**New:** `ntcip_monitor/ui/templates/overlay.html`,
+`ntcip_monitor/ui/overlay/source.py`
+
+A **dedicated `/overlay` page**, not a dashboard panel — `dashboard.html`
+is already 464 lines with six sections, and the video wants the viewport.
+Link to it from the dashboard header.
+
+Routes:
+
+- `GET /overlay` → the page
+- `GET /api/overlay/shapes` → `{video_width, video_height, shapes:[...]}`, fetched once at load
+- `GET /api/overlay/state` → statuses parallel to `shapes`, polled at the existing 250 ms `UPDATE_INTERVAL`
+- `GET /api/overlay/background` → single JPEG
+- `GET /api/overlay/stream` → MJPEG (11c; 404 while the source is `file`)
+
+Splitting shapes (static) from state (polled) keeps the hot payload to one
+small array and puts every mapping decision in Python where 11a's tests
+cover it.
+
+`source.py` — `BackgroundSource` ABC + `FileImageSource` (reads bytes from
+disk, re-reads on mtime change so swapping the calibration still doesn't
+need a restart).
+
+**Canvas sizing:** set `canvas.width/height` to the config's
+`video_width`/`video_height`, draw in native shape coordinates, and stack
+canvas + background in a container where both are `width:100%; height:auto`.
+The browser then scales both identically — no coordinate math anywhere.
+JS mirrors `pyatspm/src/atspm/video/overlay.py` L46-99: loop off → 1px
+stroke in the shape color; loop on → filled at alpha 0.2 plus a white 1px
+outline; stopbar → 3px line in G/Y/R/grey.  **Reverse the BGR triple** (see
+the verified-facts list).
+
+```json
+"overlay": {
+  "enabled": true,
+  "shapes_csv": "overlay/201_fisheye_shapes.csv",
+  "background": "file",
+  "image_path": "overlay/201_fisheye.jpg",
+  "camera_url": "rtsp://.../axis-media/media.amp?camera=1&videocodec=h264",
+  "stream_fps": 5
+}
+```
+
+**Access policy — a deliberate departure from 4f.**  4f left read-only
+routes open and gated only `/api/control/*`.  Proxied camera video is a
+different category from "phase 3 is green": it's a live view of a public
+roadway, and an operator who runs `--web-host 0.0.0.0` would not expect to
+have published it.  Apply the existing interlock to the **two video routes
+only** — reuse `_is_loopback_host()` (`web_ui.py:46`) and refuse with 403
+on a non-loopback bind with no token, exactly as `_check_control_access()`
+(`web_ui.py:107`) already does.  `/api/overlay/shapes` and
+`/api/overlay/state` stay open like `/api/status`.
+
+- [ ] routes + `/overlay` page
+- [ ] `FileImageSource` with mtime reload
+- [ ] BGR→RGB reversal, verified visually (a `255,0,0` shape renders blue)
+- [ ] video routes refused on non-loopback bind with no token
+- [ ] CLAUDE.md updated (this is where the feature becomes load-bearing)
+
+Suggested prompt:
+> [Opus] In the ntcip project, do Item 11b of ROADMAP.md: add the
+> `/overlay` page, the four `/api/overlay/*` routes, and the file-image
+> background source, on top of 11a's loader.  Read item 11's verified-facts
+> list first — especially the BGR color order and the 720×720 canvas
+> sizing.  Note the deliberate access-policy departure from 4f for the two
+> video routes.  Verify by extracting a frame from
+> `video_engine/tests/fixtures/sample.ts` as the background and confirming
+> the loops land on the pavement.  DESIGN_HISTORY entry + CLAUDE.md update
+> + check off.
+
+### 11c. Live MJPEG source (Target: Opus)
+
+Depends on 11b.  **Modified:** `ntcip_monitor/ui/overlay/source.py`
+
+`RtspMjpegSource` using PyAV — no new dependency.
+
+- **One shared decoder thread per URL**, not one per client.  Ref-counted
+  subscribers, opened lazily on first subscriber, torn down after the last
+  leaves plus a short grace period — an idle page costs no RTSP session,
+  and N viewers cost one stream off the intersection rather than N.
+- Decode all frames, encode and publish at `stream_fps` (default 5, from a
+  10 fps source) to bound bandwidth.
+- Subscriber bookkeeping follows the discipline CLAUDE.md documents for
+  `remux_video_buffer.VideoBufferManager`: **under the lock, collect what
+  to act on; release; then act.**  Never hold the lock across a decode, an
+  encode, or a socket write.
+- Reconnect with backoff on stream drop; serve the last good frame
+  meanwhile rather than breaking the `<img>`.
+- `/api/overlay/background` returns the latest decoded frame when the
+  source is `live`, so the still endpoint works for both source types.
+
+- [ ] `RtspMjpegSource` with ref-counted shared decoder
+- [ ] two tabs open → one RTSP session; both closed → teardown
+- [ ] reconnect/backoff on drop
+
+Suggested prompt:
+> [Opus] In the ntcip project, do Item 11c of ROADMAP.md: add the live
+> MJPEG background source using PyAV (already a dependency; the mjpeg
+> encoder is verified available).  One shared decoder thread per URL with
+> ref-counted subscribers — not one session per client.  Follow the lock
+> discipline CLAUDE.md documents for the remux manager.  DESIGN_HISTORY
+> entry + check off.
+
+### 11d. Config sync + calibration workflow (Target: Sonnet, mechanical)
+
+**New:** `tools/sync_ui_config.py`, `tools/grab_calibration_still.py`
+(repo root — a deploy-time layer belonging to neither package, the same
+role `video_engine/system_runner.py` plays at runtime)
+
+`sync_ui_config.py` reads `video_engine/intersections.json` for a given
+intersection ID and writes `controller.*` and `overlay.camera_url` into
+`config.json`.  `--dry-run` by default.  This is the de-duplication
+mechanism: both packages keep their own config file and stay independently
+deployable, but the shared values get one authoring source instead of being
+hand-copied.
+
+`grab_calibration_still.py` pulls one frame from an RTSP URL to a JPEG.
+
+**Calibration workflow** — documented, not built: grab a still → run
+pyatspm's `atspm video-calibrate-shapes` against it → drop the CSV at
+`overlay.shapes_csv`.  No new code; 11a's tolerant reader accepts either
+format pyatspm produces.  A browser-based calibrator would remove the
+pyatspm and Tkinter dependency from the workflow entirely, but it's a
+substantial build — promote it to its own item if it's wanted.
+
+- [ ] `sync_ui_config.py` with `--dry-run`
+- [ ] `grab_calibration_still.py`
+- [ ] workflow documented in CLAUDE.md
+
+Suggested prompt:
+> [Sonnet] In the ntcip project, do Item 11d of ROADMAP.md: add
+> `tools/sync_ui_config.py` (offline, deploy-time, `--dry-run` by default)
+> and `tools/grab_calibration_still.py` at the repo root, and document the
+> calibration workflow in CLAUDE.md.  These are deploy-time scripts, NOT
+> runtime imports — `ntcip_monitor` and `video_engine` must stay
+> independent.  DESIGN_HISTORY one-liner + check off.
+
+### Key files to read (per sub-item)
 
 | Concern | File | Lines |
 |---------|------|-------|
+| **11a** — vendor source | [`pyatspm/.../data/video.py`](file:///home/hansrkid/pyatspm/src/atspm/data/video.py) | L50-234 |
+| **11a** — test layout precedent | [`ntcip/.../test_snmp_batching.py`](file:///home/hansrkid/ntcip/ntcip_monitor/tests/test_snmp_batching.py) | all |
+| **11b** — drawing semantics to port to JS | [`pyatspm/.../video/overlay.py`](file:///home/hansrkid/pyatspm/src/atspm/video/overlay.py) | L46-99 |
+| **11b** — routes + access policy to extend | [`ntcip/.../web_ui.py`](file:///home/hansrkid/ntcip/ntcip_monitor/ui/web_ui.py) | L46, L107-145, L147-203 |
+| **11c** — lock discipline to mirror | [`ntcip/.../remux_video_buffer.py`](file:///home/hansrkid/ntcip/video_engine/remux_video_buffer.py) | manager bookkeeping |
+| **11d** — camera URL source of truth | [`ntcip/.../intersections.json`](file:///home/hansrkid/ntcip/video_engine/intersections.json) | L12-19 |
 | Shape data model + CSV format | [`pyatspm/.../data/video.py`](file:///home/hansrkid/pyatspm/src/atspm/data/video.py) | L95-234 (ShapeConfig class) |
 | Overlay drawing functions | [`pyatspm/.../video/overlay.py`](file:///home/hansrkid/pyatspm/src/atspm/video/overlay.py) | L46-99 (all 3 draw functions) |
 | Calibration UI | [`pyatspm/.../video/calibrate.py`](file:///home/hansrkid/pyatspm/src/atspm/video/calibrate.py) | L112-492 (calibrate_shapes) |
@@ -551,18 +772,23 @@ works interactively via OpenCV window.  For the ntcip app this could:
 | Example shape CSV | [`~/vid_cfg720.csv`](file:///home/hansrkid/vid_cfg720.csv) | all 39 lines |
 | pyatspm CLI workflow | [`pyatspm/.../cli.py`](file:///home/hansrkid/pyatspm/src/atspm/cli.py) | L1573-1678 |
 
-### Suggested planning prompt
+### Risks carried into implementation
 
-> I'm planning Item 11 of ROADMAP.md in the ntcip project: a live video
-> overlay feature.  Read the "11 — Live Video Overlay" section of
-> ROADMAP.md for the full context, cross-references to both codebases, and
-> the five design questions (A–E).  The goal: embed a live (or still)
-> camera view in the web UI with detector loops and stopbars drawn on top,
-> recolored by the real-time SNMP-polled state from the existing monitors.
-> Reuse pyatspm's ShapeConfig data model and overlay drawing code as much
-> as possible.  Produce a scoped implementation plan with session-sized
-> work items, noting which pyatspm modules to import vs. vendor, the
-> rendering architecture choice, and the shape config storage decision.
+- **Untestable surface.**  Flask routes and the MJPEG path can't be tested
+  in this environment.  11a is structured to absorb all the logic worth
+  testing; the route-level test belongs with **4e**'s Flask-test-client
+  work (which already lists `WebUI`).
+- **Calibration staleness.**  `vid_cfg720.csv` matches the fixture's
+  720×720, but the fixture is from 2026-07-15.  If the camera has been
+  re-aimed or reconfigured since, shapes will be subtly misplaced.  The
+  file-background check in 11b is the cheap way to catch this before
+  trusting the overlay.
+- **Sampling floor.**  The effective NTCIP detector sampling cycle is
+  ~1.0–1.5 s (CLAUDE.md), and 4a raised `snmp_chunk_size` to 8 for
+  intersection 201 without a re-baseline (Item 9C).  A 250 ms UI poll will
+  therefore show detector state changing in steps considerably coarser than
+  the video.  That's honest — it shows the monitor's real resolution — but
+  the page should label it rather than imply frame-accurate detection.
 
 ---
 

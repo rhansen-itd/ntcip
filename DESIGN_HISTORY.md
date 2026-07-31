@@ -755,3 +755,76 @@ decided. Entries after this point are logged as the decision lands.
   whitespace-only token being treated as unset). A real Flask-test-client case
   belongs to ROADMAP 4e, which already lists `WebUI` and owns the fixture
   strategy; the template render is unverified by machine here.
+
+- 2026-07-31 — **Live Video Overlay (ROADMAP 11) scoped into 11a–11d; five
+  design questions settled.** Planning pass only — no code. The item asked for
+  a real-time version of pyatspm's `atspm video-overlay`: a camera view in the
+  ntcip web UI with detector loops and stopbars recolored by live SNMP state.
+  **Two owner-supplied constraints reframed the whole thing**, and both are
+  worth recording because the code doesn't show them.
+  **(1) The UI runs on a remote host, not the J1900.** CLAUDE.md's hardware
+  constraints are written as if the whole system shares the edge box's CPU
+  budget, and the first cut of this plan was built around avoiding server-side
+  decode for that reason. The owner clarified that those constraints govern the
+  *video buffering* path only — the GUI is always remote. That put live MJPEG
+  back in scope; the remaining cost is intersection uplink bandwidth, not CPU,
+  which is why 11c uses one shared decoder per URL with ref-counted subscribers
+  rather than a session per viewer. The requested feature is live MJPEG **plus**
+  a static-image-from-file source, and the file source isn't just a fallback:
+  shape configs are calibrated pixel-exact against one still, so loading that
+  still is how you verify a calibration before trusting it against live video —
+  and it makes the whole feature demoable and testable with no camera reachable.
+  **(2) ntcip and pyatspm must be independently distributable.** The owner's
+  intent is that either can be handed to someone else standing alone, so
+  importing `atspm` is out. A shared third package was considered and rejected
+  as disproportionate for ~80 lines of CSV parsing. Decision: **vendor** the
+  reader (`ShapeConfig.load` + the `OLA`–`OLP` overlap map), keeping the file
+  format byte-compatible so pyatspm's existing OpenCV/Tkinter calibrator stays
+  the authoring tool. What makes the vendoring stay small is the rendering
+  choice: **client-side `<canvas>`**, with the server resolving shape→status and
+  JS only recoloring. pyatspm's drawing code is then a spec to port, not a
+  dependency, and none of its genuinely complex parts (the calibration state
+  machine, the vectorised status lookups against recorded events) are involved —
+  those exist to reconstruct state at arbitrary past timestamps, which the live
+  monitors make unnecessary.
+  **Module boundary held.** The web UI lives in `ntcip_monitor` but camera URLs
+  live in `video_engine/intersections.json`, and CLAUDE.md forbids the two
+  packages importing each other. Rather than breach it, the overlay reads a new
+  `overlay` section in the UI's own `config.json` — which already duplicates the
+  controller IP/port/community, so this follows an existing pattern rather than
+  setting a new precedent. The owner asked for de-duplication where possible, so
+  11d adds `tools/sync_ui_config.py` at the **repo root**: an offline,
+  deploy-time script that derives the UI config's shared fields from
+  `intersections.json`. Root placement is deliberate — it belongs to neither
+  package, the same role `system_runner.py` plays as the runtime wiring layer.
+  One authoring source, zero runtime coupling.
+  **Facts verified during the pass, recorded so no future session re-derives
+  them:** the camera stream is 720×720 h264 @ 10 fps (from
+  `tests/fixtures/sample.ts`), matching `~/vid_cfg720.csv`'s recorded
+  resolution — so the existing calibration targets this exact view and no
+  rescaling is needed; the CSV's detector inputs (17, 24, 26, 33, 38, 46, …)
+  are the same numbering space as intersection 201's detector IDs, so there is
+  no channel remapping; `~/vid_cfg720.csv` is in pyatspm's **legacy** CSV format
+  (per-row width/height, a `direction` column, no `name`) which current
+  `ShapeConfig.load` crashes on, so the vendored reader must sniff and accept
+  both; CSV colors are **BGR** (OpenCV order), so `"255,0,0"` is blue and a
+  browser must reverse the triple — a bug that looks plausible on screen, hence
+  an explicit test; `/api/status` already returns everything needed, so no new
+  monitor plumbing; and PyAV encodes MJPEG natively, so the live path adds no
+  dependency.
+  **One deliberate departure from 4f.** 4f gated `/api/control/*` and left
+  read-only routes open. The two camera-video routes will *not* follow that:
+  proxied video is a live view of a public roadway, categorically different from
+  "phase 3 is green", and an operator flipping `--web-host 0.0.0.0` would not
+  expect to have published it. They reuse 4f's existing interlock —
+  `_is_loopback_host()` plus the token check — while `/api/overlay/shapes` and
+  `/api/overlay/state` stay open like `/api/status`.
+  **Sequencing:** 11a (pure loader + status resolution, stdlib only, fully
+  testable in this environment) → 11b (page, routes, file background — first
+  visible result) → 11c (live MJPEG) → 11d (sync tool + calibration workflow).
+  Split this way on the owner's standing preference for session-sized items:
+  11a is dependency-free and green here, while everything after it needs
+  `flask`/`cv2` installed, so the split also falls on the testability boundary.
+  A browser-based calibrator was scoped and deferred — it would remove pyatspm
+  and Tkinter from the workflow entirely, but it's a substantial build and
+  belongs in its own item if wanted.
