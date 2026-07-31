@@ -464,6 +464,174 @@ Suggested prompt:
 
 ---
 
+## 11 — Live Video Overlay (Target: needs planning pass)
+
+**Vision:** A real-time version of pyatspm's video overlay.  Embed a live
+RTSP camera feed (or a still frame if the stream is unavailable) in the
+ntcip web UI, with detector loops and stopbars drawn on top and recolored
+by the live SNMP-polled phase/detector/overlap state — the same visual
+output as pyatspm's `atspm video-overlay` command, but driven by the live
+monitor data instead of a recorded event database.
+
+### What pyatspm does (the reference implementation)
+
+pyatspm's video overlay is a **post-hoc** pipeline:  recorded video +
+recorded events → rendered video with overlaid shapes.  The pieces:
+
+1. **Shape config data model** — `ShapeConfig` class in
+   [`pyatspm/src/atspm/data/video.py`](file:///home/hansrkid/pyatspm/src/atspm/data/video.py)
+   (L95-234).  A list of shape dicts, each with `type` (`"loop"` or
+   `"stopbar"`), `points` (pixel coords), `color`, `input` (detector
+   channel for loops), `phase` (int or `"OLA"`-`"OLP"` overlap code for
+   stopbars), `name`.  Resolution (`video_width`/`video_height`) recorded
+   once.  Round-trips to a 2-section CSV (metadata header + per-shape
+   rows).  Example in
+   [`~/vid_cfg720.csv`](file:///home/hansrkid/vid_cfg720.csv).
+
+2. **Interactive calibration UI** —
+   [`pyatspm/src/atspm/video/calibrate.py`](file:///home/hansrkid/pyatspm/src/atspm/video/calibrate.py)
+   `calibrate_shapes()` (L112-492).  OpenCV window over first frame +
+   Tkinter dialogs.  Mouse-driven: click 4 points → loop, click 2 points →
+   stopbar.  Edit mode with point/body dragging, snapping, copy, undo.
+   Keys: `l`/`s` mode switch, `c` color, `i` input, `p` phase, `e` edit,
+   `g` snap, `u` undo, `w` save, `q` quit.
+
+3. **Overlay renderer** —
+   [`pyatspm/src/atspm/video/overlay.py`](file:///home/hansrkid/pyatspm/src/atspm/video/overlay.py)
+   (entire file, 100 lines).  Three functions:
+   - `draw_loop_overlay(frame, shape, is_on)` — outlined when off, filled
+     (alpha-blended) when on.
+   - `draw_stopbar_overlay(frame, shape, status)` — line colored by G/Y/R/na.
+   - `draw_shape_overlay(frame, shape, status)` — dispatcher.
+
+4. **Status lookup** —
+   [`pyatspm/src/atspm/analysis/video.py`](file:///home/hansrkid/pyatspm/src/atspm/analysis/video.py)
+   (471 lines).  Pure functions: `phase_status_at_timestamps()`,
+   `overlap_status_at_timestamps()`, `detector_status_at_timestamps()`.
+   These are vectorised batch lookups against a DataFrame of recorded
+   events.  **Not needed for live** — the ntcip monitors already expose
+   point-in-time state directly.
+
+5. **Video processor** —
+   [`pyatspm/src/atspm/video/processor.py`](file:///home/hansrkid/pyatspm/src/atspm/video/processor.py)
+   `render_overlay()` (L62-186).  Orchestrates: open video, fetch events
+   from SQLite, chunk frames, vectorise status lookups, draw shapes, write
+   output.  **Not needed for live** — the equivalent is reading an RTSP
+   frame, querying the live monitors, and drawing.
+
+6. **CLI** —
+   [`pyatspm/src/atspm/cli.py`](file:///home/hansrkid/pyatspm/src/atspm/cli.py)
+   `handle_video_calibrate_shapes` (L1573-1605),
+   `handle_video_overlay` (L1608-1678),
+   `_video_shape_path` (L1541-1551).  Shape CSVs live at
+   `intersections/<folder>/video/<camera>_shapes.csv`.
+
+### What ntcip already has (the live data sources)
+
+- **Phase state** —
+  [`ntcip_monitor/monitors/phase_monitor.py`](file:///home/hansrkid/ntcip/ntcip_monitor/monitors/phase_monitor.py)
+  `PhaseMonitor._last_phases` (dict `{phase_num: SignalState}`),
+  `_last_overlaps` (dict `{overlap_num: SignalState}`).  Exposed via
+  `get_all_phases()` / `get_all_overlaps()` (L219-225).  `SignalState` enum:
+  `DARK=0, RED=1, YELLOW=2, GREEN=3`
+  ([`data_models.py:11-16`](file:///home/hansrkid/ntcip/ntcip_monitor/core/data_models.py#L11-L16)).
+
+- **Detector state** —
+  [`ntcip_monitor/monitors/detector_monitor.py`](file:///home/hansrkid/ntcip/ntcip_monitor/monitors/detector_monitor.py)
+  `DetectorMonitor._last_detectors` (dict `{det_num: DetectorState}`).
+  Exposed via `get_all_detectors()` (L122-124).  `DetectorState` enum:
+  `INACTIVE=0, ACTIVE=1`
+  ([`data_models.py:19-22`](file:///home/hansrkid/ntcip/ntcip_monitor/core/data_models.py#L19-L22)).
+
+- **Web UI** —
+  [`ntcip_monitor/ui/web_ui.py`](file:///home/hansrkid/ntcip/ntcip_monitor/ui/web_ui.py)
+  Flask app with `/api/status` (L50-94) returning JSON with
+  `phases`, `overlaps`, `detectors` keyed by number → state name.  Runs
+  in a background thread (L142-163).
+
+- **Camera config** —
+  [`video_engine/intersections.json`](file:///home/hansrkid/ntcip/video_engine/intersections.json)
+  (L12-19) has `cameras.fisheye.url` (RTSP URL) per intersection.
+  Detectors (L20-100) have `phase`, `paired_detector_id`, `camera_id`.
+
+### What this feature needs (design questions for the planning pass)
+
+**A. Shape config sharing / import.**  The pyatspm `ShapeConfig`
+(`data/video.py`) is a standalone class with CSV round-trip and no heavy
+deps (just `csv`, `pathlib`).  Options:
+- (a) Copy/vendor `ShapeConfig` + `overlay.py` into the ntcip project.
+- (b) Import `atspm.data.video.ShapeConfig` directly (pyatspm is
+  pip-installable from `~/pyatspm`).
+- (c) Just read the CSV format directly — it's simple enough.
+
+The calibration UI (`calibrate.py`) needs OpenCV+Tkinter (both already
+present on the deployment machine via the video_engine's deps).  Could
+import `calibrate_shapes()` directly or vendor it.
+
+**B. Live rendering architecture.**  Two broad approaches:
+- **Server-side rendering:** Backend reads RTSP frame with OpenCV, draws
+  overlays using the same `draw_loop_overlay`/`draw_stopbar_overlay`
+  functions, serves the composited frame as MJPEG or via WebSocket.
+  Pro: reuses pyatspm's drawing code exactly.  Con: server-side
+  RTSP decode + per-frame re-encode CPU cost.
+- **Client-side rendering:** Frontend receives the raw RTSP stream (via
+  a proxy or re-stream as HLS/DASH/MJPEG) + a JSON feed of shape
+  configs + live status.  Frontend draws overlays on a `<canvas>` over
+  the `<video>` element.  Pro: offloads rendering to client.  Con: more
+  JS, RTSP→browser format conversion needed, coordinate systems.
+
+**C. Mapping pyatspm shape semantics to ntcip live state.**
+- Loop shapes have an `input` (detector channel number).  Map to
+  `detector_monitor.get_current_detector_state(input)` → `ACTIVE`/
+  `INACTIVE` → filled/outlined.
+- Stopbar shapes have a `phase` (int or overlap code).  Map to
+  `phase_monitor.get_current_phase_state(phase)` or
+  `get_current_overlap_state(overlap_num)` → `SignalState.GREEN`/
+  `YELLOW`/`RED`/`DARK` → G/Y/R/na color.
+
+**D. Where the shape config lives.**  Per-intersection, per-camera.
+Currently pyatspm stores them at
+`intersections/<folder>/video/<camera>_shapes.csv`.  ntcip could:
+- Store in the same CSV format alongside the intersection JSON config.
+- Embed shape data in the intersection JSON (translating CSV → JSON).
+- Reference the pyatspm intersection directory's shapes.
+
+**E. Calibration workflow.**  The existing `calibrate_shapes()` function
+works interactively via OpenCV window.  For the ntcip app this could:
+- Be a CLI command (like pyatspm's `atspm video-calibrate-shapes`).
+- Be a web-based calibration UI (more work, but no Tkinter needed).
+- Just use pyatspm's CLI directly and import the resulting CSV.
+
+### Key files to read for the planning session
+
+| Concern | File | Lines |
+|---------|------|-------|
+| Shape data model + CSV format | [`pyatspm/.../data/video.py`](file:///home/hansrkid/pyatspm/src/atspm/data/video.py) | L95-234 (ShapeConfig class) |
+| Overlay drawing functions | [`pyatspm/.../video/overlay.py`](file:///home/hansrkid/pyatspm/src/atspm/video/overlay.py) | L46-99 (all 3 draw functions) |
+| Calibration UI | [`pyatspm/.../video/calibrate.py`](file:///home/hansrkid/pyatspm/src/atspm/video/calibrate.py) | L112-492 (calibrate_shapes) |
+| Live phase/overlap state | [`ntcip/.../phase_monitor.py`](file:///home/hansrkid/ntcip/ntcip_monitor/monitors/phase_monitor.py) | L54-56, L219-225 (state dicts) |
+| Live detector state | [`ntcip/.../detector_monitor.py`](file:///home/hansrkid/ntcip/ntcip_monitor/monitors/detector_monitor.py) | L48, L122-124 (state dict) |
+| Web UI / Flask routes | [`ntcip/.../web_ui.py`](file:///home/hansrkid/ntcip/ntcip_monitor/ui/web_ui.py) | L42-94 (routes, /api/status) |
+| Camera RTSP URL config | [`ntcip/.../intersections.json`](file:///home/hansrkid/ntcip/video_engine/intersections.json) | L12-19 (cameras.fisheye.url) |
+| SignalState / DetectorState enums | [`ntcip/.../data_models.py`](file:///home/hansrkid/ntcip/ntcip_monitor/core/data_models.py) | L11-22 |
+| Example shape CSV | [`~/vid_cfg720.csv`](file:///home/hansrkid/vid_cfg720.csv) | all 39 lines |
+| pyatspm CLI workflow | [`pyatspm/.../cli.py`](file:///home/hansrkid/pyatspm/src/atspm/cli.py) | L1573-1678 |
+
+### Suggested planning prompt
+
+> I'm planning Item 11 of ROADMAP.md in the ntcip project: a live video
+> overlay feature.  Read the "11 — Live Video Overlay" section of
+> ROADMAP.md for the full context, cross-references to both codebases, and
+> the five design questions (A–E).  The goal: embed a live (or still)
+> camera view in the web UI with detector loops and stopbars drawn on top,
+> recolored by the real-time SNMP-polled state from the existing monitors.
+> Reuse pyatspm's ShapeConfig data model and overlay drawing code as much
+> as possible.  Produce a scoped implementation plan with session-sized
+> work items, noting which pyatspm modules to import vs. vendor, the
+> rendering architecture choice, and the shape config storage decision.
+
+---
+
 ## Future (not yet scoped)
 
 Items below need a planning pass before they're actionable (no Target/Scope/
