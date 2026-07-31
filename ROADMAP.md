@@ -225,13 +225,18 @@ ordering, batched polls, range→groups).
 
 What remains needs the controller, but **no Claude session**:
 
-1. **[Owner, controller machine]** `git pull`, then
-   `python3 video_engine/tools/__probe_snmp_batch.py --config
-   _intersections.json --intersection 201` (~2–4 min, read-only).
-2. **[Owner]** if the verdict line says a chunk size is clean, set
-   `"snmp_chunk_size": <that value>` in the intersection config (also add it
-   to `_intersections.json` in the repo); if not clean, leave it at 1 — the
-   needed-groups cut still applies. Restart the monitor.
+1. - [x] **[Owner, controller machine]** probe run — done 2026-07-20,
+   committed as `snmp_batch_probe_20260720_073926.json`. **Verdict: chunk 8
+   is clean** on the detector groups (25/25, order + byte-range ok, median
+   **94 ms** vs 547 ms at chunk 1 — a 5.8× sweep speedup; the production
+   6-group shape measured 93 ms).
+2. - [x] **[Owner]** `"snmp_chunk_size": 8` set 2026-07-31 in
+   `_intersections.json`, `intersections.json`, and
+   `video_engine/intersections.json` (all intersection 201 = the probed
+   controller 10.37.23.200). **Not** set for intersection 701
+   (`701_intersection.json`, controller 10.70.10.51) or the standalone
+   `config.json` (10.37.2.68) — different controllers, no probe evidence;
+   probe each before raising it there. **Monitor restart still pending.**
 3. **[Owner, controller machine]** rerun `__capture_ntcip.py` ~10 min with a
    matching datZ pull; push capture + datZ + probe JSON.
 4. **[Any Claude session, any model]** verify with `__correlate_channels.py`
@@ -459,6 +464,44 @@ Suggested prompt:
 > decoded need is confirmed, replace it with a RAM-bounded decoded backend — not
 > the CFR one). Update CLAUDE.md's backends section and `config_manager.py` docs,
 > and land a DESIGN_HISTORY.md entry.
+
+---
+
+## 10 — `specialFunctionOutputState` OIDs rejected by the Cobalt (Target: Opus)
+
+Found in the 2026-07-20 probe (`snmp_batch_probe_20260720_073926.json`,
+analysed 2026-07-31). `OUTPUT_OIDS` = `...1206.4.2.1.3.14.1.2.{1..16}` returns
+SNMPv1 **`noSuchName` at index 1** on controller 10.37.23.200 — 0/25
+successes at chunk 1 *and* chunk 16. Identical failure at chunk 1 means this
+is **not** a batching problem: the agent does not implement that object at
+that OID (wrong column/index for Econolite's table, or the feature is
+unsupported/unlicensed on this box).
+
+Not urgent — nothing polls outputs today (`config.json` has
+`monitors.outputs.enabled: false`, and `system_runner` only ever builds a
+`DetectorMonitor`). The reason it's worth an item anyway:
+
+- **It fails silently.** `output_monitor._poll` catches `SNMPError` with a
+  bare `pass` (`ntcip_monitor/monitors/output_monitor.py`), so enabling
+  outputs against this controller yields a monitor that polls forever, emits
+  nothing, and logs nothing. At minimum that `pass` should log (rate-limited)
+  — compare `detector_monitor._poll`, which at least prints a diagnostic.
+- **The OID needs verifying against the MIB**, not guessing: walk the
+  `1.3.6.1.4.1.1206.4.2.1.3` subtree on the controller (or check the vendor
+  MIBs in `MIBs/`) to find what the Cobalt actually exposes, and fix
+  `oid_definitions.OUTPUT_BASE` if the column is wrong.
+- **Related, general:** an SNMPv1 GET is all-or-nothing — one unsupported
+  varbind aborts the whole PDU. That is harmless for detector groups (all 8
+  valid, which is why chunk 8 is clean) but means any future multi-OID batch
+  mixing supported and unsupported objects loses the good values too. Worth a
+  sentence in CLAUDE.md's SNMP section when this is fixed.
+
+Suggested prompt:
+> [Opus] In the ntcip project, do Item 10 of ROADMAP.md: determine the correct
+> Econolite OID for the special-function outputs (check `MIBs/` and, if the
+> controller is reachable, a subtree walk), fix `OUTPUT_BASE`/`OUTPUT_OIDS` if
+> wrong, and replace `output_monitor._poll`'s silent `except SNMPError: pass`
+> with rate-limited structured logging. DESIGN_HISTORY entry + check off.
 
 ---
 

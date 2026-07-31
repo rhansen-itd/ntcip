@@ -608,3 +608,33 @@ decided. Entries after this point are logged as the decision lands.
   `_run_loop` measurement). Note the pre-existing integration tests now
   declare `set_sampling_floor(0.01)` — at the production default their 50 ms
   pulses are correctly refused, which is itself a check that the gate works.
+
+- 2026-07-31 — **`snmp_chunk_size: 8` adopted for intersection 201 on a green
+  probe (ROADMAP 4a step 2).** The owner's 2026-07-20 probe run
+  (`snmp_batch_probe_20260720_073926.json`, committed 2026-07-31) came back
+  clean at every chunk size tried on the detector groups: 25/25 successes with
+  correct ordering and byte ranges at chunks 1/2/4/8, median sweep **547 ms →
+  94 ms** (5.8×), production 6-group shape 93 ms. So the Cobalt's historical
+  "Too Big" failures really were a dense-table phenomenon, not a
+  multi-OID-PDU limit — the hypothesis 4a was written to test. Set in
+  `_intersections.json`, `intersections.json`, and
+  `video_engine/intersections.json`. **Why only those:** all three are
+  intersection 201 on controller 10.37.23.200, the probed box.
+  `701_intersection.json` (10.70.10.51) and the standalone `config.json`
+  (10.37.2.68) are different controllers with no probe evidence and stay at
+  the default 1 — per the CLAUDE.md rule that chunk size is raised
+  per-deployment only on a green probe for *that* controller.
+  **Knock-on for ROADMAP 9:** the detector sweep drops ~1.5 s → ~0.1 s, so the
+  measured sampling floor lands near 0.3 s (sweep + the 0.2 s inter-sweep
+  sleep) and the Rule 2 gate falls from 3.2 s to ~0.6 s — i.e. **Rule 2 stops
+  being effectively disabled** once the monitor restarts. No config change is
+  needed for that: `system_runner` overwrites the 1.6 s startup assumption
+  with the measured cycle within 60 s.
+  **Caveat recorded, not fixed:** the probe's output phases failed 0/25 at
+  chunk 1 *and* chunk 16 with `noSuchName at index 1` — identical at chunk 1,
+  so it is an OID/support problem on `specialFunctionOutputState`
+  (`...4.2.1.3.14.1.2.x`), not a chunking limit. Harmless today (outputs are
+  `enabled: false` in `config.json` and `system_runner` never builds an
+  `OutputMonitor`), but `output_monitor._poll` swallows `SNMPError` with a
+  bare `pass`, so if outputs are ever enabled against this controller they
+  fail silently forever. Logged as ROADMAP 10.

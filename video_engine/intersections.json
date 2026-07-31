@@ -6,6 +6,7 @@
     "snmp_port": 501,
     "snmp_community": "administrator",
     "poll_interval_sec": 0.2,
+    "snmp_chunk_size": 8,
     "timezone": "US/Mountain",
 
     "cameras": {
