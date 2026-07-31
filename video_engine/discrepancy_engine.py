@@ -64,6 +64,10 @@ Rule 2 — Orphan Pulse (Ghost Car)
         never saw at all.
       • Works symmetrically: A brief pulse on B that A never sees also fires.
 
+    Rule 2 is additionally gated by the **sampling floor** (see below): a
+    pulse shorter than ``min_pulse_floor_multiple × sampling_floor_sec`` is
+    not registered as a candidate at all.
+
 Rule 3 — Chatter Exception (must NOT trigger)
     System A is solidly ON for 30 s; System B is chattering (ON 2 s / OFF 0.5 s
     / ON 2 s …) during the same 30 s.  The continuous disagreement (Rule 1)
@@ -111,6 +115,50 @@ Rule 1 active-resolution state machine
     │  Cooldown engaged immediately.                                    │
     └──────────────────────────────────────────────────────────────────┘
 
+Sampling floor (ROADMAP 9 / SCOPE_sampling_floor.md, 2026-07-30)
+────────────────────────────────────────────────────────────────
+**The engine must not evaluate evidence finer than its own sampling
+resolution.**  The upstream detector source samples on a cycle it measures
+itself (an NTCIP sweep at ``chunk_size=1`` is RTT-bound — measured median
+1.53 s on 2026-07-19, catching only 7–42 % of true detector edges).  Evidence
+below that resolution is aliasing, not signal: a *seen* sub-floor pulse fires
+while the partner's equally short response pulse is simply *unseen* — the
+exact shape of the false-positive storms observed on high-duty channels.
+
+The floor is injected, never imported: ``system_runner`` (the composition
+root that already wires both packages) calls :meth:`DiscrepancyMonitor.
+set_sampling_floor` at startup from config and thereafter on a slow cadence
+from the detector monitor's measured cycle.  ``discrepancy_engine`` still has
+zero imports from ``ntcip_monitor``.  A float assignment is atomic under the
+GIL — same pattern as ``cooldown_active``.
+
+Three consequences, in order of how much they change behavior:
+
+1. **Rule 2 is gated.**  An orphan candidate is registered only if its pulse
+   duration ≥ ``min_pulse_floor_multiple × floor`` (config, default 2.0×).
+   Shorter pulses bump a per-pair ``below_floor_suppressed`` counter and are
+   dropped at DEBUG.  Note the arithmetic: at the default 1.6 s floor the
+   gate is 3.2 s, which *exceeds* a typical ``lag_threshold_sec`` of 2.0 s —
+   so Rule 2 is effectively **off** until the sweep gets faster.  That is the
+   intended reading of the measurement, not an accident.  After a green
+   ``snmp_chunk_size: 8`` probe the floor drops to ~0.2 s and the gate to
+   ~0.4 s, which suppresses almost nothing real.
+2. **Rule 1 is not gated.**  Its threshold (seconds) is far above any floor.
+   One residual imprecision is documented rather than coded: in the
+   resolution state machine an *agreement* shorter than the floor is not
+   reliable evidence that the disagreement resolved.  This is acceptable
+   as-is because a re-divergence restarts the post-roll countdown, so a
+   spurious agreement only delays the stop trigger — it never truncates the
+   clip.
+3. **High-duty pairs get an advisory, not suppression.**  A rolling ON-duty
+   fraction per detector (over ``_DUTY_WINDOW_SEC``, computed on the
+   evaluator thread from the same pruned ``on_intervals`` deque) drives a
+   rate-limited structured WARNING when a pair's *minimum* duty exceeds
+   ``high_duty_warn_fraction``: NTCIP data on such a channel is structurally
+   unreliable regardless of the rules.  Setting ``suppress_high_duty_pairs``
+   (default **false**) fully disables Rules 1+2 for those pairs — a
+   deployment decision, off until the owner opts in.
+
 Thread-safety contract
 ──────────────────────
 ``on_detector_on`` / ``on_detector_off`` are called from the NTCIP monitor's
@@ -126,7 +174,11 @@ never from the callback path), then releases them before any comparison or I/O.
 All ``_PairRuntimeState`` fields are written exclusively by the evaluator thread
 except ``cooldown_active``, which the NTCIP callback thread may clear via the
 early-reset path.  A boolean assignment is atomic under CPython's GIL and the
-evaluator tolerates a one-tick stale read in the rare race window.
+evaluator tolerates a one-tick stale read in the rare race window.  The
+sampling floor is written by whatever thread calls
+:meth:`DiscrepancyMonitor.set_sampling_floor` (in production, ``system_runner``'s
+slow updater thread) and read by the evaluator — again a single atomic float
+assignment, with a one-tick stale read tolerated by design.
 """
 
 from __future__ import annotations
@@ -159,11 +211,41 @@ log = logging.getLogger(__name__)
 _ORPHAN_DECISION_GRACE_SEC = 2.0
 
 # Hard cap on the partner ON-interval history deque.  The time-based pruning in
-# the evaluator is the real bound (~3 × threshold); this maxlen is a
+# the evaluator is the real bound (now ``max(~3 × threshold, _DUTY_WINDOW_SEC)``
+# — the duty computation reads the same deque); this maxlen is a
 # belt-and-suspenders RAM cap.  At the 0.2 s NTCIP poll floor a detector can
-# produce at most ~2.5 intervals/s, so 128 comfortably exceeds any prunable
-# window.
-_PARTNER_INTERVAL_MAXLEN = 128
+# produce at most ~2.5 intervals/s, so 512 covers the 120 s duty window with
+# ~1.7× headroom (and ~6× at today's measured 1.5 s floor) for ~8 KB/detector.
+_PARTNER_INTERVAL_MAXLEN = 512
+
+# ---------------------------------------------------------------------------
+# Sampling-floor defaults (ROADMAP 9 — see the module docstring)
+# ---------------------------------------------------------------------------
+
+# Assumed effective sampling cycle until system_runner injects a measured one.
+# 1.6 s = today's measured NTCIP reality (median sweep 1.53 s at chunk_size 1).
+_DEFAULT_SAMPLING_FLOOR_SEC = 1.6
+
+# Rule 2 trusts an orphan pulse only if it lasted at least this many sampling
+# cycles.  2.0 is the Nyquist-flavoured minimum: below two samples the "pulse"
+# and the partner's absence of one are equally likely to be aliasing.
+_DEFAULT_MIN_PULSE_FLOOR_MULTIPLE = 2.0
+
+# A pair whose *minimum* detector ON-duty exceeds this fraction is flagged as
+# operating outside the regime where NTCIP sampling can resolve its edges.
+_DEFAULT_HIGH_DUTY_WARN_FRACTION = 0.8
+
+# Rolling window over which ON-duty is measured.
+_DUTY_WINDOW_SEC = 120.0
+
+# Duty is an advisory statistic, not a per-tick decision input: recomputing it
+# on every 0.1 s tick would walk the interval deques 10×/s per pair for no
+# added fidelity on a 120 s window.  J1900-class CPUs care.
+_DUTY_EVAL_INTERVAL_SEC = 5.0
+
+# Minimum spacing between high-duty WARNINGs for the same pair.  The condition
+# is a standing property of the channel, so this is a heartbeat, not an event.
+_HIGH_DUTY_WARN_INTERVAL_SEC = 600.0
 
 # ---------------------------------------------------------------------------
 # Timezone resolution helper
@@ -273,6 +355,18 @@ class _PairRuntimeState:
             again after a Rule 1 disagreement, marking the start of the
             post-roll countdown.  ``None`` if the disagreement is still ongoing
             or if no Rule 1 recording is active.
+        below_floor_suppressed: Count of orphan candidates rejected because the
+            pulse was shorter than the sampling floor allows us to trust.  A
+            large value relative to fired triggers means the pair is being
+            sampled too slowly to judge — it is diagnostic, never an input to
+            any rule.
+        last_duty_eval_ts: ``time.time()`` of the most recent ON-duty
+            computation for this pair (throttled to ``_DUTY_EVAL_INTERVAL_SEC``).
+        pair_min_duty: Most recently computed ``min(duty_a, duty_b)``.
+        high_duty_active: Cached verdict of the last duty computation — whether
+            ``pair_min_duty`` exceeded ``high_duty_warn_fraction``.
+        last_high_duty_warn_ts: ``time.time()`` of the last high-duty WARNING
+            emitted for this pair (rate limit).
     """
 
     pair_key: str
@@ -290,6 +384,12 @@ class _PairRuntimeState:
     # not actuated again.  See _maybe_register_orphan.
     last_handled_pulse_on_a: float = 0.0
     last_handled_pulse_on_b: float = 0.0
+    # Sampling-floor bookkeeping (ROADMAP 9).
+    below_floor_suppressed: int = 0
+    last_duty_eval_ts: float = 0.0
+    pair_min_duty: float = 0.0
+    high_duty_active: bool = False
+    last_high_duty_warn_ts: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -387,6 +487,59 @@ def _check_rule2_orphan(
     return True, desc
 
 
+def _compute_on_duty_fraction(
+    intervals: Sequence[Tuple[float, float]],
+    is_on: bool,
+    last_on_time: float,
+    now: float,
+    window_sec: float,
+) -> float:
+    """Compute the fraction of the trailing window a detector spent ON.
+
+    Reads the same ``on_intervals`` history Rule 2 consults, plus the
+    still-open ON interval implied by ``is_on`` / ``last_on_time``.  Intervals
+    are clipped to ``[now − window_sec, now]``, so partial overlaps at either
+    edge contribute only the part that falls inside the window.  Completed
+    intervals never overlap each other (they are consecutive ON periods of one
+    detector), so clipped durations can simply be summed.
+
+    The result is only as complete as the retained history: entries pruned by
+    the evaluator or evicted by the deque's ``maxlen`` are gone, which biases
+    the fraction *downwards*.  That is the safe direction — it can make the
+    high-duty advisory miss, never make it fire spuriously.
+
+    Args:
+        intervals: Completed ON intervals as ``(on_ts, off_ts)`` tuples.
+        is_on: Whether the detector is currently ON.
+        last_on_time: ``time.time()`` of the most recent rising edge; used
+            only when ``is_on`` is ``True``.
+        now: Current ``time.time()``.
+        window_sec: Length of the trailing window in seconds.
+
+    Returns:
+        ON-duty fraction in ``[0.0, 1.0]``.  Returns ``0.0`` for a
+        non-positive ``window_sec``.
+    """
+    if window_sec <= 0:
+        return 0.0
+
+    window_start = now - window_sec
+    on_time = 0.0
+
+    for on_ts, off_ts in intervals:
+        start = max(on_ts, window_start)
+        end = min(off_ts, now)
+        if end > start:
+            on_time += end - start
+
+    if is_on and last_on_time > 0.0:
+        start = max(last_on_time, window_start)
+        if now > start:
+            on_time += now - start
+
+    return min(1.0, on_time / window_sec)
+
+
 # ---------------------------------------------------------------------------
 # DiscrepancyMonitor
 # ---------------------------------------------------------------------------
@@ -423,6 +576,24 @@ class DiscrepancyMonitor:
         max_duration_sec: Hard recording cap used as ``max_duration_sec``
             for Rule 1 triggers only (video-buffer safety net if the stop
             trigger is somehow missed).
+
+    Sampling-floor configuration (read from the intersection config; see the
+    module docstring for why these exist):
+
+    ``min_pulse_floor_multiple``
+        Rule 2 pulse-length gate, in multiples of the sampling floor.
+        Default ``2.0``.
+    ``high_duty_warn_fraction``
+        Pair min-ON-duty above which the advisory WARNING fires.  Default
+        ``0.8``.
+    ``suppress_high_duty_pairs``
+        When ``True``, Rules 1+2 are disabled entirely for pairs over that
+        duty threshold.  Default ``False`` — advisory only.
+
+    The floor itself is **not** read from config here; it is injected by
+    ``system_runner`` via :meth:`set_sampling_floor` (at startup from the
+    config's ``sampling_floor_sec``, then from the detector monitor's measured
+    cycle).  Until then the built-in default applies.
 
     Example::
 
@@ -465,6 +636,13 @@ class DiscrepancyMonitor:
             raise ValueError(
                 f"Cannot load config for intersection '{intersection_id}': {exc}"
             ) from exc
+
+        # ── Sampling floor (ROADMAP 9) ────────────────────────────────────
+        # The floor itself is injected by the composition root; the tuning
+        # knobs around it are engine-internal and come from the config block
+        # the engine already owns.
+        self._sampling_floor_sec = _DEFAULT_SAMPLING_FLOOR_SEC
+        self._apply_floor_config()
 
         self._detector_states: Dict[str, _DetectorState] = {}
         self._pairs: Dict[str, Tuple[str, str]] = {}
@@ -528,11 +706,85 @@ class DiscrepancyMonitor:
                 f"Reload failed for intersection '{self._intersection_id}': {exc}"
             ) from exc
         self._intersection_cfg = new_cfg
+        self._apply_floor_config()
         self._build_structures(preserve_existing=True)
         self._log.info(
             "Configuration reloaded",
             extra={"intersection_id": self._intersection_id},
         )
+
+    def _apply_floor_config(self) -> None:
+        """Re-read the sampling-floor tuning knobs from the intersection config.
+
+        Called from ``__init__`` and :meth:`reload`.  Does **not** touch
+        ``_sampling_floor_sec`` itself — that value is owned by whoever calls
+        :meth:`set_sampling_floor`, and a config reload must not clobber a
+        measured floor with a stale assumption.
+        """
+        self._min_pulse_floor_multiple = float(
+            self._intersection_cfg.get(
+                "min_pulse_floor_multiple", _DEFAULT_MIN_PULSE_FLOOR_MULTIPLE
+            )
+        )
+        self._high_duty_warn_fraction = float(
+            self._intersection_cfg.get(
+                "high_duty_warn_fraction", _DEFAULT_HIGH_DUTY_WARN_FRACTION
+            )
+        )
+        self._suppress_high_duty_pairs = bool(
+            self._intersection_cfg.get("suppress_high_duty_pairs", False)
+        )
+
+    def set_sampling_floor(self, sec: float) -> None:
+        """Set the effective sampling resolution of the upstream detector source.
+
+        This is the engine's only channel for that information — the package
+        boundary forbids importing ``ntcip_monitor``, so the composition root
+        (``system_runner``) measures it there and pushes it here: once at
+        startup from the config's ``sampling_floor_sec``, then periodically
+        from ``DetectorMonitor.effective_cycle_sec()``.
+
+        Thread-safe by construction: a single float assignment is atomic under
+        CPython's GIL, and the evaluator tolerates reading the previous value
+        for one tick.
+
+        Args:
+            sec: Measured (or configured) seconds between consecutive samples
+                of a detector's state.  Non-positive values are ignored — an
+                unmeasured source must not silently disable the gate.
+        """
+        try:
+            value = float(sec)
+        except (TypeError, ValueError):
+            return
+        if value <= 0.0:
+            return
+
+        previous = self._sampling_floor_sec
+        self._sampling_floor_sec = value
+
+        # Only log meaningful movement; the updater calls this once a minute.
+        if abs(value - previous) >= 0.05:
+            self._log.info(
+                "Sampling floor updated",
+                extra={
+                    "intersection_id": self._intersection_id,
+                    "sampling_floor_sec": round(value, 4),
+                    "previous_sampling_floor_sec": round(previous, 4),
+                    "min_orphan_pulse_sec": round(
+                        value * self._min_pulse_floor_multiple, 4
+                    ),
+                },
+            )
+
+    def get_sampling_floor(self) -> float:
+        """Get the sampling floor currently in force.
+
+        Returns:
+            Seconds between consecutive samples of a detector's state, as last
+            set by :meth:`set_sampling_floor` (or the built-in default).
+        """
+        return self._sampling_floor_sec
 
     # ------------------------------------------------------------------
     # Non-blocking callbacks (called from NTCIP event thread)
@@ -619,10 +871,15 @@ class DiscrepancyMonitor:
            is set, manage the resolution countdown and send a ``"stop"``
            trigger when post-roll elapses.  Always ``return`` after this block.
         3. **State snapshot** — read both detectors under brief locks.
+        3b. **High-duty advisory** — recompute the pair's rolling ON-duty at
+           most every ``_DUTY_EVAL_INTERVAL_SEC``; warn (rate-limited) when it
+           exceeds ``high_duty_warn_fraction``, and return early only if
+           ``suppress_high_duty_pairs`` is enabled.
         4. **Rule 1 new-detection** — start/continue disagreement timer; fire
            ``"start"`` trigger (no cooldown) if threshold exceeded.
-        5. **Rule 2 orphan detection** — register candidates; fire ``"start"``
-           trigger with exact ``duration_override`` when confirmed.
+        5. **Rule 2 orphan detection** — register candidates (subject to the
+           sampling-floor gate); fire ``"start"`` trigger with exact
+           ``duration_override`` when confirmed.
 
         Args:
             pair_key: Canonical pair key used for runtime state lookup.
@@ -729,15 +986,19 @@ class DiscrepancyMonitor:
         det_cfg   = self._intersection_cfg["detectors"].get(det_a_id, {})
         threshold = float(det_cfg.get("lag_threshold_sec", 2.0))
 
-        # ON intervals older than this can never intersect a still-decidable
-        # Rule 2 window (window span < 3×threshold, verdict staleness capped
-        # by the decision grace), so prune them while the lock is held.
-        prune_before = now - (
-            3.0 * threshold + _ORPHAN_DECISION_GRACE_SEC + 1.0
+        # Rule 2 can never be intersected by an ON interval older than
+        # 3×threshold + grace (window span plus verdict staleness), but the
+        # ON-duty advisory reads the same deque over a much longer window, so
+        # the retention horizon is the larger of the two.  Pruning happens
+        # while the lock is held; the callback path never prunes.
+        prune_before = now - max(
+            3.0 * threshold + _ORPHAN_DECISION_GRACE_SEC + 1.0,
+            _DUTY_WINDOW_SEC,
         )
 
         with state_a.lock:
             a_is_on         = state_a.is_on
+            a_last_on       = state_a.last_on_time
             a_last_off      = state_a.last_off_time
             a_last_pulse_on = state_a.last_pulse_on_time
             while state_a.on_intervals and state_a.on_intervals[0][1] < prune_before:
@@ -746,11 +1007,53 @@ class DiscrepancyMonitor:
 
         with state_b.lock:
             b_is_on         = state_b.is_on
+            b_last_on       = state_b.last_on_time
             b_last_off      = state_b.last_off_time
             b_last_pulse_on = state_b.last_pulse_on_time
             while state_b.on_intervals and state_b.on_intervals[0][1] < prune_before:
                 state_b.on_intervals.popleft()
             b_intervals     = tuple(state_b.on_intervals)
+
+        # ── 3b. High-duty advisory ────────────────────────────────────────
+        if now - rt.last_duty_eval_ts >= _DUTY_EVAL_INTERVAL_SEC:
+            rt.last_duty_eval_ts = now
+            duty_a = _compute_on_duty_fraction(
+                a_intervals, a_is_on, a_last_on, now, _DUTY_WINDOW_SEC
+            )
+            duty_b = _compute_on_duty_fraction(
+                b_intervals, b_is_on, b_last_on, now, _DUTY_WINDOW_SEC
+            )
+            rt.pair_min_duty    = min(duty_a, duty_b)
+            rt.high_duty_active = rt.pair_min_duty > self._high_duty_warn_fraction
+
+            if (
+                rt.high_duty_active
+                and now - rt.last_high_duty_warn_ts >= _HIGH_DUTY_WARN_INTERVAL_SEC
+            ):
+                rt.last_high_duty_warn_ts = now
+                self._log.warning(
+                    "Pair operates above the NTCIP sampling-reliability regime",
+                    extra={
+                        "intersection_id":         self._intersection_id,
+                        "pair_key":                pair_key,
+                        "duty_a":                  round(duty_a, 3),
+                        "duty_b":                  round(duty_b, 3),
+                        "duty_window_sec":         _DUTY_WINDOW_SEC,
+                        "high_duty_warn_fraction": self._high_duty_warn_fraction,
+                        "sampling_floor_sec":      round(self._sampling_floor_sec, 4),
+                        "suppressed":              self._suppress_high_duty_pairs,
+                    },
+                )
+
+        if rt.high_duty_active and self._suppress_high_duty_pairs:
+            # Opt-in deployment decision: this pair's edges are not resolvable
+            # at the current sampling rate, so run no rules against it at all.
+            # Clear the Rule 1 timer as we go: leaving it set would mean that
+            # the first tick after the pair's duty falls back below the
+            # threshold measures a disagreement from a timestamp before the
+            # suppression began, and fires immediately.
+            rt.disagreement_start = None
+            return
 
         # ── 4. Rule 1 — Continuous Disagreement (new-detection path) ─────
         both_agree = (a_is_on == b_is_on)
@@ -787,11 +1090,18 @@ class DiscrepancyMonitor:
                 return  # skip Rule 2 on this tick
 
         # ── 5. Rule 2 — Orphan Pulse ──────────────────────────────────────
+        # Sampling-floor gate: a pulse the source could not have resolved is
+        # not evidence of anything (ROADMAP 9).  Read the floor once so both
+        # slots are judged against the same value even if it changes mid-tick.
+        min_pulse_sec = self._sampling_floor_sec * self._min_pulse_floor_multiple
+
         self._maybe_register_orphan(
-            rt, "a", a_is_on, a_last_pulse_on, a_last_off, threshold
+            rt, "a", a_is_on, a_last_pulse_on, a_last_off, threshold,
+            min_pulse_sec,
         )
         self._maybe_register_orphan(
-            rt, "b", b_is_on, b_last_pulse_on, b_last_off, threshold
+            rt, "b", b_is_on, b_last_pulse_on, b_last_off, threshold,
+            min_pulse_sec,
         )
 
         # Evaluate detector-A orphan candidate against detector-B history.
@@ -873,6 +1183,7 @@ class DiscrepancyMonitor:
         last_pulse_on: float,
         last_off: float,
         threshold: float,
+        min_pulse_sec: float = 0.0,
     ) -> None:
         """Register a new Rule-2 orphan candidate if one is not already tracked.
 
@@ -892,6 +1203,13 @@ class DiscrepancyMonitor:
         * The pulse ON-duration is strictly less than ``threshold``.  Longer
           pulses are handled by Rule 1 and excluded here to avoid
           double-triggering.
+        * The pulse ON-duration is at least ``min_pulse_sec`` — the sampling
+          floor gate (ROADMAP 9).  A shorter pulse is below the resolution of
+          the source that reported it, so its "the partner never saw it"
+          counterpart is equally likely to be an unseen sample as a real
+          absence.  Rejected pulses bump ``rt.below_floor_suppressed`` and are
+          marked handled, so each distinct pulse is counted (and logged) once
+          rather than on every 0.1 s tick it remains the detector's last pulse.
 
         Args:
             rt: The pair runtime state object to update.
@@ -900,6 +1218,9 @@ class DiscrepancyMonitor:
             last_pulse_on: ``last_pulse_on_time`` from the detector snapshot.
             last_off: ``last_off_time`` from the detector snapshot.
             threshold: Allowable disagreement window in seconds.
+            min_pulse_sec: Sampling-floor gate in seconds
+                (``floor × min_pulse_floor_multiple``).  ``0.0`` disables the
+                gate — used only by callers that have no floor to apply.
         """
         if is_on or last_pulse_on == 0.0 or last_off == 0.0:
             return
@@ -917,6 +1238,23 @@ class DiscrepancyMonitor:
         if last_pulse_on <= getattr(rt, handled_attr):
             return  # This pulse was already armed once; don't re-arm it after
                     # a cooldown while the detector's state is unchanged.
+
+        if min_pulse_sec > 0.0 and pulse_duration < min_pulse_sec:
+            # Below the sampling floor — not evidence, aliasing.  Marked
+            # handled so this pulse is accounted for exactly once.
+            rt.below_floor_suppressed += 1
+            setattr(rt, handled_attr, last_pulse_on)
+            log.debug(
+                "Orphan candidate below sampling floor — not registered",
+                extra={
+                    "pair_key": rt.pair_key,
+                    "slot": which,
+                    "pulse_duration_sec": round(pulse_duration, 3),
+                    "min_pulse_sec": round(min_pulse_sec, 3),
+                    "below_floor_suppressed": rt.below_floor_suppressed,
+                },
+            )
+            return
 
         setattr(rt, attr, (last_pulse_on, last_off))
         setattr(rt, handled_attr, last_pulse_on)

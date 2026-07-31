@@ -120,6 +120,33 @@ Top-level intersection fields
                                 the intersection's local time rather than the
                                 host machine's system timezone.
 
+Sampling-floor fields (all optional; ROADMAP 9 / SCOPE_sampling_floor.md)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The discrepancy engine must not evaluate evidence finer than the rate at which
+detector state is actually sampled.  On an Econolite Cobalt at
+``snmp_chunk_size: 1`` one detector sweep is 8 sequential SNMP round trips, so
+that rate is ~1.0–1.5 s regardless of ``poll_interval_sec``.
+
+``sampling_floor_sec``   float — Assumed seconds between consecutive samples of
+                                 a detector, used until the NTCIP monitor has
+                                 measured its own cycle (``system_runner``
+                                 then pushes the measurement in).  Default
+                                 ``1.6`` — the 2026-07-19 measured median.
+``min_pulse_floor_multiple`` float — Rule 2 refuses orphan pulses shorter than
+                                 this many sampling floors.  Default ``2.0``.
+                                 Note ``1.6 × 2.0 = 3.2 s`` exceeds a typical
+                                 ``lag_threshold_sec``, so Rule 2 is
+                                 effectively off until the sweep gets faster.
+``high_duty_warn_fraction`` float — Pair minimum ON-duty (measured over a
+                                 rolling 120 s window) above which the engine
+                                 logs a structured WARNING that the pair is
+                                 outside the sampling-reliability regime.
+                                 Default ``0.8``.
+``suppress_high_duty_pairs`` bool — When ``true``, Rules 1+2 are disabled
+                                 entirely for pairs over that duty threshold.
+                                 Default ``false`` (advisory only) — a
+                                 deployment decision, not an engine default.
+
 cameras mapping (camera_id → CameraConfig)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ``url``                 str   — RTSP or HTTP stream URL.

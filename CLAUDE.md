@@ -103,10 +103,30 @@ falling edge under the per-detector lock, pruned only by the evaluator thread
 — **not** a most-recent-edge scalar (a scalar cannot represent an interval;
 that shape caused both false negatives and leaked Rule 3 overlaps). And a
 Rule 2 verdict older than `_ORPHAN_DECISION_GRACE_SEC` past its window close
-is discarded, never fired late (the pre-roll footage is gone by then). The
-rule functions are pinned by `video_engine/tests/test_discrepancy_rules.py`
-(26 stdlib-`unittest` cases, incl. the stale-refire guard) — run it after any
-engine change: `python3 video_engine/tests/test_discrepancy_rules.py`.
+is discarded, never fired late (the pre-roll footage is gone by then).
+
+**Sampling-floor gating (added 2026-07-30, ROADMAP 9 A+B — load-bearing).**
+The engine must not evaluate evidence finer than its own sampling resolution.
+The floor is **injected, never imported**: `system_runner` calls
+`DiscrepancyMonitor.set_sampling_floor()` at startup from the config's
+`sampling_floor_sec` (default 1.6 = the measured NTCIP reality) and every 60 s
+thereafter from `DetectorMonitor.effective_cycle_sec()` — do not "simplify"
+this by importing `ntcip_monitor` into the engine. Rule 2 refuses orphan
+pulses shorter than `min_pulse_floor_multiple × floor` (default 2.0×),
+counting them in the per-pair `below_floor_suppressed`; **at the default floor
+that gate is 3.2 s, above a typical 2.0 s `lag_threshold_sec`, so Rule 2 is
+effectively disabled until the sweep gets faster** (intended — see the
+2026-07-30 DESIGN_HISTORY entry). A rolling 120 s ON-duty fraction per pair
+drives a rate-limited WARNING; `suppress_high_duty_pairs` (default false) can
+disable Rules 1+2 for such pairs. Because the duty computation reads the same
+`on_intervals` deque, its retention horizon is now
+`max(3 × threshold + grace, 120 s)` — keep the two consistent if either
+changes.
+
+The rule functions are pinned by `video_engine/tests/test_discrepancy_rules.py`
+(50 stdlib-`unittest` cases, incl. the stale-refire guard and the floor gate)
+— run it after any engine change:
+`python3 video_engine/tests/test_discrepancy_rules.py`.
 Accuracy vs. an ATSPM ground-truth export is measured with
 `video_engine/tools/__accuracy_report.py` (correspondence-based
 precision/recall; models cooldown + poll aliasing), not by comparing raw
@@ -200,6 +220,15 @@ the 2026-07-15 DESIGN_HISTORY entry.
   `_intersections.json` was verified correct against controller high-res data
   (`__correlate_channels.py`) — do not "fix" accuracy problems by remapping
   channels; fix the sweep speed (ROADMAP 4a) or gate the rules.
+- **The monitor measures its own cycle** (2026-07-30, ROADMAP 9A):
+  `BaseMonitor` folds each `_poll()`-plus-sleep into an EMA (α=0.1) exposed as
+  `effective_cycle_sec()` and in a new `get_stats()`, and logs a rate-limited
+  (5 min) structured INFO when it exceeds `2 × poll_interval`.
+  **`effective_cycle_sec()` is the number to trust for sampling resolution;
+  `poll_interval` is only a lower bound on it.** `0.0` means "no cycle
+  completed yet" — callers must fall back to a configured default, never treat
+  it as a fast sweep. Tests: `ntcip_monitor/tests/test_snmp_batching.py`
+  (17 cases).
 - Poll interval is configurable per-intersection; a warning is logged if it
   drops below 0.5s (`config_manager.py`) — note this warning understates
   reality given the sweep-time floor above.

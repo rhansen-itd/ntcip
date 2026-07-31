@@ -4,10 +4,23 @@ Event-Driven Monitor Base Class
 Provides callback/signal system for external modules to subscribe to events.
 """
 
+import logging
 import threading
 import time
 from typing import Callable, Dict, List, Any
 from abc import ABC, abstractmethod
+
+log = logging.getLogger(__name__)
+
+# Smoothing factor for the effective-cycle EMA.  0.1 ≈ a ~10-cycle memory:
+# fast enough to follow a real change in controller responsiveness, slow
+# enough that a single retried PDU doesn't move the reported floor.
+_CYCLE_EMA_ALPHA = 0.1
+
+# Minimum spacing between "sweep slower than configured" INFO logs, per
+# monitor.  The condition is persistent by nature, so this is a heartbeat,
+# not an event.
+_SLOW_SWEEP_LOG_INTERVAL_SEC = 300.0
 
 
 class EventEmitter:
@@ -85,27 +98,45 @@ class BaseMonitor(ABC, EventEmitter):
     - Threading support
     - Start/stop lifecycle
     - Periodic polling
+    - Self-measurement of the *effective* sampling cycle (see
+      ``effective_cycle_sec``)
+
+    Sampling-rate note (ROADMAP 9 / SCOPE_sampling_floor.md)
+    ────────────────────────────────────────────────────────
+    ``poll_interval`` is only the sleep *between* sweeps.  On an Econolite
+    Cobalt at ``chunk_size=1`` a detector sweep costs one SNMP round trip per
+    group, so the real sampling cycle is RTT-bound (measured median 1.53 s at
+    8 groups on 2026-07-19) and no configured ``poll_interval`` can lower it.
+    Downstream consumers must not evaluate evidence finer than this measured
+    cycle, so the loop records ``_poll()`` + sleep as an EMA and exposes it.
     """
-    
+
     def __init__(self, snmp_client, poll_interval=0.25, name="Monitor"):
         """
         Initialize monitor.
-        
+
         Args:
             snmp_client: EconoliteSNMPClient instance
             poll_interval: Time between polls in seconds
             name: Monitor name for logging
         """
         EventEmitter.__init__(self)
-        
+
         self.snmp_client = snmp_client
         self.poll_interval = poll_interval
         self.name = name
-        
+
         self._running = False
         self._thread = None
         self._last_state = None
-    
+
+        # Effective-cycle self-measurement.  Written only by the polling
+        # thread; read (float assignment is atomic under the GIL) by any
+        # thread via effective_cycle_sec()/get_stats().
+        self._effective_cycle_sec = 0.0
+        self._cycle_count = 0
+        self._last_slow_sweep_log = 0.0
+
     def start(self):
         """Start the monitor in a background thread."""
         if self._running:
@@ -134,27 +165,103 @@ class BaseMonitor(ABC, EventEmitter):
     def _run_loop(self):
         """Main monitoring loop (runs in background thread)."""
         while self._running:
+            cycle_start = time.perf_counter()
             try:
                 self._poll()
             except Exception as e:
                 print(f"Error in {self.name}: {e}")
                 # Emit error event
                 self.emit('error', e)
-            
+
             time.sleep(self.poll_interval)
-    
+            self._record_cycle(time.perf_counter() - cycle_start)
+
+    def _record_cycle(self, elapsed):
+        """Fold one completed cycle's wall-clock duration into the EMA.
+
+        A "cycle" is one ``_poll()`` plus the following sleep — i.e. the true
+        spacing between consecutive samples of the controller, which is what
+        bounds the resolution of anything derived from the emitted events.
+
+        Args:
+            elapsed: Wall-clock seconds the cycle took (poll + sleep).
+        """
+        if self._cycle_count == 0:
+            self._effective_cycle_sec = elapsed
+        else:
+            self._effective_cycle_sec = (
+                _CYCLE_EMA_ALPHA * elapsed
+                + (1.0 - _CYCLE_EMA_ALPHA) * self._effective_cycle_sec
+            )
+        self._cycle_count += 1
+        self._maybe_log_slow_sweep()
+
+    def _maybe_log_slow_sweep(self):
+        """Log (rate-limited) when the sweep, not the config, sets the rate.
+
+        An EMA above ``2 x poll_interval`` means more than half of each cycle
+        is spent inside ``_poll()`` — the operator's signal that SNMP round
+        trips, not ``poll_interval``, determine the sampling rate.
+        """
+        if self._effective_cycle_sec <= 2.0 * self.poll_interval:
+            return
+
+        now = time.monotonic()
+        if now - self._last_slow_sweep_log < _SLOW_SWEEP_LOG_INTERVAL_SEC:
+            return
+        self._last_slow_sweep_log = now
+
+        log.info(
+            "Effective sampling cycle exceeds 2x poll_interval — "
+            "sweep time, not config, sets the sampling rate",
+            extra={
+                "monitor": self.name,
+                "poll_interval_sec": self.poll_interval,
+                "effective_cycle_sec": round(self._effective_cycle_sec, 4),
+                "cycles": self._cycle_count,
+            },
+        )
+
+    def effective_cycle_sec(self):
+        """Get the measured effective sampling cycle in seconds.
+
+        Returns:
+            EMA of ``_poll()`` + sleep wall-clock duration, or ``0.0`` before
+            the first cycle completes.  Callers must treat ``0.0`` as "not
+            measured yet" and fall back to a configured default.
+        """
+        return self._effective_cycle_sec
+
     @abstractmethod
     def _poll(self):
         """
         Poll the controller and emit events on changes.
-        
+
         Must be implemented by subclasses.
         """
         pass
-    
+
     def get_last_state(self):
         """Get the last known state."""
         return self._last_state
+
+    def get_stats(self):
+        """Get monitor runtime statistics.
+
+        Returns:
+            Dict with the monitor name, running flag, configured
+            ``poll_interval_sec``, the measured ``effective_cycle_sec``, and
+            the number of completed cycles.  ``effective_cycle_sec`` is the
+            number to trust when reasoning about sampling resolution;
+            ``poll_interval_sec`` is only a lower bound on it.
+        """
+        return {
+            'name': self.name,
+            'running': self._running,
+            'poll_interval_sec': self.poll_interval,
+            'effective_cycle_sec': round(self._effective_cycle_sec, 4),
+            'cycles': self._cycle_count,
+        }
 
 
 # ============================================================================

@@ -33,7 +33,7 @@ highest used so far.
 > ended; the remaining items were deliberately left in a state where their
 > *thinking* is pre-done and cheaper models execute:
 > **8 → Opus** (race analysis + the deadlock trap are written in the item);
-> **9 → Opus** (full design in [[SCOPE_sampling_floor.md]]);
+> **9 → done except C** (A+B landed 2026-07-30; C is owner-run, gated on 4a);
 > **4a remainder → no model** (owner runs the probe, flips a config key);
 > **4a fallback (if probe fails) → Opus** (threading design decided inline
 > below); **4f → Opus**; **4d / 4b / 5 → Sonnet** (mechanical, precedents
@@ -41,25 +41,34 @@ highest used so far.
 
 ---
 
-## 9 — Sampling-floor awareness + post-4a accuracy re-baseline (Target: Opus)
+## 9 — Post-4a accuracy re-baseline (Target: owner + any Claude session)
 
-Full decided design in [[SCOPE_sampling_floor.md]] (written 2026-07-19 from
-the measured 1.53 s sweep / 7–42 % edge-capture findings). Summary: the
-engine must not evaluate evidence finer than its own sampling resolution.
-(A) `DetectorMonitor` self-measures its effective cycle (EMA, exposed via
-stats); (B) `system_runner` injects that floor into `DiscrepancyMonitor.
-set_sampling_floor()` (keeps the package boundary clean); Rule 2 refuses
-orphan pulses shorter than 2× floor; per-pair high-duty advisory warning
-(suppression opt-in only); (C) the pass/fail re-baseline protocol with
-concrete numbers. Items A+B are useful even before 4a's round trip.
+Design and code in [[SCOPE_sampling_floor.md]]; A and B are **done**:
 
-Suggested prompt:
-> [Opus] In the ntcip project, do Item 9 of ROADMAP.md by implementing
-> SCOPE_sampling_floor.md items A and B exactly as specified (C is an
-> owner-run protocol, just leave it documented). Extend
-> video_engine/tests/test_discrepancy_rules.py and
-> ntcip_monitor/tests/test_snmp_batching.py per the scope's test list.
-> DESIGN_HISTORY entry + check off.
+- [x] **A — runtime sweep-time self-measurement** (2026-07-30). `BaseMonitor`
+  EMA of `_poll()` + sleep, `effective_cycle_sec()`, `get_stats()`,
+  rate-limited slow-sweep INFO. See DESIGN_HISTORY 2026-07-30.
+- [x] **B — sampling-floor gating** (2026-07-30). `system_runner` injects the
+  floor via `DiscrepancyMonitor.set_sampling_floor()` (startup from
+  `sampling_floor_sec`, then every 60 s from the measured cycle); Rule 2
+  refuses pulses below `min_pulse_floor_multiple × floor`; per-pair high-duty
+  advisory WARNING with opt-in `suppress_high_duty_pairs`.
+- [ ] **C — post-4a re-baseline protocol.** Owner-run; steps and pass/fail
+  numbers are in [[SCOPE_sampling_floor.md]] §"Item C". **Prerequisite:** 4a's
+  controller round trip (probe → `snmp_chunk_size` → restart → recapture).
+
+**Read before running C:** at the default 1.6 s floor the Rule 2 gate (3.2 s)
+exceeds a typical 2.0 s `lag_threshold_sec`, so **Rule 2 is effectively off
+until the sweep gets faster** — a re-baseline run before 4a lands will show
+zero Rule 2 triggers *by design*, not a regression. Set `sampling_floor_sec`
+per the probe verdict (or let the runtime measurement do it) before judging
+precision/recall.
+
+Suggested prompt (after the owner's 4a round trip + a ≥2 h engine run):
+> In the ntcip project, do Item 9C of ROADMAP.md: run the re-baseline
+> protocol in SCOPE_sampling_floor.md §"Item C" against the new capture/datZ
+> and the ATSPM export, and report each pass/fail number. Categorize residual
+> misses/FPs before touching any rule code. DESIGN_HISTORY entry + check off.
 
 ---
 

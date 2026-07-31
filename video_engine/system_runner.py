@@ -133,6 +133,20 @@ def _configure_root_logger() -> logging.Logger:
 log = _configure_root_logger().getChild("system_runner")
 
 # ---------------------------------------------------------------------------
+# Sampling-floor injection (ROADMAP 9 — see SCOPE_sampling_floor.md)
+# ---------------------------------------------------------------------------
+
+# Cadence at which the measured NTCIP sweep time is pushed into the
+# discrepancy engine.  The floor is a slow-moving property of the controller
+# link, so a minute is plenty; the engine reads whatever value is current.
+_SAMPLING_FLOOR_UPDATE_SEC = 60.0
+
+# Assumed floor before any measurement exists, overridable per-intersection
+# via the config's "sampling_floor_sec".  1.6 s = the 2026-07-19 measured
+# median sweep at chunk_size 1.
+_DEFAULT_SAMPLING_FLOOR_SEC = 1.6
+
+# ---------------------------------------------------------------------------
 # SystemRunner
 # ---------------------------------------------------------------------------
 
@@ -249,6 +263,27 @@ class SystemRunner:
             max_duration_sec=300.0,
         )
 
+        # The engine must not evaluate detector evidence finer than the rate
+        # at which that evidence is sampled.  It cannot import ntcip_monitor
+        # to find that rate out, so this composition root injects it: the
+        # configured assumption now, the monitor's own measurement later (see
+        # _sampling_floor_updater).
+        self._configured_sampling_floor_sec = float(
+            self._intersection_cfg.get(
+                "sampling_floor_sec", _DEFAULT_SAMPLING_FLOOR_SEC
+            )
+        )
+        self._discrepancy_monitor.set_sampling_floor(
+            self._configured_sampling_floor_sec
+        )
+        log.info(
+            "Initial sampling floor set from config",
+            extra={
+                "intersection_id": intersection_id,
+                "sampling_floor_sec": self._configured_sampling_floor_sec,
+            },
+        )
+
         # ── 4. Routine scheduler ──────────────────────────────────────────
         # RoutineScheduler reads routine_recordings from the same config.
         # If the key is absent the scheduler starts but never fires — no error.
@@ -313,6 +348,12 @@ class SystemRunner:
                 "NTCIP monitor started",
                 extra={"intersection_id": self._intersection_id},
             )
+            # Feed the monitor's measured sweep time to the discrepancy engine
+            # on a slow cadence, replacing the configured assumption.
+            _start_in_thread(
+                target=self._sampling_floor_updater,
+                name="sampling-floor-updater",
+            )
 
         log.info(
             "System fully operational — waiting for shutdown signal",
@@ -336,6 +377,46 @@ class SystemRunner:
         Idempotent — repeated calls are harmless.
         """
         self._shutdown_event.set()
+
+    # ------------------------------------------------------------------
+    # Sampling-floor injection
+    # ------------------------------------------------------------------
+
+    def _sampling_floor_updater(self) -> None:
+        """Push the NTCIP monitor's measured sampling cycle into the engine.
+
+        This is the whole reason the floor is *injected* rather than read:
+        ``discrepancy_engine`` must not import ``ntcip_monitor``, so the only
+        place both are visible is here.  Runs until shutdown, waking every
+        :data:`_SAMPLING_FLOOR_UPDATE_SEC` — the floor is a property of the
+        controller link and moves slowly, so polling it faster buys nothing.
+
+        Before the detector monitor has completed its first cycle,
+        ``effective_cycle_sec()`` returns ``0.0``; the configured value stays
+        in force until a real measurement exists.
+        """
+        while not self._shutdown_event.wait(_SAMPLING_FLOOR_UPDATE_SEC):
+            try:
+                measured = float(self._ntcip_monitor.effective_cycle_sec())
+            except Exception as exc:  # noqa: BLE001
+                log.error(
+                    "Failed to read effective sampling cycle",
+                    extra={
+                        "intersection_id": self._intersection_id,
+                        "error": str(exc),
+                    },
+                )
+                continue
+
+            if measured <= 0.0:
+                continue  # No completed cycle yet — keep the configured floor.
+
+            self._discrepancy_monitor.set_sampling_floor(measured)
+
+        log.debug(
+            "Sampling-floor updater exiting",
+            extra={"intersection_id": self._intersection_id},
+        )
 
     # ------------------------------------------------------------------
     # Ordered teardown

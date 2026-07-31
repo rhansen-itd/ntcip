@@ -553,3 +553,58 @@ decided. Entries after this point are logged as the decision lands.
   deadlock), snapshot `_draining` under lock, multi-camera warn-only, stubbed
   ClipRemuxer test. Post-Fable routing note added to the ROADMAP intro
   (order: 4a round trip → 8 → 9 → 4d → 4f → 4b/5).
+
+- 2026-07-30 — **Sampling-floor awareness landed (ROADMAP 9, items A+B of
+  [[SCOPE_sampling_floor.md]]; item C remains an owner-run protocol).** The
+  governing principle is now enforced in code: *the engine must not evaluate
+  evidence finer than its own sampling resolution.* (A) `BaseMonitor` records
+  each `_poll()`-plus-sleep as an EMA (α=0.1), exposes `effective_cycle_sec()`
+  and a new `get_stats()`, and logs a rate-limited (5 min) structured INFO
+  when the EMA exceeds `2 × poll_interval` — the operator's signal that SNMP
+  round trips, not `poll_interval`, set the sampling rate. `0.0` is the
+  documented "not measured yet" sentinel. (B) The floor reaches the engine by
+  **injection, not import**: `system_runner` calls the new
+  `DiscrepancyMonitor.set_sampling_floor()` once at startup from the config's
+  `sampling_floor_sec` (default 1.6 = the 2026-07-19 measured median) and
+  thereafter every 60 s from `effective_cycle_sec()` on a daemon thread that
+  waits on the shutdown event — the package boundary is untouched, and a
+  single float assignment is atomic under the GIL (same pattern as
+  `cooldown_active`). Rule 2 now refuses orphan candidates whose pulse is
+  shorter than `min_pulse_floor_multiple × floor` (default 2.0×), counting
+  them in a per-pair `below_floor_suppressed` and logging at DEBUG; rejected
+  pulses are marked handled so the counter tracks pulses, not 0.1 s ticks. A
+  per-pair rolling ON-duty fraction (new pure `_compute_on_duty_fraction`,
+  120 s window, recomputed at most every 5 s on the evaluator thread) drives
+  a rate-limited (10 min) structured WARNING when a pair's *minimum* duty
+  exceeds `high_duty_warn_fraction` (default 0.8), with full Rule 1+2
+  suppression available but **off by default** (`suppress_high_duty_pairs`)
+  — a deployment decision, not an engine default.
+  **Why this shape:** the 2026-07-19 measurements showed the false-trigger
+  storms were aliasing, not rule errors — a *seen* sub-floor pulse fires
+  while the partner's equally short response pulse is simply *unseen*. Gating
+  on pulse length heals that asymmetry at its source; the pure rule functions
+  stay pure (the floor is passed in as an argument), and the floor is
+  measured rather than assumed so the gate self-corrects when 4a's probe
+  lands. **Two consequences worth stating plainly:** (1) at the default 1.6 s
+  floor the Rule 2 gate is 3.2 s, which *exceeds* a typical
+  `lag_threshold_sec` of 2.0 s — so **Rule 2 is effectively disabled until
+  the sweep gets faster**. That is the honest reading of the measurement, not
+  an accident; after a green `snmp_chunk_size: 8` probe the floor drops to
+  ~0.2 s and the gate to ~0.4 s, suppressing almost nothing real. (2) the
+  `on_intervals` retention horizon is now `max(3 × threshold + grace, 120 s)`
+  because the duty computation reads the same deque, so
+  `_PARTNER_INTERVAL_MAXLEN` rose 128 → 512 (~8 KB/detector) to keep the
+  time-based prune the real bound. **Documented, not coded** (per the scope):
+  in the Rule 1 resolution state machine an *agreement* shorter than the
+  floor is not reliable evidence of resolution — acceptable because a
+  re-divergence restarts the post-roll countdown, so it can only delay a stop
+  trigger, never truncate a clip. Tests: `test_discrepancy_rules.py` 26 → 50
+  cases (floor gate incl. once-per-pulse counting, floor-update-takes-effect
+  end-to-end through `_evaluate_pair`, 9 duty-fraction cases, high-duty
+  warning + rate limit + opt-in suppression, which clears the Rule 1 timer as
+  it goes so a pair resuming after a quiet period times afresh);
+  `test_snmp_batching.py` 10 → 17
+  (EMA seeding/blending, `get_stats`, slow-sweep log + rate limit, real
+  `_run_loop` measurement). Note the pre-existing integration tests now
+  declare `set_sampling_floor(0.01)` — at the production default their 50 ms
+  pulses are correctly refused, which is itself a check that the gate works.

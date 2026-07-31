@@ -1,5 +1,11 @@
 # Scope: Sampling-floor awareness + post-4a accuracy re-baseline (ROADMAP #9)
 
+**Status (2026-07-30):** items **A and B are implemented** as specified — see
+the DESIGN_HISTORY entry of that date for what landed and the two consequences
+worth knowing (Rule 2 is effectively off at the default 1.6 s floor; the
+`on_intervals` retention horizon now covers the duty window). **Item C below
+is the remaining work** and is owner-run.
+
 **Target model:** Opus (the design below is decided; execution is one session)
 **Prerequisite:** ROADMAP 4a's controller round trip (probe run, `snmp_chunk_size`
 set or not, monitor restarted). Item B here is worth doing even before that.

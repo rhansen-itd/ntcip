@@ -1,4 +1,5 @@
-"""Unit tests for SNMP chunking and the batched monitor poll loops (ROADMAP 4a).
+"""Unit tests for SNMP chunking, the batched monitor poll loops (ROADMAP 4a),
+and the effective-cycle self-measurement (ROADMAP 9 item A).
 
 Runs without pysnmp installed: a minimal stub of ``pysnmp.hlapi`` is injected
 into ``sys.modules`` before ``ntcip_monitor`` is imported, and the stub's
@@ -13,6 +14,7 @@ Run from anywhere:
 from __future__ import annotations
 
 import sys
+import time
 import types
 import unittest
 from pathlib import Path
@@ -71,6 +73,7 @@ from ntcip_monitor.core.snmp_client import EconoliteSNMPClient  # noqa: E402
 from ntcip_monitor.core.oid_definitions import (  # noqa: E402
     DETECTOR_GROUPS, OUTPUT_OIDS,
 )
+from ntcip_monitor.core.event_monitor import _CYCLE_EMA_ALPHA  # noqa: E402
 from ntcip_monitor.monitors.detector_monitor import DetectorMonitor  # noqa: E402
 from ntcip_monitor.monitors.output_monitor import OutputMonitor  # noqa: E402
 
@@ -167,6 +170,80 @@ class TestOutputMonitorBatching(unittest.TestCase):
         self.assertEqual(client.stats["reads"], 1)
         self.assertEqual([len(p) for p in _PDU_LOG], [1] * 16)
         self.assertEqual(ons, [5])
+
+
+class TestEffectiveCycleMeasurement(unittest.TestCase):
+    """ROADMAP 9 item A — the monitor measures its own sampling cycle.
+
+    ``poll_interval`` is only the sleep between sweeps; at chunk_size 1 the
+    sweep itself is 8 sequential round trips, so the cycle a downstream
+    consumer must respect is measured, not configured.
+    """
+
+    LOGGER = "ntcip_monitor.core.event_monitor"
+
+    def _monitor(self, poll_interval=0.2):
+        _reset({oid: 0 for oid in DETECTOR_GROUPS})
+        client = EconoliteSNMPClient("1.2.3.4")
+        return DetectorMonitor(
+            client, poll_interval=poll_interval, detector_range=(1, 9)
+        )
+
+    def test_unmeasured_before_first_cycle(self):
+        mon = self._monitor()
+        # 0.0 is the documented "not measured yet" sentinel — consumers fall
+        # back to their configured assumption rather than trusting it.
+        self.assertEqual(mon.effective_cycle_sec(), 0.0)
+        self.assertEqual(mon.get_stats()["cycles"], 0)
+
+    def test_first_sample_seeds_ema(self):
+        mon = self._monitor()
+        mon._record_cycle(1.5)
+        self.assertAlmostEqual(mon.effective_cycle_sec(), 1.5)
+
+    def test_ema_blends_subsequent_samples(self):
+        mon = self._monitor()
+        mon._record_cycle(1.5)
+        mon._record_cycle(2.5)
+        expected = _CYCLE_EMA_ALPHA * 2.5 + (1.0 - _CYCLE_EMA_ALPHA) * 1.5
+        self.assertAlmostEqual(mon.effective_cycle_sec(), expected)
+        self.assertEqual(mon.get_stats()["cycles"], 2)
+
+    def test_get_stats_exposes_measured_and_configured_rates(self):
+        mon = self._monitor(poll_interval=0.2)
+        mon._record_cycle(1.53)  # the 2026-07-19 measured median
+        stats = mon.get_stats()
+        self.assertEqual(stats["name"], "DetectorMonitor")
+        self.assertEqual(stats["poll_interval_sec"], 0.2)
+        self.assertAlmostEqual(stats["effective_cycle_sec"], 1.53)
+
+    def test_slow_sweep_logs_once_per_interval(self):
+        mon = self._monitor(poll_interval=0.2)  # budget = 0.4 s
+        with self.assertLogs(self.LOGGER, level="INFO") as captured:
+            mon._record_cycle(1.53)
+            mon._record_cycle(1.53)  # rate-limited: must not log again
+        self.assertEqual(len(captured.records), 1)
+        record = captured.records[0]
+        self.assertEqual(record.monitor, "DetectorMonitor")
+        self.assertAlmostEqual(record.poll_interval_sec, 0.2)
+        self.assertGreater(record.effective_cycle_sec, 0.4)
+
+    def test_no_slow_sweep_log_within_budget(self):
+        mon = self._monitor(poll_interval=1.0)  # budget = 2.0 s
+        mon._record_cycle(1.53)
+        # White-box on purpose: assertNoLogs needs Python 3.10+, and this
+        # suite must run on whatever stdlib the edge box ships.
+        self.assertEqual(mon._last_slow_sweep_log, 0.0)
+
+    def test_run_loop_measures_real_cycles(self):
+        mon = self._monitor(poll_interval=0.01)
+        mon.start()
+        try:
+            time.sleep(0.15)
+        finally:
+            mon.stop()
+        self.assertGreater(mon.get_stats()["cycles"], 0)
+        self.assertGreater(mon.effective_cycle_sec(), 0.0)
 
 
 if __name__ == "__main__":

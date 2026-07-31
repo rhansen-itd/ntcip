@@ -1,10 +1,11 @@
 """Unit tests for the discrepancy engine's pure rule functions.
 
 Covers ``_check_rule1_continuous``, ``_check_rule2_orphan`` (interval-based
-partner overlap), and ``DiscrepancyMonitor._maybe_register_orphan`` (including
-the 2026-07-19 stale-refire guard), plus a small set of integration tests that
-drive ``DiscrepancyMonitor._evaluate_pair`` directly (no evaluator thread)
-against a stub ``ConfigProvider`` and a temp Hot Folder.
+partner overlap), ``_compute_on_duty_fraction``, and
+``DiscrepancyMonitor._maybe_register_orphan`` (including the 2026-07-19
+stale-refire guard and the 2026-07-30 sampling-floor gate), plus a set of
+integration tests that drive ``DiscrepancyMonitor._evaluate_pair`` directly
+(no evaluator thread) against a stub ``ConfigProvider`` and a temp Hot Folder.
 
 Run from anywhere:
 
@@ -15,6 +16,7 @@ Run from anywhere:
 from __future__ import annotations
 
 import json
+import logging
 import sys
 import tempfile
 import time
@@ -28,11 +30,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config_manager import ConfigProvider  # noqa: E402
 from discrepancy_engine import (  # noqa: E402
     DiscrepancyMonitor,
+    _DEFAULT_SAMPLING_FLOOR_SEC,
+    _DUTY_WINDOW_SEC,
     _ORPHAN_DECISION_GRACE_SEC,
     _PairRuntimeState,
     _check_rule1_continuous,
     _check_rule2_orphan,
+    _compute_on_duty_fraction,
 )
+
+# The engine logs a WARNING for high-duty pairs.  Without a handler, logging's
+# lastResort prints it to stderr and clutters the test output; assertLogs
+# installs its own handler, so capturing tests are unaffected.
+logging.getLogger("discrepancy_engine").addHandler(logging.NullHandler())
 
 
 # ---------------------------------------------------------------------------
@@ -152,9 +162,11 @@ class TestMaybeRegisterOrphan(unittest.TestCase):
     def setUp(self):
         self.rt = _PairRuntimeState(pair_key="1:2")
 
-    def register(self, is_on=False, last_pulse_on=100.0, last_off=102.0):
+    def register(self, is_on=False, last_pulse_on=100.0, last_off=102.0,
+                 min_pulse_sec=0.0):
         DiscrepancyMonitor._maybe_register_orphan(
-            self.rt, "a", is_on, last_pulse_on, last_off, self.THRESHOLD
+            self.rt, "a", is_on, last_pulse_on, last_off, self.THRESHOLD,
+            min_pulse_sec,
         )
 
     def test_registers_short_pulse(self):
@@ -198,6 +210,95 @@ class TestMaybeRegisterOrphan(unittest.TestCase):
         self.assertEqual(self.rt.orphan_watch_a, (110.0, 111.0))
         self.assertEqual(self.rt.last_handled_pulse_on_a, 110.0)
 
+    # ── Sampling-floor gate (ROADMAP 9 item B, rule 1 of the gating list) ──
+
+    def test_below_floor_pulse_not_registered(self):
+        # 2 s pulse, floor gate 3.2 s (= 1.6 s measured floor x 2): the source
+        # cannot resolve this pulse, so the partner's silence is not evidence.
+        self.register(min_pulse_sec=3.2)
+        self.assertIsNone(self.rt.orphan_watch_a)
+        self.assertEqual(self.rt.below_floor_suppressed, 1)
+
+    def test_below_floor_pulse_counted_once_not_per_tick(self):
+        # The evaluator re-examines the same last-pulse every 0.1 s tick;
+        # the suppression counter must track pulses, not ticks.
+        for _ in range(5):
+            self.register(min_pulse_sec=3.2)
+        self.assertEqual(self.rt.below_floor_suppressed, 1)
+
+    def test_pulse_exactly_at_floor_gate_registers(self):
+        # Gate is "shorter than", so a pulse of exactly the gate length is
+        # trusted (2.0 s pulse, gate 2.0 s).
+        self.register(min_pulse_sec=2.0)
+        self.assertEqual(self.rt.orphan_watch_a, (100.0, 102.0))
+        self.assertEqual(self.rt.below_floor_suppressed, 0)
+
+    def test_above_floor_pulse_registers(self):
+        # Post-chunk-8 regime: floor ~0.2 s, gate ~0.4 s — suppresses nothing
+        # real at a 2 s pulse.
+        self.register(min_pulse_sec=0.4)
+        self.assertEqual(self.rt.orphan_watch_a, (100.0, 102.0))
+        self.assertEqual(self.rt.below_floor_suppressed, 0)
+
+    def test_zero_gate_disables_the_check(self):
+        self.register(last_pulse_on=100.0, last_off=100.001, min_pulse_sec=0.0)
+        self.assertEqual(self.rt.orphan_watch_a, (100.0, 100.001))
+        self.assertEqual(self.rt.below_floor_suppressed, 0)
+
+
+# ---------------------------------------------------------------------------
+# ON-duty fraction (feeds the high-duty advisory)
+# ---------------------------------------------------------------------------
+
+class TestOnDutyFraction(unittest.TestCase):
+    NOW = 1000.0
+    WINDOW = 100.0
+
+    def duty(self, intervals, is_on=False, last_on_time=0.0, window=None):
+        return _compute_on_duty_fraction(
+            intervals, is_on, last_on_time, self.NOW,
+            self.WINDOW if window is None else window,
+        )
+
+    def test_no_history_is_zero(self):
+        self.assertEqual(self.duty(()), 0.0)
+
+    def test_completed_intervals_sum(self):
+        # 20 s + 30 s inside a 100 s window.
+        intervals = ((910.0, 930.0), (950.0, 980.0))
+        self.assertAlmostEqual(self.duty(intervals), 0.5)
+
+    def test_interval_clipped_at_window_start(self):
+        # Started 50 s before the window; only the 10 s inside it counts.
+        self.assertAlmostEqual(self.duty(((850.0, 910.0),)), 0.1)
+
+    def test_interval_entirely_before_window_ignored(self):
+        self.assertEqual(self.duty(((800.0, 850.0),)), 0.0)
+
+    def test_open_interval_counts_up_to_now(self):
+        # Currently ON since 40 s ago, no completed intervals.
+        self.assertAlmostEqual(self.duty((), is_on=True, last_on_time=960.0), 0.4)
+
+    def test_open_interval_adds_to_completed(self):
+        intervals = ((910.0, 930.0),)  # 20 s
+        self.assertAlmostEqual(
+            self.duty(intervals, is_on=True, last_on_time=960.0), 0.6
+        )
+
+    def test_high_duty_channel_reads_above_warn_fraction(self):
+        # The phase-2/6/7 shape: ON almost continuously with brief gaps.
+        intervals = tuple(
+            (self.NOW - self.WINDOW + i * 10.0, self.NOW - self.WINDOW + i * 10.0 + 9.0)
+            for i in range(10)
+        )
+        self.assertAlmostEqual(self.duty(intervals), 0.9)
+
+    def test_saturates_at_one(self):
+        self.assertEqual(self.duty(((500.0, 1000.0),)), 1.0)
+
+    def test_non_positive_window_is_zero(self):
+        self.assertEqual(self.duty(((910.0, 930.0),), window=0.0), 0.0)
+
 
 # ---------------------------------------------------------------------------
 # Integration: DiscrepancyMonitor._evaluate_pair end-to-end (no thread)
@@ -216,27 +317,56 @@ class _StubProvider(ConfigProvider):
         return ["test_int"]
 
 
+def _build_monitor(trigger_dir, threshold=0.2, floor=None, **extra_cfg):
+    """Build a two-detector DiscrepancyMonitor over a temp Hot Folder.
+
+    Args:
+        trigger_dir: Directory the monitor writes trigger files into.
+        threshold: ``lag_threshold_sec`` for both detectors.
+        floor: When given, injected via ``set_sampling_floor`` the way
+            ``system_runner`` does in production.
+        **extra_cfg: Extra top-level intersection config keys (e.g.
+            ``suppress_high_duty_pairs``).
+
+    Returns:
+        A constructed (not started) :class:`DiscrepancyMonitor`.
+    """
+    cfg = {
+        "timezone": "UTC",
+        "detectors": {
+            "1": {"paired_detector_id": "2", "camera_id": "cam1",
+                  "lag_threshold_sec": threshold, "type": "radar"},
+            "2": {"paired_detector_id": "1", "camera_id": "cam1",
+                  "lag_threshold_sec": threshold, "type": "loop"},
+        },
+    }
+    cfg.update(extra_cfg)
+    monitor = DiscrepancyMonitor(
+        intersection_id="test_int",
+        config_provider=_StubProvider(cfg),
+        trigger_dir=trigger_dir,
+        cooldown_sec=60.0,
+    )
+    if floor is not None:
+        monitor.set_sampling_floor(floor)
+    return monitor
+
+
 class TestMonitorIntegration(unittest.TestCase):
     """Drives real callbacks + _evaluate_pair with a 0.2 s threshold."""
 
     THRESHOLD = 0.2
 
+    # Sub-second pulses are only meaningful evidence if the source samples
+    # faster than they last, so the tests declare a matching floor.  Without
+    # this the production default (1.6 s x 2 = a 3.2 s gate) correctly refuses
+    # every pulse these tests fire.
+    FLOOR = 0.01
+
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        cfg = {
-            "timezone": "UTC",
-            "detectors": {
-                "1": {"paired_detector_id": "2", "camera_id": "cam1",
-                      "lag_threshold_sec": self.THRESHOLD, "type": "radar"},
-                "2": {"paired_detector_id": "1", "camera_id": "cam1",
-                      "lag_threshold_sec": self.THRESHOLD, "type": "loop"},
-            },
-        }
-        self.monitor = DiscrepancyMonitor(
-            intersection_id="test_int",
-            config_provider=_StubProvider(cfg),
-            trigger_dir=self._tmp.name,
-            cooldown_sec=60.0,
+        self.monitor = _build_monitor(
+            self._tmp.name, threshold=self.THRESHOLD, floor=self.FLOOR
         )
 
     def tearDown(self):
@@ -309,6 +439,181 @@ class TestMonitorIntegration(unittest.TestCase):
         self.assertEqual(len(intervals), 2)
         for on_ts, off_ts in intervals:
             self.assertLess(on_ts, off_ts)
+
+
+# ---------------------------------------------------------------------------
+# Sampling-floor injection end-to-end (ROADMAP 9 item B)
+# ---------------------------------------------------------------------------
+
+class TestSamplingFloorInjection(unittest.TestCase):
+    """The floor arrives via ``set_sampling_floor``, never via an import."""
+
+    THRESHOLD = 0.2
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.monitor = _build_monitor(self._tmp.name, threshold=self.THRESHOLD)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def triggers(self):
+        return sorted(Path(self._tmp.name).glob("trigger_*.json"))
+
+    def pulse(self, det_id: str, duration: float):
+        self.monitor.on_detector_on(det_id)
+        time.sleep(duration)
+        self.monitor.on_detector_off(det_id)
+
+    def test_defaults_to_measured_ntcip_reality(self):
+        # Nothing injected yet: assume the 2026-07-19 measured sweep, not an
+        # optimistic poll_interval.
+        self.assertEqual(
+            self.monitor.get_sampling_floor(), _DEFAULT_SAMPLING_FLOOR_SEC
+        )
+
+    def test_set_and_get_round_trip(self):
+        self.monitor.set_sampling_floor(0.25)
+        self.assertAlmostEqual(self.monitor.get_sampling_floor(), 0.25)
+
+    def test_unmeasured_values_are_ignored(self):
+        # effective_cycle_sec() returns 0.0 before the first sweep completes;
+        # accepting it would silently disable the gate.
+        self.monitor.set_sampling_floor(0.25)
+        for bogus in (0.0, -1.0, None, "slow"):
+            self.monitor.set_sampling_floor(bogus)
+            self.assertAlmostEqual(self.monitor.get_sampling_floor(), 0.25)
+
+    def test_floor_update_takes_effect_on_rule2(self):
+        # A floor too coarse to resolve the pulse: no trigger, counter bumped.
+        self.monitor.set_sampling_floor(1.6)   # gate = 3.2 s
+        self.pulse("1", 0.05)
+        time.sleep(self.THRESHOLD + 0.05)
+        self.monitor._evaluate_pair("1:2", "1", "2")
+        self.assertEqual(self.triggers(), [])
+        rt = self.monitor._pair_runtime["1:2"]
+        self.assertEqual(rt.below_floor_suppressed, 1)
+
+        # Same engine, faster sweep measured (the chunk-8 outcome): an equally
+        # short pulse is now resolvable evidence and fires.
+        self.monitor.set_sampling_floor(0.01)  # gate = 0.02 s
+        self.pulse("1", 0.05)
+        time.sleep(self.THRESHOLD + 0.05)
+        self.monitor._evaluate_pair("1:2", "1", "2")
+        trigs = self.triggers()
+        self.assertEqual(len(trigs), 1)
+        payload = json.loads(trigs[0].read_text(encoding="utf-8"))
+        self.assertEqual(payload["metadata"]["rule"], "rule2_orphan_pulse")
+
+
+# ---------------------------------------------------------------------------
+# High-duty advisory + opt-in suppression
+# ---------------------------------------------------------------------------
+
+class TestHighDutyAdvisory(unittest.TestCase):
+    """Pairs whose duty cycle outruns NTCIP sampling are flagged, not silenced.
+
+    Duty history is injected directly into the detectors' ``on_intervals``
+    deques — the same structure the callbacks populate — so a 120 s window can
+    be exercised without waiting 120 s.
+    """
+
+    THRESHOLD = 0.2
+    LOGGER = "discrepancy_engine.test_int"
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def build(self, **extra_cfg):
+        return _build_monitor(
+            self._tmp.name, threshold=self.THRESHOLD, floor=0.01, **extra_cfg
+        )
+
+    def load_duty(self, monitor, fraction):
+        """Give both detectors ``fraction`` ON-duty over the rolling window."""
+        now = time.time()
+        span = _DUTY_WINDOW_SEC * fraction
+        for det_id in ("1", "2"):
+            state = monitor._detector_states[det_id]
+            state.on_intervals.clear()
+            state.on_intervals.append((now - span, now - 0.001))
+
+    def test_warns_when_pair_duty_exceeds_fraction(self):
+        monitor = self.build()
+        self.load_duty(monitor, 0.9)
+        with self.assertLogs(self.LOGGER, level="WARNING") as captured:
+            monitor._evaluate_pair("1:2", "1", "2")
+        self.assertEqual(len(captured.records), 1)
+        record = captured.records[0]
+        self.assertIn("sampling-reliability regime", record.getMessage())
+        self.assertGreater(record.duty_a, 0.8)
+        self.assertFalse(record.suppressed)
+
+    def test_warning_is_rate_limited_per_pair(self):
+        monitor = self.build()
+        self.load_duty(monitor, 0.9)
+        with self.assertLogs(self.LOGGER, level="WARNING") as captured:
+            monitor._evaluate_pair("1:2", "1", "2")
+            # Force a duty recompute; the warning itself stays rate-limited.
+            monitor._pair_runtime["1:2"].last_duty_eval_ts = 0.0
+            monitor._evaluate_pair("1:2", "1", "2")
+        self.assertEqual(len(captured.records), 1)
+
+    def test_no_warning_below_fraction(self):
+        monitor = self.build()
+        self.load_duty(monitor, 0.5)
+        monitor._evaluate_pair("1:2", "1", "2")
+        rt = monitor._pair_runtime["1:2"]
+        self.assertFalse(rt.high_duty_active)
+        self.assertAlmostEqual(rt.pair_min_duty, 0.5, places=2)
+
+    def test_advisory_does_not_suppress_by_default(self):
+        monitor = self.build()
+        self.load_duty(monitor, 0.9)
+        monitor.on_detector_on("1")            # divergence: 1 ON, 2 OFF
+        monitor._evaluate_pair("1:2", "1", "2")  # starts the disagreement timer
+        time.sleep(self.THRESHOLD + 0.05)
+        monitor._evaluate_pair("1:2", "1", "2")
+        trigs = sorted(Path(self._tmp.name).glob("trigger_*.json"))
+        self.assertEqual(len(trigs), 1)
+        self.assertTrue(monitor._pair_runtime["1:2"].high_duty_active)
+
+    def test_opt_in_suppression_disables_rules(self):
+        monitor = self.build(suppress_high_duty_pairs=True)
+        self.load_duty(monitor, 0.9)
+        monitor.on_detector_on("1")
+        monitor._evaluate_pair("1:2", "1", "2")
+        time.sleep(self.THRESHOLD + 0.05)
+        monitor._evaluate_pair("1:2", "1", "2")
+        self.assertEqual(sorted(Path(self._tmp.name).glob("trigger_*.json")), [])
+        self.assertTrue(monitor._pair_runtime["1:2"].high_duty_active)
+        # No stale Rule 1 timer left behind: the first tick after duty falls
+        # back below the threshold must not fire on a pre-suppression start.
+        self.assertIsNone(monitor._pair_runtime["1:2"].disagreement_start)
+
+    def test_rules_resume_when_duty_falls_back(self):
+        monitor = self.build(suppress_high_duty_pairs=True)
+        self.load_duty(monitor, 0.9)
+        monitor.on_detector_on("1")
+        monitor._evaluate_pair("1:2", "1", "2")   # suppressed
+        time.sleep(self.THRESHOLD + 0.05)
+
+        # Duty drops (quiet period); force a recompute the way 5 s of ticks
+        # would, then confirm the pair is live again but timing afresh.
+        self.load_duty(monitor, 0.1)
+        monitor._pair_runtime["1:2"].last_duty_eval_ts = 0.0
+        monitor._evaluate_pair("1:2", "1", "2")
+        self.assertFalse(monitor._pair_runtime["1:2"].high_duty_active)
+        self.assertEqual(sorted(Path(self._tmp.name).glob("trigger_*.json")), [])
+
+        time.sleep(self.THRESHOLD + 0.05)
+        monitor._evaluate_pair("1:2", "1", "2")
+        self.assertEqual(
+            len(sorted(Path(self._tmp.name).glob("trigger_*.json"))), 1
+        )
 
 
 if __name__ == "__main__":
