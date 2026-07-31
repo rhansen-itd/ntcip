@@ -638,3 +638,16 @@ decided. Entries after this point are logged as the decision lands.
   `OutputMonitor`), but `output_monitor._poll` swallows `SNMPError` with a
   bare `pass`, so if outputs are ever enabled against this controller they
   fail silently forever. Logged as ROADMAP 10.
+
+- 2026-07-31 — **ROADMAP tidied after the 9A/B + 4a-config landings.** Item 8
+  moved above Item 9 (file order is priority order, and 9's only remaining
+  part is owner-blocked while 8 is the top actionable item — the sole known
+  bug in code that runs). The Fable-era routing note was replaced with a
+  status-at-a-glance block, which also flags that 4a steps 3–4 and 9C need
+  **one** controller capture between them, not two. 4a compressed to what
+  remains: its narrative history now lives here, and the dirty-probe fallback
+  (concurrent per-group clients) was dropped from the forward-looking list as
+  moot given the green verdict — the design stays in the 2026-07-19 entry
+  should another controller ever need it. Fixed stale text: 4d no longer
+  claims no `tests/` directory exists (two do), and the sub-item ordering note
+  no longer sequences work behind 4a.

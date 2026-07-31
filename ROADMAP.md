@@ -29,46 +29,27 @@ highest used so far.
 
 ---
 
-> **Post-Fable routing (2026-07-19, final Fable session).** Fable access has
-> ended; the remaining items were deliberately left in a state where their
-> *thinking* is pre-done and cheaper models execute:
-> **8 → Opus** (race analysis + the deadlock trap are written in the item);
-> **9 → done except C** (A+B landed 2026-07-30; C is owner-run, gated on 4a);
-> **4a remainder → no model** (owner runs the probe, flips a config key);
-> **4a fallback (if probe fails) → Opus** (threading design decided inline
-> below); **4f → Opus**; **4d / 4b / 5 → Sonnet** (mechanical, precedents
-> set). Suggested order: 4a round trip → 8 → 9 → 4d → 4f → 4b/5.
-
----
-
-## 9 — Post-4a accuracy re-baseline (Target: owner + any Claude session)
-
-Design and code in [[SCOPE_sampling_floor.md]]; A and B are **done**:
-
-- [x] **A — runtime sweep-time self-measurement** (2026-07-30). `BaseMonitor`
-  EMA of `_poll()` + sleep, `effective_cycle_sec()`, `get_stats()`,
-  rate-limited slow-sweep INFO. See DESIGN_HISTORY 2026-07-30.
-- [x] **B — sampling-floor gating** (2026-07-30). `system_runner` injects the
-  floor via `DiscrepancyMonitor.set_sampling_floor()` (startup from
-  `sampling_floor_sec`, then every 60 s from the measured cycle); Rule 2
-  refuses pulses below `min_pulse_floor_multiple × floor`; per-pair high-duty
-  advisory WARNING with opt-in `suppress_high_duty_pairs`.
-- [ ] **C — post-4a re-baseline protocol.** Owner-run; steps and pass/fail
-  numbers are in [[SCOPE_sampling_floor.md]] §"Item C". **Prerequisite:** 4a's
-  controller round trip (probe → `snmp_chunk_size` → restart → recapture).
-
-**Read before running C:** at the default 1.6 s floor the Rule 2 gate (3.2 s)
-exceeds a typical 2.0 s `lag_threshold_sec`, so **Rule 2 is effectively off
-until the sweep gets faster** — a re-baseline run before 4a lands will show
-zero Rule 2 triggers *by design*, not a regression. Set `sampling_floor_sec`
-per the probe verdict (or let the runtime measurement do it) before judging
-precision/recall.
-
-Suggested prompt (after the owner's 4a round trip + a ≥2 h engine run):
-> In the ntcip project, do Item 9C of ROADMAP.md: run the re-baseline
-> protocol in SCOPE_sampling_floor.md §"Item C" against the new capture/datZ
-> and the ATSPM export, and report each pass/fail number. Categorize residual
-> misses/FPs before touching any rule code. DESIGN_HISTORY entry + check off.
+> **Status at a glance (2026-07-31).**
+>
+> **Waiting on the owner + a controller — one round trip closes both:**
+> restart the monitor with the new `snmp_chunk_size: 8`, rerun
+> `__capture_ntcip.py` (~10 min) with a matching datZ pull, and run the engine
+> ≥ 2 h with a matching ATSPM export. That single capture session feeds **4a
+> steps 3–4** (verify the sweep got faster) and **9C** (the accuracy
+> re-baseline). Don't capture twice.
+>
+> **Ready to start now, no hardware:** **8** (Opus — the only known bug in
+> code that runs), **4f** (Opus — unauthenticated endpoints that toggle signal
+> hardware), **4d / 4b / 5** (Sonnet — mechanical, precedents set), **6**
+> (Opus, fold into 5), **2**, **3**, **10**.
+>
+> **Suggested order:** 8 → 4f → 4d → 4b/5 → 6, with the owner's round trip
+> (4a 3–4, then 9C) slotted in whenever the controller is available.
+>
+> Model routing follows the Fable-era principle: the *thinking* for the
+> remaining items is pre-done in the item text, so the Target line says who
+> executes. Deferred by design: **4e** (needs a fixture strategy session,
+> after 4d), **4h** (refactors, after 4d). Don't-action lists: **4c**, **4g**.
 
 ---
 
@@ -126,6 +107,37 @@ Suggested prompt:
 
 ---
 
+## 9 — Post-4a accuracy re-baseline (Target: owner + any Claude session)
+
+Design and code in [[SCOPE_sampling_floor.md]]; A and B are **done**:
+
+- [x] **A — runtime sweep-time self-measurement** (2026-07-30). `BaseMonitor`
+  EMA of `_poll()` + sleep, `effective_cycle_sec()`, `get_stats()`,
+  rate-limited slow-sweep INFO. See DESIGN_HISTORY 2026-07-30.
+- [x] **B — sampling-floor gating** (2026-07-30). `system_runner` injects the
+  floor via `DiscrepancyMonitor.set_sampling_floor()` (startup from
+  `sampling_floor_sec`, then every 60 s from the measured cycle); Rule 2
+  refuses pulses below `min_pulse_floor_multiple × floor`; per-pair high-duty
+  advisory WARNING with opt-in `suppress_high_duty_pairs`.
+- [ ] **C — post-4a re-baseline protocol.** Owner-run; steps and pass/fail
+  numbers are in [[SCOPE_sampling_floor.md]] §"Item C". **Prerequisite:** 4a's
+  controller round trip (probe → `snmp_chunk_size` → restart → recapture).
+
+**Read before running C:** at the default 1.6 s floor the Rule 2 gate (3.2 s)
+exceeds a typical 2.0 s `lag_threshold_sec`, so **Rule 2 is effectively off
+until the sweep gets faster** — a re-baseline run before 4a lands will show
+zero Rule 2 triggers *by design*, not a regression. Set `sampling_floor_sec`
+per the probe verdict (or let the runtime measurement do it) before judging
+precision/recall.
+
+Suggested prompt (after the owner's 4a round trip + a ≥2 h engine run):
+> In the ntcip project, do Item 9C of ROADMAP.md: run the re-baseline
+> protocol in SCOPE_sampling_floor.md §"Item C" against the new capture/datZ
+> and the ATSPM export, and report each pass/fail number. Categorize residual
+> misses/FPs before touching any rule code. DESIGN_HISTORY entry + check off.
+
+---
+
 ## 2 — Merge or finalize the second intersection config (Target: Opus)
 
 `video_engine/701_intersection.json` (intersection 701, US-95/Whitley Dr) is
@@ -162,103 +174,50 @@ Suggested prompt:
 ## 4 — Jules code-review backlog (Target: Opus; each sub-item is one session)
 
 Findings from Jules's ongoing automated review, triaged against current code
-(none were obsolete — all still apply as described). Grouped by how they
-should be tackled. Each lettered sub-item below is a session-sized unit; take
-them in roughly the listed order (4d before 4a/4h, since those want tests
-first).
+when logged. Grouped by how they should be tackled; each lettered sub-item is
+a session-sized unit. Remaining order: **4f** (security) → **4d** (tests) →
+**4b** (mechanical), with **4e**/**4h** after 4d and **4a** waiting only on
+the owner's capture. **4c** and **4g** are don't-action lists.
 
-### 4a. Batch the per-OID SNMP polling loops (one focused session)
+### 4a. SNMP sweep speed — verify the round trip (nearly done)
 
-`output_monitor.py` and `detector_monitor.py` both call
-`self.snmp_client.get(oid)` once per item inside a loop, instead of
-`self.snmp_client.get(*oids)` once — which `phase_monitor.py` already does
-correctly (`reds, yellows, greens = self.snmp_client.get(reds_oid, ...)`).
+The original finding (per-OID poll loops) and the measurement that made it the
+top accuracy item (`CHUNK_SIZE=1` → a 1.0–1.5 s sampling cycle, 7–42 % edge
+capture) are recorded in DESIGN_HISTORY (2026-07-19). **The software half and
+the config flip are both done:**
 
-- `ntcip_monitor/monitors/output_monitor.py:54` — loops over up to 16 outputs.
-- `ntcip_monitor/monitors/detector_monitor.py:66` — loops over up to 8
-  detector groups. Independently flagged by Jules too (matches what I'd
-  already found by inspection) — same fix applies to both.
+- [x] **Software** (2026-07-19) — call sites batched into one `get(*oids)`,
+  `EconoliteSNMPClient(chunk_size=...)`, `detector_range` derived from the
+  config's detectors, `snmp_chunk_size` / `controller.chunk_size` config keys,
+  `stats['reads']` now counting poll cycles. Tests:
+  `ntcip_monitor/tests/test_snmp_batching.py`.
+- [x] **Probe** (owner, 2026-07-20; `snmp_batch_probe_20260720_073926.json`)
+  — **chunk 8 is clean** on the detector groups: 25/25, order + byte ranges
+  ok, median sweep **547 ms → 94 ms** (5.8×); production 6-group shape 93 ms.
+  So the Cobalt's "Too Big" history really was a dense-table effect, not a
+  multi-OID-PDU limit. (The dirty-verdict fallback — concurrent per-group
+  clients — is therefore **moot**; its design is preserved in DESIGN_HISTORY
+  2026-07-19 if a different controller ever needs it.)
+- [x] **Config** (2026-07-31) — `"snmp_chunk_size": 8` in
+  `_intersections.json`, `intersections.json`, `video_engine/intersections.json`
+  (all intersection 201 = the probed controller 10.37.23.200). Deliberately
+  **not** set for intersection 701 (10.70.10.51) or the standalone
+  `config.json` (10.37.2.68): different controllers, no probe evidence. Probe
+  each before raising it there.
 
-Traced through `EconoliteSNMPClient.get()`
-(`ntcip_monitor/core/snmp_client.py:33`): it already internally re-chunks any
-multi-OID call into `CHUNK_SIZE=1` single-OID requests and preserves
-ordering, so batching the *call* doesn't change the wire behavior or risk
-mis-pairing values to OIDs — it only removes redundant lock acquisitions (16→1
-per output poll) and future-proofs for if `CHUNK_SIZE` is ever raised above 1
-(see CLAUDE.md — don't actually change `CHUNK_SIZE` itself). Low risk, but
-note: `self.stats['reads']` currently increments once per OID; after batching
-it increments once per `get()` call, which changes what that stat means if
-anything depends on it (e.g. the web UI `/api/stats` endpoint).
+What remains — **the same round trip Item 9C needs, so do one capture, not
+two**:
 
-**Priority upgrade (2026-07-19, measured):** this is now the
-highest-leverage accuracy item, not just hygiene. The channel-correlation
-work (see DESIGN_HISTORY) measured the real cost of `CHUNK_SIZE=1`: one
-detector sweep = 8 sequential round trips = **1.0–1.5 s effective sampling
-cycle** (median 1.53 s), so NTCIP sees only ~7–42 % of true detector edges —
-the direct cause of the phase-2/6/7 false-trigger storms. Batching the call
-sites (the original scope) fixes none of that on its own; the win requires a
-**hardware test**: try the 8 single-byte detector-group OIDs in one PDU
-against the Cobalt (the "Too Big" failures were on *dense tables*, which this
-is not). If one PDU works, sweep time drops ~8× to ~0.15–0.2 s and the
-0.2 s `poll_interval` becomes real. If it fails, fall back to polling only
-the groups the config actually uses (6 of 8 at intersection 201) and
-consider per-group threads. Until one of these lands, treat discrepancy
-triggers on high-duty channels as unreliable.
+3. [ ] **[Owner, controller machine]** restart the monitor (nothing takes
+   effect until then), then rerun `__capture_ntcip.py` ~10 min with a matching
+   datZ pull; push capture + datZ.
+4. [ ] **[Any Claude session, any model]** verify with
+   `__correlate_channels.py` and the edge-capture-ratio check that sweep time
+   and edge capture improved (baseline 2026-07-19: median sweep 1.53 s, 7–42 %
+   of edges seen; expected now ~0.1 s sweep and ≥ 90 % capture). Then move
+   this item to DESIGN_HISTORY.
 
-**Two-machine workflow (2026-07-19):** Claude Code cannot run on the
-controller-reachable machine, so the hardware evidence is gathered by a
-self-contained probe, `video_engine/tools/__probe_snmp_batch.py` (already
-written and self-tested; read-only GETs, safe on a live controller). The 4a
-loop is:
-
-**Software half DONE (2026-07-19, Fable — see DESIGN_HISTORY):** the call
-sites are batched (`detector_monitor._poll` / `output_monitor._poll` each
-issue one `get(*oids)`), `EconoliteSNMPClient` takes a `chunk_size` param
-(default 1 = today's verified-safe wire behavior), `system_runner` derives
-`detector_range` from the config's detectors (201: groups 1–6 instead of all
-8 — a guaranteed ~25 % sweep cut) and reads **`snmp_chunk_size`** from the
-intersection config; the standalone app reads `controller.chunk_size`.
-`stats['reads']` now counts get() calls (= poll cycles), not OIDs — noted in
-the code for `/api/stats` readers. Tests:
-`ntcip_monitor/tests/test_snmp_batching.py` (stubbed pysnmp; chunk math,
-ordering, batched polls, range→groups).
-
-What remains needs the controller, but **no Claude session**:
-
-1. - [x] **[Owner, controller machine]** probe run — done 2026-07-20,
-   committed as `snmp_batch_probe_20260720_073926.json`. **Verdict: chunk 8
-   is clean** on the detector groups (25/25, order + byte-range ok, median
-   **94 ms** vs 547 ms at chunk 1 — a 5.8× sweep speedup; the production
-   6-group shape measured 93 ms).
-2. - [x] **[Owner]** `"snmp_chunk_size": 8` set 2026-07-31 in
-   `_intersections.json`, `intersections.json`, and
-   `video_engine/intersections.json` (all intersection 201 = the probed
-   controller 10.37.23.200). **Not** set for intersection 701
-   (`701_intersection.json`, controller 10.70.10.51) or the standalone
-   `config.json` (10.37.2.68) — different controllers, no probe evidence;
-   probe each before raising it there. **Monitor restart still pending.**
-3. **[Owner, controller machine]** rerun `__capture_ntcip.py` ~10 min with a
-   matching datZ pull; push capture + datZ + probe JSON.
-4. **[Any Claude session, any model]** verify with `__correlate_channels.py`
-   and the edge-capture-ratio check that sweep time and edge capture improved
-   (baseline 2026-07-19: median sweep 1.53 s, 7–42 % of edges seen). Then
-   move this item to DESIGN_HISTORY.
-
-**Fallback design if the probe verdict is dirty (decided 2026-07-19, Fable —
-implement only if needed, one Opus session):** concurrent per-group polling.
-Key constraints already worked out: `EconoliteSNMPClient.get()` serializes on
-an internal lock, so concurrency requires **N clients** (own `SnmpEngine` +
-socket each), one worker thread per client, each polling a fixed subset of
-the needed groups (2 workers × 3 groups halves the sweep; 6 × 1 ≈ one-RTT
-sweeps). Workers only write their group's latest bitmask + read-timestamp
-into a shared array (tiny lock or per-slot atomic tuple assignment);
-**`DetectorMonitor._poll` stays the single edge-emitting thread**, consuming
-snapshots — this preserves the one-emitter ordering guarantee the
-discrepancy-engine callbacks rely on. Before implementing, extend
-`__probe_snmp_batch.py` with a `--concurrency N` phase (N simultaneous
-single-OID clients hammering distinct groups) and re-run it in the same
-owner round trip — a weak Cobalt CPU may serialize or drop concurrent UDP
-requests, and that must be measured, not assumed.
+Note the outputs OIDs failed this probe for an unrelated reason — see Item 10.
 
 ### 4b. Unused-import cleanup (one mechanical sweep, zero behavior risk)
 
@@ -306,11 +265,12 @@ Suggested prompt:
   is just an in-memory deep-copy, not disk I/O. The hot-loop pattern the
   rationale describes doesn't actually exist here.
 
-### 4d. Seed a test suite (no `tests/` directory exists yet)
+### 4d. Cover the remaining untested pure functions
 
 Six "lacks test coverage" findings that are genuinely valid and all
-pure/deterministic — no mocking needed — making a reasonable first
-`tests/` directory:
+pure/deterministic — no mocking needed. Both `tests/` directories now exist
+(`video_engine/tests/`, `ntcip_monitor/tests/`), so this is breadth over
+established scaffolding, not new layout work:
 
 - `ntcip_monitor/core/oid_definitions.py:109` — `get_phase_oids(group)`.
 - `ntcip_monitor/core/oid_definitions.py:127` — `get_detector_oid(detector_num)`.
@@ -343,8 +303,7 @@ Suggested prompt:
 > test layout — follow the `tests/` layout Item 7 already established (check
 > `video_engine/tests/` and the DESIGN_HISTORY entry from 7) and place the
 > `ntcip_monitor` tests in the matching per-package location. No mocking needed.
-> DESIGN_HISTORY one-liner + check off. (Runs after Item 7; it is the
-> scaffolding 4a/4e/4h build on.)
+> DESIGN_HISTORY one-liner + check off. (4e and 4h build on this.)
 
 ### 4e. Broader test backlog — needs mocking/fixtures, defer until after 4d
 
