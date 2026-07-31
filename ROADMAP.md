@@ -38,72 +38,20 @@ highest used so far.
 > steps 3–4** (verify the sweep got faster) and **9C** (the accuracy
 > re-baseline). Don't capture twice.
 >
-> **Ready to start now, no hardware:** **8** (Opus — the only known bug in
-> code that runs), **4f** (Opus — unauthenticated endpoints that toggle signal
-> hardware), **4d / 4b / 5** (Sonnet — mechanical, precedents set), **6**
-> (Opus, fold into 5), **2**, **3**, **10**.
+> **Ready to start now, no hardware:** **4f** (Opus — unauthenticated
+> endpoints that toggle signal hardware), **4d / 4b / 5** (Sonnet —
+> mechanical, precedents set), **6** (Opus, fold into 5), **2**, **3**, **10**.
 >
-> **Suggested order:** 8 → 4f → 4d → 4b/5 → 6, with the owner's round trip
+> **Suggested order:** 4f → 4d → 4b/5 → 6, with the owner's round trip
 > (4a 3–4, then 9C) slotted in whenever the controller is available.
+>
+> Item **8** (remux manager thread-safety + the single-camera assumption)
+> landed 2026-07-31 — see DESIGN_HISTORY.
 >
 > Model routing follows the Fable-era principle: the *thinking* for the
 > remaining items is pre-done in the item text, so the Target line says who
 > executes. Deferred by design: **4e** (needs a fixture strategy session,
 > after 4d), **4h** (refactors, after 4d). Don't-action lists: **4c**, **4g**.
-
----
-
-## 8 — remux VideoBufferManager thread-safety + multi-camera assumption (Target: Opus)
-
-Found 2026-07-19 while reviewing `video_engine/remux_video_buffer.py`.
-
-- **Unlocked shared state across three thread contexts (real bug).**
-  `_active_writers`, `_stop_timers`, and `_draining` are mutated from the poll
-  loop (`_scan_trigger_dir`/`_handle_start`/`_stop_trigger`/`_reap_finished`),
-  from `threading.Timer` callbacks (`_auto_stop` → `_stop_trigger`), and from
-  the main thread (`stop()`), with **no lock**. Compound sequences (pop timer →
-  cancel → pop writer → append `_draining`) can interleave, and `_draining` is
-  iterated-and-removed by `_reap_finished`/`stop()` while a Timer thread may be
-  appending — a concurrent-list-mutation hazard (intermittent `RuntimeError` /
-  missed join / semaphore accounting drift). The `full` backend's poll-only
-  model doesn't hit this because it has no Timer callbacks; the remux backend's
-  `_auto_stop` timers introduced the exposure. Fix: guard the manager's
-  writer/timer/draining bookkeeping with a single `threading.Lock` (short
-  critical sections; no I/O under the lock).
-- **Single-camera assumption (latent, both backends).** `_handle_start` does
-  `cam_id = target_cams[0]` and creates exactly one writer, so a `["all"]` or
-  two-camera trigger silently records only the first camera. Present in
-  `video_buffer.py` too, so it's a design assumption, not a remux regression —
-  harmless today (every intersection uses the single `fisheye` camera) but the
-  trigger schema advertises multi-camera. Recommended for now: warn when a
-  trigger resolves to >1 camera and document the single-camera assumption in the
-  schema; defer true per-camera writers until a second camera is deployed.
-
-**Execution guidance (2026-07-19, so Opus doesn't rediscover it):**
-- ONE lock for all three fields; critical sections are pure bookkeeping
-  (dict/list pop/append, timer cancel). **Never call `writer.stop()`,
-  `thread.join()`, semaphore acquire, or any I/O while holding the lock** —
-  `_auto_stop` runs on a Timer thread and `_stop_trigger` can be re-entered
-  from it; holding the lock across a join deadlocks the reap path. Pattern:
-  under the lock, pop/collect what to act on; release; then act.
-- `stop()` and `_reap_finished` iterate `_draining` — snapshot the list under
-  the lock (`list(...)`), mutate only under the lock.
-- Multi-camera: log one WARNING when `target_cams` resolves to >1 camera and
-  record `cameras_recorded: [cam_id]` vs `cameras_requested` in the CSV/log;
-  document the single-camera assumption in `config_manager.py`'s trigger
-  schema docstring. Do NOT implement per-camera writers (no second camera
-  exists to test against).
-- Test economically: stub `ClipRemuxer` (no PyAV, no streams) and drive
-  start/auto-stop/stop/reap sequences from two threads; follow
-  `video_engine/tests/test_discrepancy_rules.py`'s unittest layout. Skip
-  real-stream replay verification.
-
-Suggested prompt:
-> [Opus] In the ntcip project, do Item 8 of ROADMAP.md following the item's
-> execution guidance exactly: single lock around the manager's
-> writer/timer/draining bookkeeping (no I/O or joins under the lock),
-> multi-camera warn + schema docstring note, and a stubbed-remuxer
-> bookkeeping test in video_engine/tests/. DESIGN_HISTORY entry + check off.
 
 ---
 

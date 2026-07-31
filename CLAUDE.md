@@ -64,16 +64,18 @@ as readers (`video_buffer.py` and `remux_video_buffer.py`, identical
   `video_buffer.py` poll loop), sorted oldest-first, never with a sleep inside
   the frame-capture loop itself.
 
-Trigger file schema (enforced in `video_buffer.py`, documented in
-`config_manager.py`):
+Trigger file schema (enforced in `video_buffer.py`; the canonical, field-by-field
+reference is `config_manager.py`'s module docstring — a real section as of
+2026-07-31, previously only claimed to exist):
 
 ```json
 {
   "trigger_id": "uuid4-hex-string",
   "action": "start",               // "start", "stop", or "extend"
   "event_timestamp": 1738923456.7, // Unix timestamp when discrepancy DETECTED
-  "reason": "detector_lag",        // "detector_lag", "no_actuation", "phase_mismatch"
+  "reason": "detector_disagreement", // what the engine always writes today
   "intersection_id": "1234_main",
+  "timezone": "America/Boise",      // for local times in the CSV log
   "cameras": ["cam1", "cam2"],      // specific IDs or ["all"]
   "pre_roll_sec": 10,
   "post_roll_sec": 20,
@@ -81,6 +83,15 @@ Trigger file schema (enforced in `video_buffer.py`, documented in
   "metadata": {"det1": "radar", "det2": "loop", "lag": 2.5}
 }
 ```
+
+**Single-camera assumption (both backends, load-bearing).** `_handle_start`
+resolves `cameras` against the configured streams and records only
+`target_cams[0]` — one writer per trigger. A multi-camera trigger logs a WARNING
+with `cameras_requested`/`cameras_recorded` and is otherwise honored for the
+first camera. This is deliberate (no second camera exists to test against), not
+an oversight; don't "fix" it by adding per-camera writers until one is deployed.
+Note a pair whose two detectors name different `camera_id`s does produce a
+two-camera trigger, so the warning is reachable in real config.
 
 Don't add fields casually — both sides (writer in `discrepancy_engine.py`,
 reader in `video_buffer.py`) need to agree, and `config_manager.py`'s docstring
@@ -177,6 +188,20 @@ Constraint status:
     writes on stop (to compute an exact FPS from total frames / total elapsed
     time) — RAM-unbounded, a multi-minute 1080p clip is tens of GB. This is why
     `full` is central/server-only, never an edge default.
+
+**Manager thread-safety in `remux` (2026-07-31, ROADMAP 8 — load-bearing).**
+`VideoBufferManager`'s writer bookkeeping (`_active_writers`, `_stop_timers`,
+`_draining`) is touched by the poll loop, by `threading.Timer` callbacks
+(`_auto_stop`), and by the main thread's `stop()`, and is guarded by a single
+`_state_lock`. The discipline is **under the lock, pop/collect what to act on;
+release; then act** — never hold it across `finish()`, `join()`, a semaphore
+acquire, `buf.subscribe`/`unsubscribe`, or any I/O (`_auto_stop` re-enters
+`_stop_trigger` from a Timer thread, so a join under the lock deadlocks the reap
+path). `_stop_timers` maps `trigger_id -> (generation, timer)`; the generation
+lets a timer whose `cancel()` lost a race against `extend` detect that it has
+been superseded and do nothing. The `full` backend has no Timer-driven
+bookkeeping and is unchanged. Tests:
+`python3 video_engine/tests/test_remux_manager.py` (22 stubbed-remuxer cases).
 
 Clip length in `remux` is accurate **by construction** (= source PTS span = true
 elapsed), so there is no FPS to guess and nothing drifts under RTSP jitter — the
@@ -282,8 +307,9 @@ As of this writing:
   `__correlate_channels.py` (MCC waveform correlation of a capture against a
   controller high-res export — verifies the channel map; see the 2026-07-19
   DESIGN_HISTORY entries), plus `simulate_playback.py`. `video_engine/tests/` holds the unit tests
-  (`test_discrepancy_rules.py`, stdlib `unittest` — the layout precedent for
-  ROADMAP 4d) and `video_engine/tests/fixtures/` the captured test data
+  (`test_discrepancy_rules.py` and `test_remux_manager.py`, stdlib `unittest` —
+  the layout precedent for ROADMAP 4d) and `video_engine/tests/fixtures/` the
+  captured test data
   (`sample.ts` + its `.packets.jsonl` profile). The four tools that import
   `video_engine/` modules (`record_clip`, `__replay_verify`,
   `__probe_adversarial`, `simulate_playback`) add a `sys.path` bootstrap

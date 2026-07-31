@@ -395,6 +395,19 @@ class VideoBufferManager:
         if not target_cams:
             return
 
+        # Single-camera assumption (shared with the remux backend): only
+        # target_cams[0] is recorded. See config_manager.py's trigger schema.
+        if len(target_cams) > 1:
+            self._log.warning(
+                "Trigger resolved to multiple cameras — recording only the first "
+                "(single-camera assumption; per-camera writers not implemented)",
+                extra={
+                    "trigger_id": trigger_id,
+                    "cameras_requested": target_cams,
+                    "cameras_recorded": target_cams[:1],
+                },
+            )
+
         if not self._writer_semaphore.acquire(blocking=False):
             self._log.warning("Concurrent writer cap reached — trigger dropped", extra={"trigger_id": trigger_id})
             return

@@ -165,6 +165,69 @@ detectors mapping (detector_id → DetectorConfig)
                                  used by the trigger layer to select a stream.
 ``lag_threshold_sec``   float — Seconds of actuation lag that constitutes a
                                  discrepancy worth triggering a clip.
+
+────────────────────────────────────────────────────────────────────────────
+Hot Folder trigger schema (canonical reference)
+────────────────────────────────────────────────────────────────────────────
+
+Written by ``discrepancy_engine.py`` and consumed by both video-buffer backends
+(``remux_video_buffer.py``, ``video_buffer.py``).  Written to ``*.tmp`` and
+atomically renamed to ``trigger_{iso8601}_{uuid4_short}.json``.
+
+.. code-block:: json
+
+    {
+      "trigger_id": "uuid4-hex-string",
+      "action": "start",
+      "event_timestamp": 1738923456.7,
+      "reason": "detector_lag",
+      "intersection_id": "1234_main",
+      "cameras": ["cam1", "cam2"],
+      "pre_roll_sec": 10,
+      "post_roll_sec": 20,
+      "max_duration_sec": 300,
+      "metadata": {"det1": "radar", "det2": "loop", "lag": 2.5}
+    }
+
+``trigger_id``          str   — uuid4 hex; correlates start/stop/extend.
+``action``              str   — ``"start"``, ``"stop"``, or ``"extend"``.
+``event_timestamp``     float — Unix time the discrepancy was **detected**
+                                 (monitoring-machine clock, never controller or
+                                 camera time); anchors the pre-roll window.
+``reason``              str   — Trigger cause.  ``discrepancy_engine.py``
+                                 currently always writes
+                                 ``"detector_disagreement"``, which is also the
+                                 value both backends key on when appending to
+                                 ``discrepancies_log.csv``; ``"detector_lag"`` /
+                                 ``"no_actuation"`` / ``"phase_mismatch"`` are
+                                 reserved for future sources.
+``intersection_id``     str   — Matches the config key above.
+``timezone``            str   — IANA name copied from the intersection config;
+                                 used only to render local times in the CSV log.
+``cameras``             list  — Camera IDs, or ``["all"]``.  **Single-camera
+                                 assumption:** both backends resolve this list
+                                 against the configured streams and record only
+                                 the **first** match, logging a WARNING with
+                                 ``cameras_requested`` / ``cameras_recorded``
+                                 when it resolves to more than one.  A pair whose
+                                 two detectors name different ``camera_id``s does
+                                 produce a two-camera list, so this is reachable
+                                 config, not just a schema formality.  True
+                                 per-camera writers are deferred until a second
+                                 camera is actually deployed (every intersection
+                                 currently runs a single ``fisheye`` camera) —
+                                 ROADMAP Item 8, 2026-07-31.
+``pre_roll_sec``        float — Overrides the buffer's configured pre-roll.
+``post_roll_sec``       float — Live recording retained after a stop.
+``max_duration_sec``    float — Hard cap; the buffer arms an auto-stop timer,
+                                 which an ``extend`` trigger reschedules.
+``metadata``            dict  — Free-form rule context (rule name, detector IDs,
+                                 measured lag); surfaced in the CSV log.
+
+Required fields (validated on read): ``trigger_id``, ``action``,
+``event_timestamp``.  Don't add fields casually — the writer in
+``discrepancy_engine.py`` and both readers must agree, and this docstring is the
+canonical reference.
 """
 
 from __future__ import annotations

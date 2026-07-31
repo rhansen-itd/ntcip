@@ -769,6 +769,28 @@ class VideoBufferManager:
     there is no per-tick frame-flush loop; the poll loop only scans triggers and
     reaps finished writers.
 
+    **Thread-safety (ROADMAP Item 8, 2026-07-31).** The writer bookkeeping —
+    ``_active_writers``, ``_stop_timers``, ``_draining`` — is touched from three
+    contexts: the poll loop, ``threading.Timer`` callbacks (``_auto_stop``), and
+    the main thread (:meth:`stop`). All three fields are guarded by a single
+    ``_state_lock``. The critical sections are **pure bookkeeping** (dict/list
+    pop/append); ``writer.finish()``, ``join()``, ``timer.cancel()``, semaphore
+    acquires and any I/O happen **outside** the lock — ``_auto_stop`` runs on a
+    Timer thread and re-enters ``_stop_trigger``, so holding the lock across a
+    join would deadlock the reap path. The pattern throughout is: under the
+    lock, pop/collect what to act on; release; then act.
+
+    Timers carry a **generation** so a timer that fires while ``extend``/``stop``
+    is superseding it (i.e. whose ``cancel()`` lost the race) cannot stop a clip
+    it no longer owns.
+
+    **Single-camera assumption.** A ``start`` trigger naming several cameras (or
+    ``["all"]`` at a multi-camera intersection) records only the *first* resolved
+    camera and logs a WARNING; per-camera writers are deliberately not
+    implemented (no second camera is deployed to test against). Documented in
+    ``config_manager.py``'s trigger-schema section; the same assumption exists in
+    ``video_buffer.py``.
+
     Args:
         config: The :class:`VideoBufferConfig`.
         stream_buffer_factory: Optional ``(camera_id, url) -> PacketStreamBuffer``
@@ -785,12 +807,18 @@ class VideoBufferManager:
     ) -> None:
         self._config = config
         self._stream_buffers: Dict[str, PacketStreamBuffer] = {}
+        # --- guarded by _state_lock (see the class docstring) -----------------
         self._active_writers: Dict[str, ClipRemuxer] = {}
         # Writers that have been told to finish but whose thread may still be
         # finalizing the container. Tracked until the thread dies so shutdown
         # can join them (clean finalize) and callers can await completion.
         self._draining: List[ClipRemuxer] = []
-        self._stop_timers: Dict[str, threading.Timer] = {}
+        # trigger_id -> (generation, timer); the generation lets a timer that
+        # fired just as it was being superseded detect that and do nothing.
+        self._stop_timers: Dict[str, Tuple[int, threading.Timer]] = {}
+        self._timer_generation = 0
+        self._state_lock = threading.Lock()
+        # ---------------------------------------------------------------------
         self._writer_semaphore = threading.Semaphore(config.max_concurrent_writers)
         self._running = False
         self._sb_factory = stream_buffer_factory or self._default_stream_buffer
@@ -827,18 +855,31 @@ class VideoBufferManager:
         self._poll_loop()
 
     def stop(self) -> None:
-        """Finalize active clips, join writers, then stop the stream buffers."""
+        """Finalize active clips, join writers, then stop the stream buffers.
+
+        Snapshots the bookkeeping under the lock and does every blocking step
+        (cancel, finish, join) outside it. ``_draining`` is drained by repeated
+        locked pops rather than a snapshot-then-clear so a writer appended by a
+        Timer thread mid-shutdown is still joined instead of being dropped.
+        """
         self._running = False
 
-        for timer in list(self._stop_timers.values()):
+        with self._state_lock:
+            timers = [timer for _, timer in self._stop_timers.values()]
+            self._stop_timers.clear()
+            trigger_ids = list(self._active_writers.keys())
+        for timer in timers:
             timer.cancel()
-        self._stop_timers.clear()
 
-        for trigger_id in list(self._active_writers.keys()):
+        for trigger_id in trigger_ids:
             self._stop_trigger(trigger_id)
-        for remuxer in list(self._draining):
+
+        while True:
+            with self._state_lock:
+                if not self._draining:
+                    break
+                remuxer = self._draining.pop(0)
             remuxer.join()
-        self._draining.clear()
 
         for buf in self._stream_buffers.values():
             buf.stop()
@@ -856,11 +897,17 @@ class VideoBufferManager:
             time.sleep(0.05)
 
     def _reap_finished(self) -> None:
-        """Join draining writers whose finalize thread has exited."""
-        for remuxer in list(self._draining):
-            if not remuxer.is_alive():
-                remuxer.join()
+        """Join draining writers whose finalize thread has exited.
+
+        Selection and removal happen together under the lock (a Timer thread may
+        be appending concurrently); the joins happen after releasing it.
+        """
+        with self._state_lock:
+            finished = [r for r in self._draining if not r.is_alive()]
+            for remuxer in finished:
                 self._draining.remove(remuxer)
+        for remuxer in finished:
+            remuxer.join()
 
     # -- Hot Folder --------------------------------------------------------
 
@@ -897,7 +944,12 @@ class VideoBufferManager:
             self._safe_delete(path)
 
     def _handle_start(self, trigger: dict) -> None:
-        """Begin a clip for a ``start`` trigger, under the semaphore + disk check."""
+        """Begin a clip for a ``start`` trigger, under the semaphore + disk check.
+
+        Only the first resolved camera is recorded (single-camera assumption —
+        see the class docstring); a trigger resolving to more than one logs a
+        WARNING naming what was requested versus what is being recorded.
+        """
         trigger_id: str = trigger["trigger_id"]
         cameras: List[str] = trigger.get("cameras", ["all"])
         pre_roll_sec: float = float(
@@ -906,8 +958,9 @@ class VideoBufferManager:
         max_duration_sec: float = float(trigger.get("max_duration_sec", 300))
         event_ts: float = float(trigger.get("event_timestamp", time.time()))
 
-        if trigger_id in self._active_writers:
-            return
+        with self._state_lock:
+            if trigger_id in self._active_writers:
+                return
 
         target_cams = (
             list(self._stream_buffers.keys())
@@ -920,6 +973,17 @@ class VideoBufferManager:
                 extra={"trigger_id": trigger_id, "cameras": cameras},
             )
             return
+
+        if len(target_cams) > 1:
+            self._log.warning(
+                "Trigger resolved to multiple cameras — recording only the first "
+                "(single-camera assumption; per-camera writers not implemented)",
+                extra={
+                    "trigger_id": trigger_id,
+                    "cameras_requested": target_cams,
+                    "cameras_recorded": target_cams[:1],
+                },
+            )
 
         if not self._writer_semaphore.acquire(blocking=False):
             self._log.warning(
@@ -954,17 +1018,33 @@ class VideoBufferManager:
         )
         remuxer.start()
         buf.subscribe(remuxer)  # primes pre-roll, then routes live packets
-        self._active_writers[trigger_id] = remuxer
 
-        timer = threading.Timer(
-            interval=max_duration_sec,
-            function=self._auto_stop,
-            args=(trigger_id,),
-        )
-        timer.daemon = True
+        # Register the writer and its auto-stop timer together, *before* the
+        # timer is armed: a very short max_duration must not let _auto_stop run
+        # against bookkeeping that doesn't exist yet (it would find nothing to
+        # stop and the clip would run forever).
+        with self._state_lock:
+            self._timer_generation += 1
+            generation = self._timer_generation
+            timer = threading.Timer(
+                interval=max_duration_sec,
+                function=self._auto_stop,
+                args=(trigger_id, generation),
+            )
+            timer.daemon = True
+            self._active_writers[trigger_id] = remuxer
+            self._stop_timers[trigger_id] = (generation, timer)
         timer.start()
-        self._stop_timers[trigger_id] = timer
 
+        self._log.info(
+            "Clip start dispatched",
+            extra={
+                "trigger_id": trigger_id,
+                "cameras_requested": target_cams,
+                "cameras_recorded": [cam_id],
+                "output_path": str(output_path),
+            },
+        )
         self._log_discrepancy_to_csv(trigger, output_path)
 
     def _handle_stop(self, trigger: dict) -> None:
@@ -979,46 +1059,75 @@ class VideoBufferManager:
         the auto-stop timer for another ``max_duration_sec`` from now.
         """
         trigger_id: str = trigger["trigger_id"]
-        if trigger_id not in self._active_writers:
-            return
         max_duration_sec: float = float(trigger.get("max_duration_sec", 300))
-        old = self._stop_timers.pop(trigger_id, None)
+
+        with self._state_lock:
+            if trigger_id not in self._active_writers:
+                return
+            old = self._stop_timers.pop(trigger_id, None)
+            self._timer_generation += 1
+            generation = self._timer_generation
+            timer = threading.Timer(
+                interval=max_duration_sec,
+                function=self._auto_stop,
+                args=(trigger_id, generation),
+            )
+            timer.daemon = True
+            self._stop_timers[trigger_id] = (generation, timer)
+
         if old is not None:
-            old.cancel()
-        timer = threading.Timer(
-            interval=max_duration_sec,
-            function=self._auto_stop,
-            args=(trigger_id,),
-        )
-        timer.daemon = True
+            old[1].cancel()
         timer.start()
-        self._stop_timers[trigger_id] = timer
         self._log.info("Clip extended", extra={"trigger_id": trigger_id})
 
-    def _auto_stop(self, trigger_id: str) -> None:
-        """Stop a clip that hit its ``max_duration_sec`` cap."""
+    def _auto_stop(self, trigger_id: str, generation: int) -> None:
+        """Stop a clip that hit its ``max_duration_sec`` cap.
+
+        Runs on a Timer thread. A timer whose generation is no longer the
+        registered one has been superseded by an ``extend`` (or the clip has
+        already stopped) and its ``cancel()`` simply lost the race — it must not
+        stop a clip it no longer owns.
+
+        Args:
+            trigger_id: The clip's trigger identifier.
+            generation: The timer generation this callback was armed with.
+        """
+        with self._state_lock:
+            current = self._stop_timers.get(trigger_id)
+            if current is None or current[0] != generation:
+                return
         self._log.info("Max-duration cap reached", extra={"trigger_id": trigger_id})
         self._stop_trigger(trigger_id)
 
     def _stop_trigger(self, trigger_id: str) -> None:
         """Unsubscribe, finalize, and drop bookkeeping for one clip.
 
+        Re-entrant across threads: the whole writer/timer/draining hand-off is
+        done in one locked bookkeeping step, so two callers racing on the same
+        ``trigger_id`` cannot both finalize it. The unsubscribe/``finish()``/
+        ``cancel()`` steps deliberately run after the lock is released.
+
         Args:
             trigger_id: The clip's trigger identifier.
         """
-        remuxer = self._active_writers.pop(trigger_id, None)
-        timer = self._stop_timers.pop(trigger_id, None)
+        with self._state_lock:
+            remuxer = self._active_writers.pop(trigger_id, None)
+            timer = self._stop_timers.pop(trigger_id, None)
+            if remuxer is not None:
+                # Track it while it finalizes; _reap_finished / stop() join it
+                # once its thread exits, guaranteeing a clean container close.
+                # Safe to append before finish(): the writer thread blocks on
+                # its queue, so it stays alive until the sentinel is consumed.
+                self._draining.append(remuxer)
+
         if timer is not None:
-            timer.cancel()
+            timer[1].cancel()
         if remuxer is None:
             return
         buf = self._stream_buffers.get(remuxer.camera_id)
         if buf is not None:
             buf.unsubscribe(remuxer)
         remuxer.finish()
-        # Keep the writer tracked while it finalizes; _reap_finished / stop()
-        # join it once its thread exits, guaranteeing a clean container close.
-        self._draining.append(remuxer)
 
     # -- CSV discrepancy log (parity with the full backend) ----------------
 

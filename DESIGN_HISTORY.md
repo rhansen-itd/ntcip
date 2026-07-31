@@ -651,3 +651,60 @@ decided. Entries after this point are logged as the decision lands.
   should another controller ever need it. Fixed stale text: 4d no longer
   claims no `tests/` directory exists (two do), and the sub-item ordering note
   no longer sequences work behind 4a.
+
+- 2026-07-31 — **Remux `VideoBufferManager` bookkeeping put under one lock;
+  the single-camera assumption made explicit (ROADMAP Item 8, done).**
+  `_active_writers`, `_stop_timers`, and `_draining` were mutated from three
+  thread contexts — the poll loop, `threading.Timer` callbacks (`_auto_stop`),
+  and the main thread (`stop()`) — with no lock. All three are now guarded by
+  a single `_state_lock`, with a strict discipline stated in the class
+  docstring: **under the lock, pop/collect what to act on; release; then act.**
+  Nothing blocking (`writer.finish()`, `join()`, `timer.cancel()`, semaphore
+  acquires, disk checks, `buf.subscribe`/`unsubscribe`) happens while the lock
+  is held — `_auto_stop` runs on a Timer thread and re-enters `_stop_trigger`,
+  so a join under the lock would deadlock the reap path. Concretely:
+  `_reap_finished` now selects *and* removes in one locked step and joins
+  afterwards; `stop()` snapshots timers/trigger-ids under the lock and drains
+  `_draining` by repeated locked `pop(0)` instead of snapshot-then-`clear()`;
+  `_stop_trigger` does the whole pop-writer/pop-timer/append-draining hand-off
+  atomically. **Why the shape matters and not just "add a lock":** the old
+  `_reap_finished` walked a *snapshot*, joined, then `remove()`d — while
+  `stop()` joined its own snapshot and `clear()`ed the list, so a reaper parked
+  in `join()` came back to `ValueError: list.remove(x): x not in list` and the
+  writer was joined twice. That exact interleaving is now a regression test
+  (`test_reap_parked_in_join_is_not_clobbered_by_stop`), verified to fail on
+  the pre-fix file and pass on the new one — the other concurrency tests pass
+  either way, which is worth knowing about their strength.
+  Two smaller correctness fixes came out of the same reading. (1) **Timers now
+  carry a generation** (`_stop_timers: {trigger_id: (generation, timer)}`): a
+  timer that fires just as `extend` supersedes it — i.e. whose `cancel()` lost
+  the race — used to stop a clip it no longer owned, truncating footage the
+  extend was asking to keep. `_auto_stop` now returns unless its generation is
+  still the registered one. (2) **The writer and its timer are registered
+  before the timer is armed**; previously `_stop_timers[tid]` was assigned
+  *after* `timer.start()`, so a very short `max_duration_sec` could fire
+  against bookkeeping that did not exist yet and leave a stale entry behind.
+  **Single-camera assumption (latent, both backends):** `_handle_start` takes
+  `target_cams[0]` and creates exactly one writer, so a `["all"]` or two-camera
+  trigger silently recorded only the first. Deliberately *not* fixed with
+  per-camera writers — there is no second camera deployed to test against.
+  Instead both backends log a WARNING with `cameras_requested` /
+  `cameras_recorded` when a trigger resolves to more than one, remux logs the
+  same pair on every start, and the assumption is written down in
+  `config_manager.py`. This is reachable config, not a schema formality: a pair
+  whose two detectors name different `camera_id`s makes
+  `_cameras_for_pair` return two cameras. The camera provenance went to the
+  **structured log, not the CSV** — `discrepancies_log.csv` is appended with a
+  header written only when the file is absent, so widening the row would
+  silently misalign columns in every existing log.
+  While there, `config_manager.py` gained the Hot Folder **trigger-schema
+  section** that CLAUDE.md has always claimed lived there but didn't (it was
+  only in CLAUDE.md itself), corrected against what the engine actually writes:
+  `reason` is always `detector_disagreement` today, and there is a `timezone`
+  field the CLAUDE.md copy omits.
+  Tests: new `video_engine/tests/test_remux_manager.py`, 22 stdlib-`unittest`
+  cases with `ClipRemuxer`/`PacketStreamBuffer` stubbed (no PyAV, no streams,
+  no disk) per the item's "test economically" guidance — start/stop/reap
+  bookkeeping, semaphore accounting across four sequential clips, the
+  generation guard, threaded stop/reap races, and the camera warnings.
+  `test_discrepancy_rules.py` (50) and `test_snmp_batching.py` (17) still pass.
