@@ -593,9 +593,9 @@ overlap letter mapping incl. out-of-range; phase bounds; every row of the
 status table; missing detector → off; missing phase → `na`; the overlap >8
 warning fires once.
 
-- [ ] `shapes.py` reads both CSV formats
-- [ ] `status.py` resolution table
-- [ ] tests green: `python3 ntcip_monitor/tests/test_overlay_shapes.py`
+- [x] `shapes.py` reads both CSV formats
+- [x] `status.py` resolution table
+- [x] tests green: `python3 ntcip_monitor/tests/test_overlay_shapes.py` (41 cases)
 
 Suggested prompt:
 > [Opus] In the ntcip project, do Item 11a of ROADMAP.md: vendor the
@@ -606,7 +606,9 @@ Suggested prompt:
 > list first and don't re-derive it.  Follow the `tests/` layout Item 7
 > established.  Then verify against the real file:
 > `ShapeConfig.load('/home/hansrkid/vid_cfg720.csv')` must yield
-> `720 720` and 38 shapes.  DESIGN_HISTORY one-liner + check off.
+> `720 720` and 37 shapes.  DESIGN_HISTORY one-liner + check off.
+> *(Done 2026-07-31.  The count in this prompt originally read 38; the real
+> file has 37 — 28 loops + 9 stopbars.)*
 
 ### 11b. Overlay page, shape/state routes, file background (Target: Opus)
 
@@ -769,7 +771,7 @@ Suggested prompt:
 | Web UI / Flask routes | [`ntcip/.../web_ui.py`](file:///home/hansrkid/ntcip/ntcip_monitor/ui/web_ui.py) | L147-203 (routes, /api/status) |
 | Camera RTSP URL config | [`ntcip/.../intersections.json`](file:///home/hansrkid/ntcip/video_engine/intersections.json) | L12-19 (cameras.fisheye.url) |
 | SignalState / DetectorState enums | [`ntcip/.../data_models.py`](file:///home/hansrkid/ntcip/ntcip_monitor/core/data_models.py) | L11-22 |
-| Example shape CSV | [`~/vid_cfg720.csv`](file:///home/hansrkid/vid_cfg720.csv) | all 39 lines |
+| Example shape CSV | [`~/vid_cfg720.csv`](file:///home/hansrkid/vid_cfg720.csv) | all 38 lines (1 header + 37 shapes) |
 | pyatspm CLI workflow | [`pyatspm/.../cli.py`](file:///home/hansrkid/pyatspm/src/atspm/cli.py) | L1573-1678 |
 
 ### Risks carried into implementation

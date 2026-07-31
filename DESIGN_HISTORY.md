@@ -828,3 +828,58 @@ decided. Entries after this point are logged as the decision lands.
   A browser-based calibrator was scoped and deferred — it would remove pyatspm
   and Tkinter from the workflow entirely, but it's a substantial build and
   belongs in its own item if wanted.
+
+- 2026-07-31 — **ROADMAP 11a landed: pyatspm's shape reader vendored into
+  `ntcip_monitor/ui/overlay/`, plus pure status resolution.** New
+  `shapes.py` (`OVERLAP_LETTER_MAP`, `resolve_stopbar_target()`,
+  `ShapeConfig.load()`) and `status.py` (`resolve_shape_status()` /
+  `resolve_all()`), pinned by 41 stdlib-`unittest` cases in
+  `ntcip_monitor/tests/test_overlay_shapes.py`. Both modules are stdlib-only
+  and import nothing from the monitors, so they are fully green in this
+  environment (no flask/cv2/numpy/atspm installed) — the reason the item was
+  carved out this way in the first place.
+  **Four deliberate deviations from the pyatspm original**, recorded so a
+  future session doesn't "sync" them away. (1) The loader **sniffs row 1** and
+  reads both CSV layouts — two-section (pyatspm's current writer) and legacy
+  (per-row width/height, a `direction` column, no `name`), the format every
+  real field calibration is in and the one pyatspm's own loader crashes on.
+  Both paths funnel through one `_row_to_shape()`, so points/colors parse in
+  exactly one place. (2) `validate_resolution()` **dropped** — it refuses
+  rescaling a recorded video, and 11b's canvas scales safely; the
+  width/height metadata is still kept, because the page sizes the canvas from
+  it. (3) `save()` and the `relevant_*()` helpers dropped — pyatspm stays the
+  authoring tool and nothing consumes them yet. (4) **Malformed rows are
+  skipped, not fatal:** `load()` raises only `FileNotFoundError`, and a row
+  with unparseable points/color/input is dropped and reported in a single
+  structured WARNING naming the offending 1-based line numbers. **Why:** the
+  overlay is a monitoring aid, and an operator-edited CSV losing one loop
+  beats an `/overlay` page that won't render at all — the same "degrade, don't
+  fail" posture the item already took for out-of-range overlaps.
+  **`MAX_MONITORED_OVERLAP = 8`** lives in `shapes.py`, documented as *what
+  `PhaseMonitor` actually polls, not a format limit* (the CSV permits
+  `OLA`–`OLP` = 1–16). `load()` emits one WARNING naming every stopbar bound
+  above it; `status.py` then reports them as `"na"` rather than raising, so
+  they no longer render permanently grey with no explanation.
+  **Colors stay BGR in the loader.** `"255,0,0"` is blue, as pyatspm authored
+  it; reversing the triple is the renderer's job in 11b. A real-file test pins
+  the as-authored order specifically so that reversal can't be "fixed"
+  upstream and silently double-applied.
+  **`status.py` compares state-name strings, not enums** — it accepts the
+  exact `phases`/`overlaps`/`detectors` dicts `/api/status` builds, with
+  **either int or str keys** (the monitors hand over int-keyed dicts
+  in-process; the same payload through `jsonify` has string keys). That keeps
+  it free of any monitor import and testable with plain dicts. Nothing in the
+  module raises — a single bad shape must never break a 250 ms poll.
+  **Two package `__init__.py` files went lazy (PEP 562):** `ntcip_monitor/`
+  and `ntcip_monitor/ui/` now resolve `NTCIPMonitorApp` / `WebUI` through
+  `__getattr__` instead of importing them at package-import time. Without
+  this, `import ntcip_monitor.ui.overlay.shapes` drags in `pysnmp` and
+  `flask`, which defeats the whole point of a dependency-free 11a. Existing
+  `from ntcip_monitor import NTCIPMonitorApp` / `from ntcip_monitor.ui import
+  WebUI` (run.py, examples.py) are unaffected.
+  **Count correction:** the planning pass recorded `~/vid_cfg720.csv` as 38
+  shapes / 39 lines. It is **37** (28 loops + 9 stopbars) across 38 lines
+  (1 header + 37 rows); ROADMAP updated. Verified end-to-end: the real file
+  loads to `720 720` / 37 shapes, and a hand-authored two-section equivalent
+  loads to an identical shape list — proving the tolerant sniff before 11b
+  depends on it.
