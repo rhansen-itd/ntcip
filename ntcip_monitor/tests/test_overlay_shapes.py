@@ -1,9 +1,11 @@
-"""Unit tests for the live video overlay's shape loader and status resolution
-(ROADMAP Item 11a).
+"""Unit tests for the live video overlay's shape loader, status resolution
+(ROADMAP Item 11a), wire payload and background sources (Item 11b).
 
-Both modules under test are deliberately dependency-free — no Flask, no
+Every module under test is deliberately dependency-free — no Flask, no
 OpenCV, no ``atspm``, no monitor imports — so this suite runs on a bare stdlib
-Python with nothing installed. Test CSVs are generated into a temporary
+Python with nothing installed. That is also why the Flask routes in
+``web_ui.py`` are not covered here: they need a Flask test client, which is
+ROADMAP 4e's work. Test CSVs are generated into a temporary
 directory rather than committed as fixtures, so the suite is hermetic; the one
 test that reads the owner's real calibration file skips itself when that file
 is absent.
@@ -16,6 +18,7 @@ Run from anywhere:
 from __future__ import annotations
 
 import logging
+import os
 import sys
 import tempfile
 import unittest
@@ -28,7 +31,13 @@ from ntcip_monitor.ui.overlay.shapes import (  # noqa: E402
     MAX_MONITORED_OVERLAP,
     OVERLAP_LETTER_MAP,
     ShapeConfig,
+    bgr_to_rgb,
     resolve_stopbar_target,
+    shapes_payload,
+)
+from ntcip_monitor.ui.overlay.source import (  # noqa: E402
+    FileImageSource,
+    create_background_source,
 )
 from ntcip_monitor.ui.overlay.status import (  # noqa: E402
     STATUS_LOOP_OFF,
@@ -39,6 +48,7 @@ from ntcip_monitor.ui.overlay.status import (  # noqa: E402
 )
 
 SHAPES_LOGGER = "ntcip_monitor.ui.overlay.shapes"
+SOURCE_LOGGER = "ntcip_monitor.ui.overlay.source"
 
 REAL_CSV = Path("/home/hansrkid/vid_cfg720.csv")
 
@@ -457,7 +467,7 @@ class TestRealCalibrationFile(unittest.TestCase):
 
     def test_colors_are_kept_in_authored_bgr_order(self):
         # pyatspm writes OpenCV BGR: "255,0,0" is blue, not red. The loader
-        # must not reverse it — that is the renderer's job (ROADMAP 11b).
+        # must not reverse it — `shapes_payload` does, on the way to the wire.
         config = ShapeConfig.load(REAL_CSV)
         loops = [s for s in config.shapes if s["type"] == "loop"]
         self.assertEqual(loops[0]["color"], (255, 0, 0))
@@ -476,6 +486,198 @@ class TestRealCalibrationFile(unittest.TestCase):
                     overlaps.add(num)
         self.assertEqual(overlaps, {2, 3, 4, 6})  # OLB, OLC, OLD, OLF
         self.assertTrue(all(n <= MAX_MONITORED_OVERLAP for n in overlaps))
+
+
+# ---------------------------------------------------------------------------
+# shapes_payload -- the /api/overlay/shapes wire format (ROADMAP 11b)
+# ---------------------------------------------------------------------------
+
+class TestBgrToRgb(unittest.TestCase):
+    """The reversal the browser depends on. Getting it wrong looks plausible."""
+
+    def test_blue_stays_blue(self):
+        self.assertEqual(bgr_to_rgb((255, 0, 0)), [0, 0, 255])
+
+    def test_red_stays_red(self):
+        self.assertEqual(bgr_to_rgb((0, 0, 255)), [255, 0, 0])
+
+    def test_green_is_unchanged(self):
+        self.assertEqual(bgr_to_rgb((0, 255, 0)), [0, 255, 0])
+
+    def test_returns_a_json_serialisable_list(self):
+        self.assertIsInstance(bgr_to_rgb((1, 2, 3)), list)
+
+
+class TestShapesPayload(_CsvTestCase):
+    """The static half of the overlay payload."""
+
+    def setUp(self):
+        super().setUp()
+        self.config = ShapeConfig.load(self.write_csv(TWO_SECTION_CSV))
+        self.payload = shapes_payload(self.config)
+
+    def test_resolution_metadata(self):
+        self.assertEqual(self.payload["video_width"], 720)
+        self.assertEqual(self.payload["video_height"], 720)
+
+    def test_one_entry_per_shape_in_order(self):
+        self.assertEqual(len(self.payload["shapes"]), len(self.config.shapes))
+        self.assertEqual([s["type"] for s in self.payload["shapes"]],
+                         ["loop", "stopbar", "stopbar"])
+
+    def test_points_are_lists_not_tuples(self):
+        # jsonify would render tuples as arrays anyway, but the page indexes
+        # them positionally and the payload is asserted against here.
+        points = self.payload["shapes"][0]["points"]
+        self.assertIsInstance(points, list)
+        self.assertEqual(points[0], [100, 100])
+
+    def test_colors_are_reversed_to_rgb(self):
+        config = ShapeConfig.load(self.write_csv("""
+            video_width,video_height
+            720,720
+            type,points,color,input,phase,name
+            loop,"1,1;2,2","255,0,0",1,,blue in BGR
+            loop,"1,1;2,2","0,0,255",2,,red in BGR
+        """, name="colors.csv"))
+        colors = [s["color"] for s in shapes_payload(config)["shapes"]]
+        self.assertEqual(colors, [[0, 0, 255], [255, 0, 0]])
+
+    def test_shape_fields_carried_through(self):
+        loop, stopbar_phase, stopbar_overlap = self.payload["shapes"]
+        self.assertEqual(loop["input"], 38)
+        self.assertIsNone(loop["phase"])
+        self.assertEqual(stopbar_phase["phase"], "4")
+        self.assertEqual(stopbar_overlap["phase"], "OLB")
+
+    def test_parallel_to_resolve_all(self):
+        statuses = resolve_all(self.config, {})
+        self.assertEqual(len(statuses), len(self.payload["shapes"]))
+
+    def test_empty_config(self):
+        payload = shapes_payload(ShapeConfig())
+        self.assertEqual(payload["shapes"], [])
+        self.assertIsNone(payload["video_width"])
+
+
+# ---------------------------------------------------------------------------
+# Background sources (ROADMAP 11b)
+# ---------------------------------------------------------------------------
+
+class TestFileImageSource(unittest.TestCase):
+    """The still-image background, including the swap-without-restart path."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp_dir = Path(self._tmp.name)
+        self.path = self.tmp_dir / "background.jpg"
+
+    def write(self, data, mtime):
+        """Write *data* with an explicit mtime.
+
+        Args:
+            data: File contents.
+            mtime: Modification time to stamp, so the change is visible
+                regardless of filesystem timestamp granularity.
+        """
+        self.path.write_bytes(data)
+        os.utime(self.path, (mtime, mtime))
+
+    def test_reads_the_file(self):
+        self.write(b"first", 1000)
+        data, content_type = FileImageSource(self.path).get_image()
+        self.assertEqual(data, b"first")
+        self.assertEqual(content_type, "image/jpeg")
+
+    def test_content_type_follows_the_extension(self):
+        png = self.tmp_dir / "background.png"
+        png.write_bytes(b"pngdata")
+        self.assertEqual(FileImageSource(png).get_image()[1], "image/png")
+
+    def test_unchanged_file_is_not_reread(self):
+        self.write(b"first", 1000)
+        source = FileImageSource(self.path)
+        self.assertEqual(source.get_image()[0], b"first")
+
+        # Same mtime and size => the cached bytes win, even though the
+        # contents changed underneath. That is the point of the stamp check.
+        self.write(b"secnd", 1000)
+        self.assertEqual(source.get_image()[0], b"first")
+
+    def test_reloads_on_mtime_change(self):
+        self.write(b"first", 1000)
+        source = FileImageSource(self.path)
+        source.get_image()
+
+        self.write(b"second image", 2000)
+        self.assertEqual(source.get_image()[0], b"second image")
+
+    def test_missing_file_returns_none(self):
+        with self.assertLogs(SOURCE_LOGGER, level="WARNING"):
+            self.assertIsNone(FileImageSource(self.path).get_image())
+
+    def test_last_good_image_survives_the_file_disappearing(self):
+        self.write(b"first", 1000)
+        source = FileImageSource(self.path)
+        source.get_image()
+
+        self.path.unlink()
+        with self.assertLogs(SOURCE_LOGGER, level="WARNING"):
+            self.assertEqual(source.get_image()[0], b"first")
+
+    def test_zero_byte_file_does_not_blank_the_page(self):
+        # A copy in progress must not replace a good image with nothing.
+        self.write(b"first", 1000)
+        source = FileImageSource(self.path)
+        source.get_image()
+
+        self.write(b"", 2000)
+        self.assertEqual(source.get_image()[0], b"first")
+
+    def test_missing_file_logs_once_per_outage(self):
+        source = FileImageSource(self.path)
+        with self.assertLogs(SOURCE_LOGGER, level="WARNING") as captured:
+            source.get_image()
+            source.get_image()
+            source.get_image()
+        self.assertEqual(len(captured.records), 1)
+
+    def test_does_not_support_streaming(self):
+        source = FileImageSource(self.path)
+        self.assertFalse(source.supports_stream())
+        with self.assertRaises(NotImplementedError):
+            next(iter(source.mjpeg_frames()))
+
+
+class TestCreateBackgroundSource(unittest.TestCase):
+    """The config -> source factory."""
+
+    def test_file_source(self):
+        source = create_background_source({
+            "background": "file", "image_path": "/tmp/x.jpg",
+        })
+        self.assertIsInstance(source, FileImageSource)
+        self.assertEqual(source.kind, "file")
+
+    def test_file_is_the_default_background(self):
+        source = create_background_source({"image_path": "/tmp/x.jpg"})
+        self.assertIsInstance(source, FileImageSource)
+
+    def test_file_without_image_path_raises(self):
+        with self.assertRaises(ValueError):
+            create_background_source({"background": "file"})
+
+    def test_live_is_not_implemented_yet(self):
+        # ROADMAP 11c. web_ui turns this into a logged 503, not a crash.
+        with self.assertRaises(NotImplementedError):
+            create_background_source({
+                "background": "live", "camera_url": "rtsp://example/stream",
+            })
+
+    def test_unknown_background_raises(self):
+        with self.assertRaises(ValueError):
+            create_background_source({"background": "webcam"})
 
 
 if __name__ == "__main__":

@@ -25,19 +25,47 @@ vehicle calls, output toggles), so they are gated by a shared-secret header
 * No token and the bind host is *not* loopback -> control refused with 403
   (reads still work), plus a startup warning. You cannot accidentally expose
   unauthenticated hardware control to the network.
+
+Live video overlay (2026-07-31, ROADMAP 11b)
+--------------------------------------------
+``/overlay`` renders calibrated detector loops and stopbars on a ``<canvas>``
+over a camera background, recolored from the live monitor state. Its four
+``/api/overlay/*`` routes split deliberately:
+
+* ``shapes`` (static, fetched once) and ``state`` (polled at the dashboard's
+  250 ms interval) — **open**, like ``/api/status``: they are the same signal
+  state the dashboard already publishes, in a different shape.
+* ``background`` and ``stream`` — **gated by the same interlock as
+  ``/api/control/*``**, a deliberate departure from the 4f policy of leaving
+  reads open. Proxied camera imagery is a different category from "phase 3 is
+  green": it is a live view of a public roadway, and an operator who passes
+  ``--web-host 0.0.0.0`` to reach the dashboard would not expect to have
+  published the camera with it. The two video routes additionally accept the
+  token as a ``?token=`` query parameter, because an ``<img>`` tag — how the
+  MJPEG stream of Item 11c is consumed — cannot set a request header.
 """
 
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, Response, render_template, jsonify, request
 import hmac
 import ipaddress
 import logging
 import threading
+import time
 from ..core.data_models import SignalState, DetectorState, OutputState
+from .overlay import (
+    ShapeConfig,
+    create_background_source,
+    resolve_all,
+    shapes_payload,
+)
 
 logger = logging.getLogger(__name__)
 
 #: Request header carrying the shared secret for ``/api/control/*``.
 CONTROL_TOKEN_HEADER = 'X-NTCIP-Control-Token'
+
+#: Multipart boundary for ``/api/overlay/stream`` (ROADMAP Item 11c).
+MJPEG_BOUNDARY = b'ntcipframe'
 
 #: Hostnames that resolve to the loopback interface but aren't IP literals.
 _LOOPBACK_NAMES = {'localhost', 'localhost.localdomain'}
@@ -76,7 +104,7 @@ class WebUI:
     """
 
     def __init__(self, app_instance, host='127.0.0.1', port=5000,
-                 control_token=None):
+                 control_token=None, overlay_config=None):
         """
         Initialize web UI.
 
@@ -90,12 +118,26 @@ class WebUI:
                 requests. ``None``/empty means no token is configured, in
                 which case control is allowed only on a loopback bind (see
                 the module docstring).
+            overlay_config: The ``overlay`` section of ``config.json``
+                (``enabled``, ``shapes_csv``, ``background``, ``image_path``,
+                ``camera_url``, ``stream_fps``). ``None`` or ``enabled: false``
+                leaves ``/overlay`` and the ``/api/overlay/*`` routes
+                registered but answering 404.
         """
         self.app_instance = app_instance
         self.host = host
         self.port = port
         self.control_token = (control_token or '').strip() or None
         self._loopback_only = _is_loopback_host(host)
+
+        self.overlay_config = dict(overlay_config or {})
+        self.overlay_enabled = bool(self.overlay_config.get('enabled'))
+        self._shape_config = None
+        self._shape_error = None
+        self._background_source = None
+        self._background_error = None
+        if self.overlay_enabled:
+            self._init_overlay()
 
         # Create Flask app
         self.flask_app = Flask(__name__)
@@ -104,10 +146,58 @@ class WebUI:
         self._thread = None
         self._running = False
 
-    def _check_control_access(self):
-        """Authorize an ``/api/control/*`` request.
+    def _init_overlay(self):
+        """Load the shape CSV and build the background source.
+
+        Neither failure is fatal: a monitor that can't find its calibration
+        file should still serve the dashboard. The offending piece is left as
+        ``None`` and its routes answer 503 with the reason, which the overlay
+        page shows to the operator.
+        """
+        shapes_csv = self.overlay_config.get('shapes_csv')
+        try:
+            if not shapes_csv:
+                raise ValueError('overlay.shapes_csv is not set')
+            self._shape_config = ShapeConfig.load(shapes_csv)
+            logger.info(
+                'Overlay shapes loaded: %d shape(s) at %sx%s from %s',
+                len(self._shape_config.shapes),
+                self._shape_config.video_width,
+                self._shape_config.video_height,
+                shapes_csv,
+                extra={
+                    'event': 'overlay_shapes_loaded',
+                    'path': str(shapes_csv),
+                    'shape_count': len(self._shape_config.shapes),
+                },
+            )
+        except (OSError, ValueError) as e:
+            self._shape_error = str(e)
+            logger.error(
+                'Overlay shapes unavailable: %s', e,
+                extra={'event': 'overlay_shapes_failed', 'error': str(e)},
+            )
+
+        try:
+            self._background_source = create_background_source(self.overlay_config)
+        except (ValueError, NotImplementedError) as e:
+            self._background_error = str(e)
+            logger.error(
+                'Overlay background source unavailable: %s', e,
+                extra={'event': 'overlay_background_failed', 'error': str(e)},
+            )
+
+    def _check_shared_secret(self, supplied, scope, disabled_error):
+        """Apply the token/loopback interlock to a privileged request.
 
         Implements the three-case policy documented in the module docstring.
+        Both ``/api/control/*`` (4f) and the two video routes (11b) go through
+        here so the policy has exactly one implementation.
+
+        Args:
+            supplied: The token the request carried, or ``''``.
+            scope: Short label for the log event (``'control'`` / ``'video'``).
+            disabled_error: Operator-facing message for the 403 case.
 
         Returns:
             tuple | None: ``None`` when the request is authorized, otherwise
@@ -117,25 +207,20 @@ class WebUI:
             if self._loopback_only:
                 return None
             logger.warning(
-                '{"event":"control_denied","reason":"no_token_non_loopback_bind",'
+                '{"event":"%s_denied","reason":"no_token_non_loopback_bind",'
                 '"host":"%s","path":"%s"}',
-                self.host, request.path,
+                scope, self.host, request.path,
             )
-            return jsonify({
-                'success': False,
-                'error': ('Control endpoints are disabled: the UI is bound to '
-                          f'{self.host} with no control token. Set '
-                          'web_ui.control_token (or bind to 127.0.0.1).'),
-            }), 403
+            return jsonify({'success': False, 'error': disabled_error}), 403
 
         # Compare as bytes: header values may contain non-ASCII, which
         # compare_digest rejects on str.
-        supplied = request.headers.get(CONTROL_TOKEN_HEADER, '')
         if not hmac.compare_digest(supplied.encode('utf-8'),
                                    self.control_token.encode('utf-8')):
             logger.warning(
-                '{"event":"control_denied","reason":"%s","path":"%s"}',
-                'missing_token' if not supplied else 'bad_token', request.path,
+                '{"event":"%s_denied","reason":"%s","path":"%s"}',
+                scope, 'missing_token' if not supplied else 'bad_token',
+                request.path,
             )
             return jsonify({
                 'success': False,
@@ -143,6 +228,97 @@ class WebUI:
             }), 401
 
         return None
+
+    def _check_control_access(self):
+        """Authorize an ``/api/control/*`` request.
+
+        Header only — a control action is a POST from the dashboard's own
+        JavaScript, which can set headers, so there is no reason to also honor
+        a token in the query string (where it would land in access logs).
+
+        Returns:
+            tuple | None: ``None`` when authorized, else ``(response, code)``.
+        """
+        return self._check_shared_secret(
+            request.headers.get(CONTROL_TOKEN_HEADER, ''),
+            'control',
+            ('Control endpoints are disabled: the UI is bound to '
+             f'{self.host} with no control token. Set '
+             'web_ui.control_token (or bind to 127.0.0.1).'),
+        )
+
+    def _check_video_access(self):
+        """Authorize an ``/api/overlay/background`` or ``/stream`` request.
+
+        Same interlock as control, plus a ``?token=`` fallback: the MJPEG
+        stream is consumed by an ``<img>`` tag, which cannot send a custom
+        header.
+
+        Returns:
+            tuple | None: ``None`` when authorized, else ``(response, code)``.
+        """
+        supplied = (request.headers.get(CONTROL_TOKEN_HEADER)
+                    or request.args.get('token', ''))
+        return self._check_shared_secret(
+            supplied,
+            'video',
+            ('Camera imagery is disabled: the UI is bound to '
+             f'{self.host} with no control token. Set '
+             'web_ui.control_token (or bind to 127.0.0.1).'),
+        )
+
+    def _build_status(self):
+        """Collect the current controller state.
+
+        Shared by ``/api/status`` and ``/api/overlay/state`` so the overlay
+        can never drift from what the dashboard shows.
+
+        Returns:
+            dict: ``phases`` / ``overlaps`` / ``pedestrians`` / ``detectors`` /
+            ``outputs`` dicts of number -> state name, plus ``connected``.
+        """
+        status = {
+            'phases': {},
+            'overlaps': {},
+            'pedestrians': {},
+            'detectors': {},
+            'outputs': {},
+            'connected': True
+        }
+
+        # Get phase data
+        if self.app_instance.phase_monitor:
+            phases = self.app_instance.phase_monitor.get_all_phases()
+            status['phases'] = {
+                num: state.name for num, state in phases.items()
+            }
+
+            overlaps = self.app_instance.phase_monitor.get_all_overlaps()
+            status['overlaps'] = {
+                num: state.name for num, state in overlaps.items()
+            }
+
+            # Get pedestrian data
+            pedestrians = self.app_instance.phase_monitor.get_all_pedestrians()
+            status['pedestrians'] = {
+                num: state.name for num, state in pedestrians.items()
+            }
+
+        # Get detector data
+        if self.app_instance.detector_monitor:
+            detectors = self.app_instance.detector_monitor.get_all_detectors()
+            status['detectors'] = {
+                num: state.name for num, state in detectors.items()
+            }
+
+        # Get output data
+        if self.app_instance.output_monitor:
+            outputs = self.app_instance.output_monitor.get_all_outputs()
+            status['outputs'] = {
+                num: state.name for num, state in outputs.items()
+            }
+
+        return status
 
     def _setup_routes(self):
         """Setup Flask routes."""
@@ -159,49 +335,110 @@ class WebUI:
         @self.flask_app.route('/api/status')
         def get_status():
             """Get current controller status."""
-            status = {
-                'phases': {},
-                'overlaps': {},
-                'pedestrians': {},
-                'detectors': {},
-                'outputs': {},
-                'connected': True
-            }
-            
-            # Get phase data
-            if self.app_instance.phase_monitor:
-                phases = self.app_instance.phase_monitor.get_all_phases()
-                status['phases'] = {
-                    num: state.name for num, state in phases.items()
-                }
-                
-                overlaps = self.app_instance.phase_monitor.get_all_overlaps()
-                status['overlaps'] = {
-                    num: state.name for num, state in overlaps.items()
-                }
+            return jsonify(self._build_status())
 
-                # Get pedestrian data
-                pedestrians = self.app_instance.phase_monitor.get_all_pedestrians()
-                status['pedestrians'] = {
-                    num: state.name for num, state in pedestrians.items()
-                }
+        @self.flask_app.route('/overlay')
+        def overlay_page():
+            """Live video overlay page."""
+            if not self.overlay_enabled:
+                return (
+                    'The live video overlay is disabled. Add an "overlay" '
+                    'section with "enabled": true to config.json.',
+                    404,
+                )
+            source_kind = (self._background_source.kind
+                           if self._background_source else 'none')
+            return render_template(
+                'overlay.html',
+                control_token_required=self.control_token is not None,
+                control_token_header=CONTROL_TOKEN_HEADER,
+                source_kind=source_kind,
+                shapes_csv=self.overlay_config.get('shapes_csv', ''),
+            )
 
-            # Get detector data
-            if self.app_instance.detector_monitor:
-                detectors = self.app_instance.detector_monitor.get_all_detectors()
-                status['detectors'] = {
-                    num: state.name for num, state in detectors.items()
-                }
-            
-            # Get output data
-            if self.app_instance.output_monitor:
-                outputs = self.app_instance.output_monitor.get_all_outputs()
-                status['outputs'] = {
-                    num: state.name for num, state in outputs.items()
-                }
-            
-            return jsonify(status)
-        
+        @self.flask_app.route('/api/overlay/shapes')
+        def overlay_shapes():
+            """Static shape geometry, fetched once per page load."""
+            if not self.overlay_enabled:
+                return jsonify({'error': 'Overlay is disabled'}), 404
+            if self._shape_config is None:
+                return jsonify({
+                    'error': f'Shape config unavailable: {self._shape_error}',
+                }), 503
+            return jsonify(shapes_payload(self._shape_config))
+
+        @self.flask_app.route('/api/overlay/state')
+        def overlay_state():
+            """Per-shape status, polled at the dashboard's update interval."""
+            if not self.overlay_enabled:
+                return jsonify({'error': 'Overlay is disabled'}), 404
+            if self._shape_config is None:
+                return jsonify({
+                    'error': f'Shape config unavailable: {self._shape_error}',
+                }), 503
+            return jsonify({
+                'statuses': resolve_all(self._shape_config, self._build_status()),
+                'timestamp': time.time(),
+            })
+
+        @self.flask_app.route('/api/overlay/background')
+        def overlay_background():
+            """Single background image (still, or latest live frame)."""
+            denied = self._check_video_access()
+            if denied:
+                return denied
+            if not self.overlay_enabled:
+                return jsonify({'error': 'Overlay is disabled'}), 404
+            if self._background_source is None:
+                return jsonify({
+                    'error': ('Background source unavailable: '
+                              f'{self._background_error}'),
+                }), 503
+
+            image = self._background_source.get_image()
+            if image is None:
+                return jsonify({'error': 'No background image available'}), 503
+
+            data, content_type = image
+            response = Response(data, mimetype=content_type)
+            # The still is re-read on mtime change; never let a proxy or the
+            # browser pin a stale calibration frame.
+            response.headers['Cache-Control'] = 'no-store'
+            return response
+
+        @self.flask_app.route('/api/overlay/stream')
+        def overlay_stream():
+            """MJPEG stream — live source only (ROADMAP Item 11c)."""
+            denied = self._check_video_access()
+            if denied:
+                return denied
+            if not self.overlay_enabled:
+                return jsonify({'error': 'Overlay is disabled'}), 404
+            if self._background_source is None or \
+                    not self._background_source.supports_stream():
+                return jsonify({
+                    'error': ('Streaming is not available for this background '
+                              'source; use /api/overlay/background'),
+                }), 404
+
+            # The source yields raw JPEG bytes; the multipart framing is HTTP
+            # concern and stays here, so overlay/source.py needs no Flask.
+            frames = self._background_source.mjpeg_frames()
+
+            def generate():
+                for jpeg in frames:
+                    yield (b'--' + MJPEG_BOUNDARY + b'\r\n'
+                           b'Content-Type: image/jpeg\r\n'
+                           b'Content-Length: ' + str(len(jpeg)).encode() +
+                           b'\r\n\r\n' + jpeg + b'\r\n')
+
+            return Response(
+                generate(),
+                mimetype=('multipart/x-mixed-replace; boundary='
+                          + MJPEG_BOUNDARY.decode()),
+                headers={'Cache-Control': 'no-store'},
+            )
+
         @self.flask_app.route('/api/stats')
         def get_stats():
             """Get SNMP client statistics."""
@@ -272,6 +509,16 @@ class WebUI:
 
         print(f"Web UI started at http://{self.host}:{self.port}")
 
+        if self.overlay_enabled:
+            shapes = (len(self._shape_config.shapes)
+                      if self._shape_config is not None else 0)
+            print(f"  Video overlay at /overlay ({shapes} shapes, "
+                  f"background: {self.overlay_config.get('background', 'file')})")
+            if self._shape_config is None:
+                print(f"    WARNING: shapes unavailable — {self._shape_error}")
+            if self._background_source is None:
+                print(f"    WARNING: background unavailable — {self._background_error}")
+
         if self.control_token is not None:
             print(f"  Control endpoints require the {CONTROL_TOKEN_HEADER} header")
         elif self._loopback_only:
@@ -279,8 +526,9 @@ class WebUI:
         else:
             warning = (
                 f"WARNING: bound to {self.host} (not loopback) with no "
-                "control token — /api/control/* is DISABLED. Set "
-                "web_ui.control_token to enable hardware control here."
+                "control token — /api/control/* and the overlay's camera "
+                "imagery are DISABLED. Set web_ui.control_token to enable "
+                "hardware control and video here."
             )
             print(f"  {warning}")
             logger.warning(
@@ -300,5 +548,9 @@ class WebUI:
     def stop(self):
         """Stop web UI."""
         self._running = False
+        if self._background_source is not None:
+            # The file source has nothing to release; the live source of Item
+            # 11c holds an RTSP session and a decoder thread.
+            self._background_source.close()
         # Note: Flask doesn't have a clean shutdown method when run in thread
         # In production, use Werkzeug's Server.shutdown() or run in separate process

@@ -41,5 +41,13 @@
     "host": "127.0.0.1",
     "port": 5000,
     "control_token": ""
+  },
+  "overlay": {
+    "enabled": true,
+    "shapes_csv": "overlay/201_fisheye_shapes.csv",
+    "background": "file",
+    "image_path": "overlay/201_fisheye.jpg",
+    "camera_url": "",
+    "stream_fps": 5
   }
 }

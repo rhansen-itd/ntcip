@@ -134,6 +134,17 @@ class ConfigLoader:
                 "host": "127.0.0.1",
                 "port": 5000,
                 "control_token": ""
+            },
+            # Live video overlay (ROADMAP 11b). Off by default: it needs a
+            # calibrated shape CSV and a background image that only exist
+            # per-deployment.
+            "overlay": {
+                "enabled": False,
+                "shapes_csv": "",
+                "background": "file",
+                "image_path": "",
+                "camera_url": "",
+                "stream_fps": 5
             }
         }
     

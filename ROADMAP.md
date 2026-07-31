@@ -39,8 +39,8 @@ highest used so far.
 > re-baseline). Don't capture twice.
 >
 > **Ready to start now, no hardware:** **4d / 4b / 5** (Sonnet — mechanical,
-> precedents set), **6** (Opus, fold into 5), **11a** (Opus — pure, stdlib
-> only, no camera needed), **2**, **3**, **10**.
+> precedents set), **6** (Opus, fold into 5), **11c** (Opus — `sample.ts` can
+> stand in for a camera), **11d** (Sonnet), **2**, **3**, **10**.
 >
 > **Suggested order:** 4d → 4b/5 → 6, with the owner's round trip
 > (4a 3–4, then 9C) slotted in whenever the controller is available.
@@ -49,7 +49,8 @@ highest used so far.
 > Items **8** (remux manager thread-safety + the single-camera assumption) and
 > **4f** (web UI: loopback default + shared-secret control endpoints) landed
 > 2026-07-31 — see DESIGN_HISTORY.  Item **11** was scoped 2026-07-31 into
-> four sub-items; no code yet.
+> four sub-items; **11a** and **11b** landed the same day, so `/overlay` now
+> renders live shapes over a still image; **11c** (live MJPEG) is next.
 >
 > Model routing follows the Fable-era principle: the *thinking* for the
 > remaining items is pre-done in the item text, so the Target line says who
@@ -669,11 +670,14 @@ on a non-loopback bind with no token, exactly as `_check_control_access()`
 (`web_ui.py:107`) already does.  `/api/overlay/shapes` and
 `/api/overlay/state` stay open like `/api/status`.
 
-- [ ] routes + `/overlay` page
-- [ ] `FileImageSource` with mtime reload
-- [ ] BGR→RGB reversal, verified visually (a `255,0,0` shape renders blue)
-- [ ] video routes refused on non-loopback bind with no token
-- [ ] CLAUDE.md updated (this is where the feature becomes load-bearing)
+- [x] routes + `/overlay` page
+- [x] `FileImageSource` with mtime reload
+- [x] BGR→RGB reversal, verified visually (a `255,0,0` shape renders blue) —
+  done in Python (`shapes.bgr_to_rgb`, on the way out to
+  `/api/overlay/shapes`) rather than in JS, so a unit test pins it; the page
+  consumes RGB directly
+- [x] video routes refused on non-loopback bind with no token
+- [x] CLAUDE.md updated (this is where the feature becomes load-bearing)
 
 Suggested prompt:
 > [Opus] In the ntcip project, do Item 11b of ROADMAP.md: add the
@@ -685,12 +689,22 @@ Suggested prompt:
 > `video_engine/tests/fixtures/sample.ts` as the background and confirming
 > the loops land on the pavement.  DESIGN_HISTORY entry + CLAUDE.md update
 > + check off.
+> *(Done 2026-07-31.  The still and the shape CSV were committed to
+> `overlay/` so the shipped `config.json` works out of the box.  Note
+> `overlay.camera_url` is left empty — 11d's sync script authors it from
+> `video_engine/intersections.json` rather than hand-copying a credential.)*
 
 ### 11c. Live MJPEG source (Target: Opus)
 
 Depends on 11b.  **Modified:** `ntcip_monitor/ui/overlay/source.py`
 
-`RtspMjpegSource` using PyAV — no new dependency.
+`RtspMjpegSource` using PyAV — no new dependency.  11b left the seams:
+subclass `BackgroundSource`, override `supports_stream()` → True and
+`mjpeg_frames()` (yield raw JPEG bytes; `web_ui.py` owns the multipart
+framing), and make `create_background_source()` return it for
+`background: "live"` instead of raising `NotImplementedError`.  The route,
+the access gate, the `?token=` fallback for `<img>`, and the page's
+`SOURCE_KIND === 'live'` branch are already in place.
 
 - **One shared decoder thread per URL**, not one per client.  Ref-counted
   subscribers, opened lazily on first subscriber, torn down after the last
@@ -776,10 +790,12 @@ Suggested prompt:
 
 ### Risks carried into implementation
 
-- **Untestable surface.**  Flask routes and the MJPEG path can't be tested
-  in this environment.  11a is structured to absorb all the logic worth
-  testing; the route-level test belongs with **4e**'s Flask-test-client
-  work (which already lists `WebUI`).
+- **Untestable surface.**  ~~Flask routes and the MJPEG path can't be tested
+  in this environment.~~  Superseded 2026-07-31: `flask` and `pysnmp` were
+  installed during 11b, and the routes were verified with a Flask test
+  client + stub monitors (38 checks) — but only from a scratch script, so
+  the in-repo route test is still **4e**'s work.  11a/11b logic that can be
+  tested without Flask is in `test_overlay_shapes.py` (66 cases).
 - **Calibration staleness.**  `vid_cfg720.csv` matches the fixture's
   720×720, but the fixture is from 2026-07-15.  If the camera has been
   re-aimed or reconfigured since, shapes will be subtly misplaced.  The

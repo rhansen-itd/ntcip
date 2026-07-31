@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NTCIP Live Video Overlay</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a1a;
+            color: #e0e0e0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        header {
+            background: #2d2d2d;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            color: #4CAF50;
+            margin-bottom: 10px;
+            font-size: 24px;
+        }
+
+        .stats {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            font-size: 14px;
+            color: #aaa;
+        }
+
+        a {
+            color: #4CAF50;
+        }
+
+        .section {
+            background: #2d2d2d;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        /* Background image and shape canvas are stacked and BOTH sized
+           width:100%; height:auto — the browser scales them identically, so
+           shapes stay in native calibration coordinates with no math here. */
+        .stage {
+            position: relative;
+            width: 100%;
+            background: #111;
+            line-height: 0;
+        }
+
+        #background {
+            display: block;
+            width: 100%;
+            height: auto;
+        }
+
+        #overlay-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: auto;
+            pointer-events: none;
+        }
+
+        .legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 18px;
+            font-size: 13px;
+            color: #aaa;
+            margin-top: 15px;
+        }
+
+        .legend span::before {
+            content: '';
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            margin-right: 6px;
+            vertical-align: -1px;
+            border-radius: 2px;
+        }
+
+        .legend .g::before { background: #00ff00; }
+        .legend .y::before { background: #ffff00; }
+        .legend .r::before { background: #ff0000; }
+        .legend .na::before { background: #808080; }
+        .legend .on::before { background: rgba(255,255,255,0.35); border: 1px solid #fff; }
+
+        .note {
+            font-size: 13px;
+            color: #888;
+            margin-top: 12px;
+            line-height: 1.5;
+        }
+
+        .error {
+            background: #4a2020;
+            border-left: 4px solid #F44336;
+            padding: 12px 15px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            font-size: 14px;
+            display: none;
+        }
+
+        .token-input {
+            background: #1a1a1a;
+            border: 1px solid #555;
+            color: #e0e0e0;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Live Video Overlay</h1>
+            <div class="stats">
+                <span><a href="/">&larr; Dashboard</a></span>
+                <span id="source-kind">Background: {{ source_kind }}</span>
+                <span id="shape-count">Shapes: --</span>
+                <span id="last-update">Last update: --</span>
+            </div>
+            {% if control_token_required %}
+            <div class="stats" style="margin-top: 12px;">
+                <input type="password" id="control-token" class="token-input"
+                       placeholder="Control token (required for video)"
+                       autocomplete="off">
+            </div>
+            {% endif %}
+        </header>
+
+        <div class="section">
+            <div class="error" id="error-box"></div>
+            <div class="stage">
+                <img id="background" alt="Camera background">
+                <canvas id="overlay-canvas"></canvas>
+            </div>
+            <div class="legend">
+                <span class="g">Green</span>
+                <span class="y">Yellow</span>
+                <span class="r">Red</span>
+                <span class="na">Dark / not polled</span>
+                <span class="on">Detector on</span>
+            </div>
+            <div class="note">
+                Shapes come from <code>{{ shapes_csv }}</code>, calibrated with
+                pyatspm. Detector and phase state is sampled by SNMP at an
+                effective cycle of roughly 1&ndash;1.5&nbsp;s, so the overlay
+                shows the monitor's real resolution &mdash; it is
+                <strong>not</strong> frame-synchronised with the video.
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Matches the dashboard's poll rate.
+        const UPDATE_INTERVAL = 250;
+        // How often the still background is re-fetched, so swapping the
+        // calibration image on disk shows up without a reload.
+        const BACKGROUND_REFRESH_INTERVAL = 5000;
+
+        const SOURCE_KIND = '{{ source_kind }}';
+        const CONTROL_TOKEN_HEADER = '{{ control_token_header|default("X-NTCIP-Control-Token") }}';
+        const TOKEN_STORAGE_KEY = 'ntcip_control_token';
+        const TOKEN_REQUIRED = {{ 'true' if control_token_required else 'false' }};
+
+        // Mirrors pyatspm's video/overlay.py drawing semantics.
+        const STOPBAR_COLORS = {
+            'G': '#00ff00',
+            'Y': '#ffff00',
+            'R': '#ff0000',
+            'na': '#808080'
+        };
+        const LOOP_ON_ALPHA = 0.2;
+        const LOOP_ON_OUTLINE = '#ffffff';
+        const STOPBAR_WIDTH = 3;
+
+        let shapes = [];
+        let statuses = [];
+        let backgroundUrl = null;
+
+        function currentToken() {
+            const field = document.getElementById('control-token');
+            const token = field ? field.value.trim() : '';
+            if (token) localStorage.setItem(TOKEN_STORAGE_KEY, token);
+            return token;
+        }
+
+        function showError(message) {
+            const box = document.getElementById('error-box');
+            box.textContent = message;
+            box.style.display = message ? 'block' : 'none';
+        }
+
+        // Colors arrive from /api/overlay/shapes already reversed to RGB by
+        // ntcip_monitor.ui.overlay.shapes.bgr_to_rgb (the CSV stores BGR).
+        function rgb(color, alpha) {
+            const [r, g, b] = color;
+            return alpha === undefined
+                ? `rgb(${r}, ${g}, ${b})`
+                : `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        }
+
+        function tracePolygon(ctx, points) {
+            ctx.beginPath();
+            ctx.moveTo(points[0][0], points[0][1]);
+            for (let i = 1; i < points.length; i++) {
+                ctx.lineTo(points[i][0], points[i][1]);
+            }
+            ctx.closePath();
+        }
+
+        // Loop off: 1px outline in the shape's own color.
+        // Loop on: filled at alpha 0.2, plus a white 1px outline.
+        function drawLoop(ctx, shape, isOn) {
+            tracePolygon(ctx, shape.points);
+            if (isOn) {
+                ctx.fillStyle = rgb(shape.color, LOOP_ON_ALPHA);
+                ctx.fill();
+                ctx.strokeStyle = LOOP_ON_OUTLINE;
+            } else {
+                ctx.strokeStyle = rgb(shape.color);
+            }
+            ctx.lineWidth = 1;
+            ctx.stroke();
+        }
+
+        // Stopbar: 3px line colored by the phase/overlap status.
+        function drawStopbar(ctx, shape, status) {
+            const [p1, p2] = shape.points;
+            ctx.beginPath();
+            ctx.moveTo(p1[0], p1[1]);
+            ctx.lineTo(p2[0], p2[1]);
+            ctx.strokeStyle = STOPBAR_COLORS[status] || STOPBAR_COLORS['na'];
+            ctx.lineWidth = STOPBAR_WIDTH;
+            ctx.stroke();
+        }
+
+        function draw() {
+            const canvas = document.getElementById('overlay-canvas');
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            shapes.forEach((shape, i) => {
+                const status = statuses[i] || 'na';
+                if (shape.type === 'loop') {
+                    drawLoop(ctx, shape, status === 'on');
+                } else if (shape.type === 'stopbar') {
+                    drawStopbar(ctx, shape, status);
+                }
+            });
+        }
+
+        async function loadShapes() {
+            const response = await fetch('/api/overlay/shapes');
+            const payload = await response.json();
+            if (!response.ok) {
+                throw new Error(payload.error || 'Could not load shapes');
+            }
+
+            shapes = payload.shapes;
+            statuses = shapes.map(() => 'na');
+
+            // Native calibration coordinates; CSS scales the canvas and the
+            // background image by the same factor.
+            const canvas = document.getElementById('overlay-canvas');
+            canvas.width = payload.video_width || 720;
+            canvas.height = payload.video_height || 720;
+
+            document.getElementById('shape-count').textContent =
+                `Shapes: ${shapes.length} @ ${canvas.width}x${canvas.height}`;
+            draw();
+        }
+
+        async function fetchState() {
+            try {
+                const response = await fetch('/api/overlay/state');
+                const payload = await response.json();
+                if (!response.ok) {
+                    showError(payload.error || 'Could not read overlay state');
+                    return;
+                }
+                statuses = payload.statuses;
+                draw();
+                document.getElementById('last-update').textContent =
+                    `Last update: ${new Date().toLocaleTimeString()}`;
+            } catch (error) {
+                console.error('Error fetching overlay state:', error);
+            }
+        }
+
+        function videoUrl(path) {
+            const token = TOKEN_REQUIRED ? currentToken() : '';
+            // <img> cannot set a header, so the video routes also accept the
+            // token as a query parameter.
+            return token ? `${path}?token=${encodeURIComponent(token)}` : path;
+        }
+
+        // Still background: fetched as a blob so the token can travel in a
+        // header, and refreshed periodically to pick up an image swapped on
+        // disk (FileImageSource re-reads on mtime change).
+        async function refreshBackground() {
+            const headers = {};
+            if (TOKEN_REQUIRED) {
+                const token = currentToken();
+                if (!token) {
+                    showError('Enter the control token to load camera imagery.');
+                    return;
+                }
+                headers[CONTROL_TOKEN_HEADER] = token;
+            }
+
+            try {
+                const response = await fetch('/api/overlay/background', { headers });
+                if (!response.ok) {
+                    let detail = `HTTP ${response.status}`;
+                    try {
+                        const payload = await response.json();
+                        if (payload.error) detail = payload.error;
+                    } catch (e) { /* not JSON — keep the status code */ }
+                    showError(`Background image unavailable: ${detail}`);
+                    return;
+                }
+
+                const blob = await response.blob();
+                const url = URL.createObjectURL(blob);
+                document.getElementById('background').src = url;
+                if (backgroundUrl) URL.revokeObjectURL(backgroundUrl);
+                backgroundUrl = url;
+                showError('');
+            } catch (error) {
+                showError(`Background image unavailable: ${error}`);
+            }
+        }
+
+        function startBackground() {
+            if (SOURCE_KIND === 'live') {
+                // MJPEG: one long-lived request driven by the <img> itself.
+                document.getElementById('background').src =
+                    videoUrl('/api/overlay/stream');
+                return;
+            }
+            refreshBackground();
+            setInterval(refreshBackground, BACKGROUND_REFRESH_INTERVAL);
+        }
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            const tokenField = document.getElementById('control-token');
+            if (tokenField) {
+                tokenField.value = localStorage.getItem(TOKEN_STORAGE_KEY) || '';
+                tokenField.addEventListener('change', startBackground);
+            }
+
+            try {
+                await loadShapes();
+            } catch (error) {
+                showError(String(error.message || error));
+            }
+
+            startBackground();
+            fetchState();
+            setInterval(fetchState, UPDATE_INTERVAL);
+        });
+    </script>
+</body>
+</html>

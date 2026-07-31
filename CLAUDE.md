@@ -278,10 +278,53 @@ output toggles). Two rules, both implemented:
   the network takes both a host change and a secret. `/api/status` and
   `/api/stats` stay open (read-only, polled every 250 ms by the dashboard).
 
+Both rules are implemented in one place: `_check_shared_secret()`, which
+`_check_control_access()` and the overlay's `_check_video_access()` both call.
+
 Deliberately not a session/user/JWT system — a reverse proxy owns real auth if
-the deployment story changes. Flask/Jinja2 aren't installed in this
-environment, so there's no in-repo test yet; a Flask-test-client case is part
-of ROADMAP 4e.
+the deployment story changes. There's still no in-repo route test (a
+Flask-test-client case is ROADMAP 4e), though `flask` and `pysnmp` were
+installed here during 11b and the routes were verified from a scratch harness.
+
+## Live video overlay (2026-07-31, ROADMAP 11a+11b — load-bearing)
+
+`GET /overlay` draws pyatspm-calibrated detector loops and stopbars on a
+`<canvas>` over a camera image, recolored from the live monitor state. Config
+lives in `config.json`'s `overlay` section (`enabled`, `shapes_csv`,
+`background`, `image_path`, `camera_url`, `stream_fps`); absent or
+`enabled: false` means every overlay route answers 404. Deployment data for
+intersection 201 is in `overlay/` at the repo root.
+
+- **`ntcip_monitor/ui/overlay/` imports nothing heavy.** `shapes.py` (vendored
+  from pyatspm — see the module docstring for the four deliberate deviations),
+  `status.py`, and `source.py` are stdlib-only: no Flask, no cv2, no `atspm`,
+  no `video_engine`, no monitor imports. That is what keeps 66 unit tests
+  runnable on a bare interpreter (`python3 ntcip_monitor/tests/test_overlay_shapes.py`).
+  Flask lives only in `web_ui.py` — including the MJPEG multipart framing, so
+  11c's live source stays testable.
+- **Shape CSV colors are BGR** (OpenCV order, as pyatspm authors them):
+  `"255,0,0"` is *blue*. `shapes.bgr_to_rgb()` reverses the triple exactly
+  once, inside `shapes_payload()` on the way to `/api/overlay/shapes`; the
+  loaded shapes keep the authored order. Don't reverse again in the page.
+- **Two routes are open, two are gated.** `/api/overlay/shapes` (static,
+  fetched once) and `/api/overlay/state` (polled at 250 ms) are open like
+  `/api/status`. `/api/overlay/background` and `/api/overlay/stream` carry the
+  **same interlock as `/api/control/*`** — a deliberate departure from 4f,
+  because proxied camera video is a live view of a public roadway and
+  `--web-host 0.0.0.0` shouldn't publish it by accident. The video routes also
+  accept `?token=` (an `<img>` can't set a header); control is header-only.
+- **The canvas does all the scaling.** `canvas.width/height` = the config's
+  `video_width/video_height`; shapes are drawn in native calibration
+  coordinates; canvas and background are stacked at `width:100%`. No
+  coordinate math in the page — don't add any.
+- **Every failure degrades to a 503 on one route**, never a crash: a missing
+  CSV, an unreadable image, or `background: "live"` (not implemented until
+  11c) leaves the dashboard and the rest of the page working.
+  `FileImageSource` re-reads on mtime/size change, so swapping the calibration
+  still needs no restart.
+- The page **labels its own resolution** — SNMP sampling is ~1–1.5 s effective
+  (see the NTCIP rules above), far coarser than the video. Keep that caveat if
+  you touch the template.
 
 ## Style conventions already in use
 
@@ -314,6 +357,10 @@ As of this writing:
   (2026-07-15), retiring them is ROADMAP #5 — don't wire either into
   `system_runner.py`.
 - `ntcip_monitor/monitors/ring_monitor.py` — new, not yet committed to git.
+- `overlay/` (repo root) is **not** clutter: it's the overlay's per-deployment
+  data for intersection 201 — `201_fisheye_shapes.csv` (a copy of the owner's
+  `~/vid_cfg720.csv` calibration) and `201_fisheye.jpg` (a still extracted
+  from `video_engine/tests/fixtures/sample.ts`). `config.json` points at both.
 - `video_engine/701_intersection.json` — real in-progress config for a second
   intersection (701, US-95/Whitley Dr), distinct from intersection 201 in
   `video_engine/intersections.json`. See [ROADMAP.md](ROADMAP.md) #2.
@@ -345,7 +392,10 @@ See [ROADMAP.md](ROADMAP.md) for open architectural decisions and planned work.
 ## Environment
 
 - `requirements.txt` covers both packages (pysnmp/flask/pyasn1/pycryptodomex
-  for `ntcip_monitor`; opencv-python/pytz for `video_engine`).
+  for `ntcip_monitor`; opencv-python/pytz for `video_engine`). Installed on
+  this machine as of 2026-07-31: `flask`, `pysnmp` 5.1.0 + `pyasn1` 0.6.0 (the
+  pinned pair — pysnmp 7 drops `hlapi.getCmd`), `av`, `pytz`, `PIL`. **Not**
+  installed: `cv2`, `numpy`, `atspm`, `pytest` — tests are stdlib `unittest`.
 - `video_engine/tools/simulate_playback.py` expects a sibling project at
   `../pyatspm` (present on this machine at `/home/hansrkid/pyatspm`) for
   reading historical detector events out of a pyatspm SQLite DB. It's not a

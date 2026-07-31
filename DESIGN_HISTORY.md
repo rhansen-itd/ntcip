@@ -883,3 +883,74 @@ decided. Entries after this point are logged as the decision lands.
   loads to `720 720` / 37 shapes, and a hand-authored two-section equivalent
   loads to an identical shape list — proving the tolerant sniff before 11b
   depends on it.
+
+- 2026-07-31 — **ROADMAP 11b landed: the `/overlay` page, four
+  `/api/overlay/*` routes, and the file background source — first visible
+  overlay.** New `ntcip_monitor/ui/overlay/source.py` (`BackgroundSource` ABC
+  + `FileImageSource`) and `ntcip_monitor/ui/templates/overlay.html`;
+  `web_ui.py` gained the routes, `config.json`/`run.py` the `overlay` section,
+  and the dashboard header a link. A dedicated page, not a dashboard panel:
+  `dashboard.html` is already 464 lines and the video wants the viewport.
+  **Shapes (static) and state (polled) are split routes**, so the 250 ms hot
+  payload is one array of 37 strings and every mapping decision stays in 11a's
+  tested Python. `/api/overlay/state` and `/api/status` now share one
+  `_build_status()` so the overlay can never drift from the dashboard.
+  **The BGR→RGB reversal moved into Python** (`shapes.bgr_to_rgb()`, applied
+  by the new `shapes_payload()` on the way to the wire) rather than into the
+  page's JavaScript as the plan sketched. **Why:** the mistake looks entirely
+  plausible on screen — red and blue are both believable loop colors — so it
+  needs a unit test, and only Python has one here. The loader still stores the
+  authored BGR, so the reversal happens exactly once, at the boundary.
+  **Access policy: a deliberate departure from 4f.** 4f left every read-only
+  route open and gated only `/api/control/*`. The two *video* routes
+  (`background`, `stream`) now carry the same interlock — token set → header
+  must match (401); no token + loopback → allowed; no token + non-loopback →
+  403 — while `shapes` and `state` stay open like `/api/status`. **Why:**
+  proxied camera imagery is a different category from "phase 3 is green" —
+  it's a live view of a public roadway, and an operator who passes
+  `--web-host 0.0.0.0` to reach the dashboard has not consented to publishing
+  the camera. Both paths now run through one `_check_shared_secret()` so the
+  policy has a single implementation. The video routes *additionally* accept
+  `?token=`, because the MJPEG `<img>` of 11c cannot set a request header;
+  control stays header-only, where the token can't land in an access log.
+  **Canvas sizing does the scaling.** `canvas.width/height` are the config's
+  `video_width/video_height` (720×720), shapes are drawn in native
+  calibration coordinates, and canvas + background are stacked at
+  `width:100%`. The browser scales both by the same factor, so there is no
+  coordinate math anywhere in the page — and no rescale-refusal check to
+  vendor (11a's dropped `validate_resolution()`).
+  **Degrade, don't fail** — the same posture 11a took for bad CSV rows. A
+  missing shapes CSV, an unreadable image, or `background: "live"` (11c) is
+  logged and turned into a 503 on that route only; the dashboard, and the rest
+  of the overlay page, still work. `FileImageSource` re-reads on mtime/size
+  change (swap the calibration still without a restart), keeps serving the
+  last good bytes when the file vanishes mid-copy, and ignores a zero-byte
+  read — a copy in progress must not blank the operator's page.
+  **The page labels its own resolution.** SNMP sampling is ~1–1.5 s effective,
+  far coarser than the video, so the page says so rather than implying
+  frame-accurate detection.
+  **Verified three ways** (`flask` and `pysnmp` 5.1.0 were installed into this
+  environment to do it, so CLAUDE.md's "Flask isn't installed" note is now
+  stale and was corrected): 66 stdlib-`unittest` cases (41 from 11a + 25 new
+  covering `shapes_payload`, the reversal, and `FileImageSource`); 38
+  Flask-test-client checks against stub monitors covering all four routes ×
+  the three access states plus every degraded config; and the shipped page
+  JavaScript run under Node against the live app with a recording canvas
+  context, confirming 37 strokes, the 0.2-alpha fill + white outline for an
+  ON loop, 3 px G/Y/R stopbars, and `rgb(0, 0, 255)` for a `"255,0,0"`
+  authored shape. Geometry was checked against a real frame extracted from
+  `video_engine/tests/fixtures/sample.ts`: **the loops land on the pavement**,
+  so the 2026-07-15 calibration still matches the camera's aim.
+  The route-level test stays out of the repo — it belongs with **4e**'s Flask
+  test-client work; the scratch harness was verification, not a deliverable.
+  **`overlay/` (repo root) holds the deployment data** the shipped
+  `config.json` points at: `201_fisheye_shapes.csv` (a copy of
+  `~/vid_cfg720.csv`) and `201_fisheye.jpg` (the extracted still).
+  `overlay.camera_url` is left **empty on purpose** — 11d's sync script
+  authors it from `video_engine/intersections.json` rather than hand-copying
+  a credential into a second file.
+  **Seams left for 11c:** `BackgroundSource.mjpeg_frames()` is declared (yield
+  raw JPEGs; `web_ui.py` owns the multipart framing, so `source.py` needs no
+  Flask), `supports_stream()` gates the route, `create_background_source()`
+  raises `NotImplementedError` for `"live"`, and the page already branches on
+  `SOURCE_KIND`.

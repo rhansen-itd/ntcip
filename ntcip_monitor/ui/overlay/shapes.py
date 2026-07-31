@@ -28,7 +28,11 @@ Deliberate deviations from the pyatspm original — do not "sync" them away:
 
 Colors are stored exactly as authored, which is **BGR** (pyatspm writes OpenCV
 order): ``"255,0,0"`` is *blue*. Anything rendering these in a browser must
-reverse the triple — that reversal belongs to the renderer, not here.
+reverse the triple. :func:`shapes_payload` does that once, on the way out to
+``/api/overlay/shapes`` — the in-memory shapes keep the authored BGR so this
+module still round-trips what the calibrator wrote. The reversal is here rather
+than in the page's JavaScript because the mistake looks entirely plausible on
+screen; in Python a unit test pins it.
 
 File layouts
 ------------
@@ -229,6 +233,55 @@ def _to_int(value: Optional[str]) -> Optional[int]:
         return int(raw)
     except ValueError:
         return None
+
+
+def bgr_to_rgb(color: Tuple[int, int, int]) -> List[int]:
+    """Reverse an authored BGR triple into browser RGB order.
+
+    CSV colors come out of pyatspm's OpenCV-based calibrator, so ``"255,0,0"``
+    means *blue*. Rendering it as CSS ``rgb(255,0,0)`` would silently draw red
+    — plausible enough on screen that it needs a test rather than an eyeball.
+
+    Args:
+        color: A ``(b, g, r)`` triple as stored on a shape.
+
+    Returns:
+        list: ``[r, g, b]``, JSON-serialisable.
+    """
+    b, g, r = color
+    return [r, g, b]
+
+
+def shapes_payload(config: "ShapeConfig") -> Dict[str, Any]:
+    """Serialise a shape config for the ``/api/overlay/shapes`` route.
+
+    This is the static half of the overlay payload, fetched once per page load;
+    the per-poll half is :func:`~ntcip_monitor.ui.overlay.status.resolve_all`,
+    whose output is positionally parallel to ``shapes`` here.
+
+    Args:
+        config: The loaded shape config.
+
+    Returns:
+        dict: ``{"video_width", "video_height", "shapes": [...]}``. Each shape
+        carries ``type``, ``points`` (``[[x, y], ...]``), ``color`` as
+        **RGB** (see :func:`bgr_to_rgb`), ``input``, ``phase``, and ``name``.
+    """
+    return {
+        "video_width": config.video_width,
+        "video_height": config.video_height,
+        "shapes": [
+            {
+                "type": shape["type"],
+                "points": [[x, y] for x, y in shape["points"]],
+                "color": bgr_to_rgb(shape["color"]),
+                "input": shape["input"],
+                "phase": shape["phase"],
+                "name": shape["name"],
+            }
+            for shape in config.shapes
+        ],
+    }
 
 
 class ShapeConfig:

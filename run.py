@@ -26,7 +26,8 @@ Examples:
 
 Note: the web UI binds to 127.0.0.1 by default. Exposing it with
 --web-host also requires a control token (config web_ui.control_token or
-$NTCIP_WEB_CONTROL_TOKEN) before /api/control/* will touch the hardware.
+$NTCIP_WEB_CONTROL_TOKEN) before /api/control/* will touch the hardware,
+or before the /overlay page will serve camera imagery.
         """
     )
 
@@ -68,10 +69,16 @@ $NTCIP_WEB_CONTROL_TOKEN) before /api/control/* will touch the hardware.
             control_token = (os.environ.get('NTCIP_WEB_CONTROL_TOKEN')
                              or config.get('web_ui.control_token', ''))
 
+            # Live video overlay (ROADMAP 11b); absent section => disabled.
+            overlay_config = config.get('overlay') or {}
+
             web_ui = WebUI(app, host=web_host, port=web_port,
-                           control_token=control_token)
+                           control_token=control_token,
+                           overlay_config=overlay_config)
             web_ui.start()
             print(f"\n→ Open http://{web_host}:{web_port} in your browser")
+            if overlay_config.get('enabled'):
+                print(f"→ Video overlay at http://{web_host}:{web_port}/overlay")
         
         print("\nPress Ctrl+C to stop")
         print("="*60)
