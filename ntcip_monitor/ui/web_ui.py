@@ -5,47 +5,156 @@ Provides a simple web dashboard to visualize:
 - Phase status (colored circles)
 - Detector status (grid)
 - Controller settings
+
+Network exposure (2026-07-31, ROADMAP 4f)
+-----------------------------------------
+The bind host defaults to ``127.0.0.1`` — the dashboard is a local operator
+tool, not a service. Pass ``host='0.0.0.0'`` (``--web-host`` / the config's
+``web_ui.host``) to deliberately expose it on the LAN.
+
+The ``/api/control/*`` endpoints drive real signal hardware (time sync,
+vehicle calls, output toggles), so they are gated by a shared-secret header
+(``X-NTCIP-Control-Token``) instead of being open like the read-only
+``/api/status`` and ``/api/stats`` routes. The policy is deliberately minimal
+(no sessions, no users, no JWT — see the DESIGN_HISTORY entry):
+
+* A token is configured -> every control request must carry a matching
+  header, compared with :func:`hmac.compare_digest`; otherwise 401.
+* No token and the bind host is loopback -> allowed. This is today's
+  behavior for a local operator and keeps the dashboard button working.
+* No token and the bind host is *not* loopback -> control refused with 403
+  (reads still work), plus a startup warning. You cannot accidentally expose
+  unauthenticated hardware control to the network.
 """
 
 from flask import Flask, render_template, jsonify, request
+import hmac
+import ipaddress
+import logging
 import threading
 from ..core.data_models import SignalState, DetectorState, OutputState
+
+logger = logging.getLogger(__name__)
+
+#: Request header carrying the shared secret for ``/api/control/*``.
+CONTROL_TOKEN_HEADER = 'X-NTCIP-Control-Token'
+
+#: Hostnames that resolve to the loopback interface but aren't IP literals.
+_LOOPBACK_NAMES = {'localhost', 'localhost.localdomain'}
+
+
+def _is_loopback_host(host) -> bool:
+    """Return True if binding to ``host`` reaches only the local machine.
+
+    Args:
+        host: Bind address as passed to ``flask_app.run()`` (IP literal or
+            hostname). ``None``/empty is treated as "all interfaces".
+
+    Returns:
+        bool: True for loopback literals (``127.0.0.0/8``, ``::1``) and the
+        well-known loopback hostnames; False for everything else, including
+        unresolvable names — unknown means "assume exposed".
+    """
+    if not host:
+        return False
+
+    name = str(host).strip().lower()
+    if name in _LOOPBACK_NAMES:
+        return True
+
+    try:
+        return ipaddress.ip_address(name.strip('[]')).is_loopback
+    except ValueError:
+        return False
 
 
 class WebUI:
     """
     Flask-based web interface for NTCIP Monitor.
-    
+
     Runs in a separate thread to avoid blocking the main application.
     """
-    
-    def __init__(self, app_instance, host='0.0.0.0', port=5000):
+
+    def __init__(self, app_instance, host='127.0.0.1', port=5000,
+                 control_token=None):
         """
         Initialize web UI.
-        
+
         Args:
             app_instance: NTCIPMonitorApp instance
-            host: Host to bind to
+            host: Host to bind to. Defaults to loopback-only; pass
+                ``'0.0.0.0'`` to deliberately expose the UI on the network.
             port: Port to listen on
+            control_token: Shared secret required in the
+                ``X-NTCIP-Control-Token`` header on ``/api/control/*``
+                requests. ``None``/empty means no token is configured, in
+                which case control is allowed only on a loopback bind (see
+                the module docstring).
         """
         self.app_instance = app_instance
         self.host = host
         self.port = port
-        
+        self.control_token = (control_token or '').strip() or None
+        self._loopback_only = _is_loopback_host(host)
+
         # Create Flask app
         self.flask_app = Flask(__name__)
         self._setup_routes()
-        
+
         self._thread = None
         self._running = False
-    
+
+    def _check_control_access(self):
+        """Authorize an ``/api/control/*`` request.
+
+        Implements the three-case policy documented in the module docstring.
+
+        Returns:
+            tuple | None: ``None`` when the request is authorized, otherwise
+            a ``(flask_response, status_code)`` tuple to return from the view.
+        """
+        if self.control_token is None:
+            if self._loopback_only:
+                return None
+            logger.warning(
+                '{"event":"control_denied","reason":"no_token_non_loopback_bind",'
+                '"host":"%s","path":"%s"}',
+                self.host, request.path,
+            )
+            return jsonify({
+                'success': False,
+                'error': ('Control endpoints are disabled: the UI is bound to '
+                          f'{self.host} with no control token. Set '
+                          'web_ui.control_token (or bind to 127.0.0.1).'),
+            }), 403
+
+        # Compare as bytes: header values may contain non-ASCII, which
+        # compare_digest rejects on str.
+        supplied = request.headers.get(CONTROL_TOKEN_HEADER, '')
+        if not hmac.compare_digest(supplied.encode('utf-8'),
+                                   self.control_token.encode('utf-8')):
+            logger.warning(
+                '{"event":"control_denied","reason":"%s","path":"%s"}',
+                'missing_token' if not supplied else 'bad_token', request.path,
+            )
+            return jsonify({
+                'success': False,
+                'error': f'Missing or invalid {CONTROL_TOKEN_HEADER} header',
+            }), 401
+
+        return None
+
     def _setup_routes(self):
         """Setup Flask routes."""
         
         @self.flask_app.route('/')
         def index():
             """Main dashboard."""
-            return render_template('dashboard.html')
+            return render_template(
+                'dashboard.html',
+                control_token_required=self.control_token is not None,
+                control_token_header=CONTROL_TOKEN_HEADER,
+            )
         
         @self.flask_app.route('/api/status')
         def get_status():
@@ -103,6 +212,9 @@ class WebUI:
         @self.flask_app.route('/api/control/time', methods=['POST'])
         def sync_time():
             """Sync controller time to system time."""
+            denied = self._check_control_access()
+            if denied:
+                return denied
             try:
                 controller = self.app_instance.get_controller()
                 if controller:
@@ -115,6 +227,9 @@ class WebUI:
         @self.flask_app.route('/api/control/vehicle_call', methods=['POST'])
         def place_vehicle_call():
             """Place vehicle call on a phase."""
+            denied = self._check_control_access()
+            if denied:
+                return denied
             try:
                 phase_num = int(request.json.get('phase'))
                 controller = self.app_instance.get_controller()
@@ -128,6 +243,9 @@ class WebUI:
         @self.flask_app.route('/api/control/output', methods=['POST'])
         def set_output():
             """Set output ON or OFF."""
+            denied = self._check_control_access()
+            if denied:
+                return denied
             try:
                 output_num = int(request.json.get('output'))
                 state = request.json.get('state') == 'on'
@@ -151,8 +269,24 @@ class WebUI:
             name="WebUI"
         )
         self._thread.start()
-        
+
         print(f"Web UI started at http://{self.host}:{self.port}")
+
+        if self.control_token is not None:
+            print(f"  Control endpoints require the {CONTROL_TOKEN_HEADER} header")
+        elif self._loopback_only:
+            print("  Control endpoints: open (loopback-only bind, no token set)")
+        else:
+            warning = (
+                f"WARNING: bound to {self.host} (not loopback) with no "
+                "control token — /api/control/* is DISABLED. Set "
+                "web_ui.control_token to enable hardware control here."
+            )
+            print(f"  {warning}")
+            logger.warning(
+                '{"event":"control_disabled_on_exposed_bind","host":"%s"}',
+                self.host,
+            )
     
     def _run_flask(self):
         """Run Flask server."""

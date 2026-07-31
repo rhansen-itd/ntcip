@@ -127,10 +127,13 @@ class ConfigLoader:
                 "log_file": "ntcip_monitor.log",
                 "log_changes_only": True
             },
+            # host defaults to loopback; control_token is required before
+            # /api/control/* works on a non-loopback bind (ROADMAP 4f).
             "web_ui": {
                 "enabled": True,
-                "host": "0.0.0.0",
-                "port": 5000
+                "host": "127.0.0.1",
+                "port": 5000,
+                "control_token": ""
             }
         }
     

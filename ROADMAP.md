@@ -38,15 +38,15 @@ highest used so far.
 > steps 3–4** (verify the sweep got faster) and **9C** (the accuracy
 > re-baseline). Don't capture twice.
 >
-> **Ready to start now, no hardware:** **4f** (Opus — unauthenticated
-> endpoints that toggle signal hardware), **4d / 4b / 5** (Sonnet —
-> mechanical, precedents set), **6** (Opus, fold into 5), **2**, **3**, **10**.
+> **Ready to start now, no hardware:** **4d / 4b / 5** (Sonnet — mechanical,
+> precedents set), **6** (Opus, fold into 5), **2**, **3**, **10**.
 >
-> **Suggested order:** 4f → 4d → 4b/5 → 6, with the owner's round trip
+> **Suggested order:** 4d → 4b/5 → 6, with the owner's round trip
 > (4a 3–4, then 9C) slotted in whenever the controller is available.
 >
-> Item **8** (remux manager thread-safety + the single-camera assumption)
-> landed 2026-07-31 — see DESIGN_HISTORY.
+> Items **8** (remux manager thread-safety + the single-camera assumption) and
+> **4f** (web UI: loopback default + shared-secret control endpoints) landed
+> 2026-07-31 — see DESIGN_HISTORY.
 >
 > Model routing follows the Fable-era principle: the *thinking* for the
 > remaining items is pre-done in the item text, so the Target line says who
@@ -123,9 +123,10 @@ Suggested prompt:
 
 Findings from Jules's ongoing automated review, triaged against current code
 when logged. Grouped by how they should be tackled; each lettered sub-item is
-a session-sized unit. Remaining order: **4f** (security) → **4d** (tests) →
-**4b** (mechanical), with **4e**/**4h** after 4d and **4a** waiting only on
-the owner's capture. **4c** and **4g** are don't-action lists.
+a session-sized unit. Remaining order: **4d** (tests) → **4b** (mechanical),
+with **4e**/**4h** after 4d and **4a** waiting only on the owner's capture.
+**4c** and **4g** are don't-action lists. **4f** (security) landed 2026-07-31 —
+see DESIGN_HISTORY.
 
 ### 4a. SNMP sweep speed — verify the round trip (nearly done)
 
@@ -180,7 +181,7 @@ import line). Safe to remove in a single pass:
 - `ntcip_monitor/main.py:6` — `sys`.
 - `ntcip_monitor/utils/config_loader.py:8` — `datetime`.
 - `ntcip_monitor/utils/controller_control.py:12` — `Counter32`, `Integer32`.
-- `ntcip_monitor/ui/web_ui.py:12` — `SignalState`, `DetectorState`, `OutputState`.
+- `ntcip_monitor/ui/web_ui.py:35` — `SignalState`, `DetectorState`, `OutputState`.
 
 Suggested prompt:
 > [Sonnet] In the ntcip project, do Item 4b of ROADMAP.md: remove the confirmed
@@ -264,31 +265,15 @@ bigger lift than 4d's pure functions. Worth a real test-strategy session once
 `ConfigProvider`/`JsonFileConfigProvider`/`SqliteCentralConfigProvider`,
 `VideoBufferServer`.
 
-### 4f. Harden the web UI (security — one session)
+### 4f. Harden the web UI — **done 2026-07-31**
 
-Two real findings that belong together since they're both about
-`ntcip_monitor/ui/web_ui.py` network exposure:
-
-- **`web_ui.py:22`** — `WebUI.__init__` defaults `host='0.0.0.0'`, and nothing
-  in `run.py` exposes a way to override it (`WebUI(app, port=args.web_port)` —
-  no `host=` passed). Today there's no way to bind to localhost-only without
-  editing source. Fix: default to `127.0.0.1`, add a `--web-host` CLI flag /
-  config key for anyone who deliberately wants LAN access.
-- **`web_ui.py:103`** — `/api/control/*` endpoints (sync time, place vehicle
-  calls, toggle outputs — i.e. actions that touch real traffic signal
-  hardware) have no authentication. `ARCHITECTURE.md` already documents this
-  as a known gap ("Web UI has no authentication — add reverse proxy with auth
-  if exposed"). Minimal viable fix matching the project's stated style
-  (resist over-engineering): a shared-secret header check via config, not a
-  full session/JWT system — full auth can come later if the deployment story
-  changes.
-
-Suggested prompt:
-> [Opus] In the ntcip project, do Item 4f of ROADMAP.md: harden
-> `ntcip_monitor/ui/web_ui.py` — default the bind host to `127.0.0.1` with a
-> `--web-host`/config override, and gate the `/api/control/*` hardware-touching
-> endpoints behind a config-driven shared-secret header check (not full
-> auth). DESIGN_HISTORY entry noting the deliberately-minimal scope.
+Bind host now defaults to `127.0.0.1` (`--web-host` / `web_ui.host` to
+override) and `/api/control/*` is gated by the `X-NTCIP-Control-Token` shared
+secret, refused outright on a non-loopback bind with no token. Rationale in
+DESIGN_HISTORY (2026-07-31). A Flask-test-client regression test for it is
+part of **4e** (which already lists `WebUI`) — Flask isn't installed in this
+environment, so the policy is currently covered only by a stubbed scratch
+check.
 
 ### 4g. Won't-fix — hardware constraint
 
@@ -493,9 +478,10 @@ recorded events → rendered video with overlaid shapes.  The pieces:
 
 - **Web UI** —
   [`ntcip_monitor/ui/web_ui.py`](file:///home/hansrkid/ntcip/ntcip_monitor/ui/web_ui.py)
-  Flask app with `/api/status` (L50-94) returning JSON with
+  Flask app with `/api/status` (L159-203) returning JSON with
   `phases`, `overlaps`, `detectors` keyed by number → state name.  Runs
-  in a background thread (L142-163).
+  in a background thread (L260-298).  Note `/api/control/*` is token-gated
+  as of 4f; the read-only status/stats routes are not.
 
 - **Camera config** —
   [`video_engine/intersections.json`](file:///home/hansrkid/ntcip/video_engine/intersections.json)
@@ -559,7 +545,7 @@ works interactively via OpenCV window.  For the ntcip app this could:
 | Calibration UI | [`pyatspm/.../video/calibrate.py`](file:///home/hansrkid/pyatspm/src/atspm/video/calibrate.py) | L112-492 (calibrate_shapes) |
 | Live phase/overlap state | [`ntcip/.../phase_monitor.py`](file:///home/hansrkid/ntcip/ntcip_monitor/monitors/phase_monitor.py) | L54-56, L219-225 (state dicts) |
 | Live detector state | [`ntcip/.../detector_monitor.py`](file:///home/hansrkid/ntcip/ntcip_monitor/monitors/detector_monitor.py) | L48, L122-124 (state dict) |
-| Web UI / Flask routes | [`ntcip/.../web_ui.py`](file:///home/hansrkid/ntcip/ntcip_monitor/ui/web_ui.py) | L42-94 (routes, /api/status) |
+| Web UI / Flask routes | [`ntcip/.../web_ui.py`](file:///home/hansrkid/ntcip/ntcip_monitor/ui/web_ui.py) | L147-203 (routes, /api/status) |
 | Camera RTSP URL config | [`ntcip/.../intersections.json`](file:///home/hansrkid/ntcip/video_engine/intersections.json) | L12-19 (cameras.fisheye.url) |
 | SignalState / DetectorState enums | [`ntcip/.../data_models.py`](file:///home/hansrkid/ntcip/ntcip_monitor/core/data_models.py) | L11-22 |
 | Example shape CSV | [`~/vid_cfg720.csv`](file:///home/hansrkid/vid_cfg720.csv) | all 39 lines |

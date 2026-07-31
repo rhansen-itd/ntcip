@@ -5,6 +5,7 @@ NTCIP Monitor - Main Entry Point
 Starts the NTCIP monitor application with optional web UI.
 """
 
+import os
 import sys
 import time
 import argparse
@@ -21,16 +22,26 @@ Examples:
   %(prog)s                    # Run with default config
   %(prog)s --no-web           # Run without web UI
   %(prog)s --config custom.json  # Use custom config file
+  %(prog)s --web-host 0.0.0.0    # Expose the web UI on the LAN (see note)
+
+Note: the web UI binds to 127.0.0.1 by default. Exposing it with
+--web-host also requires a control token (config web_ui.control_token or
+$NTCIP_WEB_CONTROL_TOKEN) before /api/control/* will touch the hardware.
         """
     )
-    
+
     parser.add_argument('--config', default='config.json',
                        help='Configuration file path (default: config.json)')
     parser.add_argument('--no-web', action='store_true',
                        help='Disable web UI')
-    parser.add_argument('--web-port', type=int, default=5000,
-                       help='Web UI port (default: 5000)')
-    
+    parser.add_argument('--web-host', default=None,
+                       help='Web UI bind address (default: web_ui.host from '
+                            'config, else 127.0.0.1). Use 0.0.0.0 to expose '
+                            'on the network.')
+    parser.add_argument('--web-port', type=int, default=None,
+                       help='Web UI port (default: web_ui.port from config, '
+                            'else 5000)')
+
     args = parser.parse_args()
     
     print("="*60)
@@ -40,16 +51,27 @@ Examples:
     
     # Create and start application
     app = NTCIPMonitorApp(config_path=args.config)
-    
+    web_ui = None
+
     try:
         app.start()
-        
-        # Start web UI if enabled
-        web_ui = None
+
+        # Start web UI if enabled. CLI flags win over config, config over the
+        # (loopback-only) defaults.
         if not args.no_web:
-            web_ui = WebUI(app, port=args.web_port)
+            config = app.config_loader
+            # `or` chains so an empty/null config value falls through to the
+            # safe default rather than binding to every interface.
+            web_host = args.web_host or config.get('web_ui.host') or '127.0.0.1'
+            web_port = args.web_port or config.get('web_ui.port') or 5000
+            # Env var keeps the shared secret out of a world-readable config.
+            control_token = (os.environ.get('NTCIP_WEB_CONTROL_TOKEN')
+                             or config.get('web_ui.control_token', ''))
+
+            web_ui = WebUI(app, host=web_host, port=web_port,
+                           control_token=control_token)
             web_ui.start()
-            print(f"\n→ Open http://localhost:{args.web_port} in your browser")
+            print(f"\n→ Open http://{web_host}:{web_port} in your browser")
         
         print("\nPress Ctrl+C to stop")
         print("="*60)

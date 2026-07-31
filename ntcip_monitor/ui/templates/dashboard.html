@@ -183,6 +183,22 @@
             transform: scale(0.98);
         }
         
+        .token-input {
+            padding: 10px 12px;
+            border: 1px solid #555;
+            border-radius: 5px;
+            background: #1e1e1e;
+            color: #eee;
+            font-size: 14px;
+            min-width: 180px;
+        }
+
+        .token-hint {
+            margin-top: 8px;
+            font-size: 12px;
+            opacity: 0.7;
+        }
+
         .status-indicator {
             display: inline-block;
             width: 12px;
@@ -248,7 +264,18 @@
             <div class="section-title">Controls</div>
             <div class="controls">
                 <button onclick="syncTime()">Sync Controller Time</button>
+                {% if control_token_required %}
+                <input type="password" id="control-token" class="token-input"
+                       placeholder="Control token" autocomplete="off">
+                {% endif %}
             </div>
+            {% if control_token_required %}
+            <div class="token-hint">
+                Control endpoints require a shared secret; it is sent as the
+                <code>{{ control_token_header }}</code> header and remembered
+                in this browser only.
+            </div>
+            {% endif %}
         </div>
     </div>
     
@@ -387,10 +414,25 @@
             }
         }
         
+        // Shared secret for /api/control/*, kept in this browser only.
+        const CONTROL_TOKEN_HEADER = '{{ control_token_header|default("X-NTCIP-Control-Token") }}';
+        const TOKEN_STORAGE_KEY = 'ntcip_control_token';
+
+        function controlHeaders() {
+            const field = document.getElementById('control-token');
+            const token = field ? field.value.trim() : '';
+            if (!token) return {};
+            localStorage.setItem(TOKEN_STORAGE_KEY, token);
+            return { [CONTROL_TOKEN_HEADER]: token };
+        }
+
         // Sync controller time
         async function syncTime() {
             try {
-                const response = await fetch('/api/control/time', { method: 'POST' });
+                const response = await fetch('/api/control/time', {
+                    method: 'POST',
+                    headers: controlHeaders()
+                });
                 const result = await response.json();
                 if (result.success) {
                     alert('Controller time synced successfully');
@@ -401,13 +443,18 @@
                 alert('Error: ' + error);
             }
         }
-        
+
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
             initPhases();
             initDetectors();
             initOutputs();
-            
+
+            const tokenField = document.getElementById('control-token');
+            if (tokenField) {
+                tokenField.value = localStorage.getItem(TOKEN_STORAGE_KEY) || '';
+            }
+
             // Start polling
             fetchStatus();
             setInterval(fetchStatus, UPDATE_INTERVAL);

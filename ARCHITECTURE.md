@@ -309,6 +309,13 @@ run.py
 ## Security Considerations
 
 - SNMP community strings are passwords (use secure strings)
-- Web UI has no authentication (add reverse proxy with auth if exposed)
+- Web UI binds to `127.0.0.1` by default (`--web-host` / `web_ui.host` to
+  override). `/api/control/*` — the routes that touch signal hardware — need a
+  shared secret in the `X-NTCIP-Control-Token` header whenever
+  `web_ui.control_token` / `$NTCIP_WEB_CONTROL_TOKEN` is set, and are refused
+  outright on a non-loopback bind with no token. `/api/status` and `/api/stats`
+  stay open (read-only). This is intentionally minimal — no users, no sessions;
+  put a reverse proxy with real auth in front of it for a multi-user deployment.
 - SNMP SET operations can control traffic signals (restrict access)
-- File permissions on config.json (should not be world-readable)
+- File permissions on config.json (should not be world-readable — it can hold
+  the control token; prefer `$NTCIP_WEB_CONTROL_TOKEN` if that's a concern)

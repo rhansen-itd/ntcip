@@ -260,6 +260,29 @@ the 2026-07-15 DESIGN_HISTORY entry.
 - Econolite Cobalt specifics baked into the code: SNMP **v1** (not v2c), port
   **501** (not 161), community string = controller username, Phase 1 = bit 0.
 
+## Web UI exposure (2026-07-31, ROADMAP 4f — load-bearing)
+
+`ntcip_monitor/ui/web_ui.py` is an operator tool, not a service, and its
+`/api/control/*` routes drive real signal hardware (time sync, vehicle calls,
+output toggles). Two rules, both implemented:
+
+- **Bind host defaults to `127.0.0.1`.** Override with `--web-host` (run.py) or
+  `web_ui.host` in config — CLI beats config beats the default; `web_ui.port`
+  resolves the same way. Don't restore a `0.0.0.0` default.
+- **Control endpoints are gated by a shared secret** in the
+  `X-NTCIP-Control-Token` header (`hmac.compare_digest`, compared as bytes),
+  read from `$NTCIP_WEB_CONTROL_TOKEN` then `web_ui.control_token`. Policy:
+  token set → header must match (401); no token + loopback bind → allowed;
+  no token + non-loopback bind → **403, control disabled** plus a startup
+  warning. The two rules interlock on purpose — exposing hardware control to
+  the network takes both a host change and a secret. `/api/status` and
+  `/api/stats` stay open (read-only, polled every 250 ms by the dashboard).
+
+Deliberately not a session/user/JWT system — a reverse proxy owns real auth if
+the deployment story changes. Flask/Jinja2 aren't installed in this
+environment, so there's no in-repo test yet; a Flask-test-client case is part
+of ROADMAP 4e.
+
 ## Style conventions already in use
 
 - **Logging**: structured JSON-lines via a shared `_JsonFormatter` pattern

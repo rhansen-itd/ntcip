@@ -708,3 +708,50 @@ decided. Entries after this point are logged as the decision lands.
   bookkeeping, semaphore accounting across four sequential clips, the
   generation guard, threaded stop/reap races, and the camera warnings.
   `test_discrepancy_rules.py` (50) and `test_snmp_batching.py` (17) still pass.
+
+- 2026-07-31 — **Web UI hardened: loopback by default, shared-secret header on
+  `/api/control/*` (ROADMAP Item 4f, done).** `WebUI.__init__` defaulted to
+  `host='0.0.0.0'` with no way to override it from `run.py`, and the three
+  `/api/control/*` routes — sync controller time, place a vehicle call, toggle
+  an output — took unauthenticated POSTs. Anything that could reach the port
+  could drive real signal hardware. Two changes, deliberately small.
+  **(1) Bind host.** Default is now `127.0.0.1`, with `--web-host` on `run.py`
+  and `web_ui.host` in config (CLI > config > default); `web_ui.port` is now
+  read from config too, since the key already existed and was silently ignored.
+  `config.json`'s live `"host": "0.0.0.0"` was flipped to `127.0.0.1` — the key
+  was dead before this session (run.py never passed it), so leaving it would
+  have quietly preserved the exposure the item is about.
+  **(2) Control auth.** A shared secret in the `X-NTCIP-Control-Token` header,
+  compared with `hmac.compare_digest` (as bytes — `compare_digest` raises
+  TypeError on non-ASCII `str`, and header values can be non-ASCII), sourced
+  from `$NTCIP_WEB_CONTROL_TOKEN` first and `web_ui.control_token` second so
+  the secret can stay out of a config file. The policy has three cases, and
+  the third is the point of it: token set → header must match (401 otherwise);
+  no token + **loopback** bind → allowed, which is exactly today's behavior for
+  a local operator, so nobody's workflow breaks; no token + **non-loopback**
+  bind → control refused with 403 plus a startup warning. That last case means
+  the two halves of the fix reinforce each other — you cannot expose hardware
+  control to the network by flipping one setting, you have to flip the host
+  *and* set a secret. Loopback is decided with `ipaddress.is_loopback` (so all
+  of `127.0.0.0/8` and `::1` count) plus the `localhost` names; anything
+  unresolvable is treated as exposed.
+  **Why a header and not real auth:** the deployment is one operator on an
+  edge box, and the item explicitly scoped this as "not a full session/JWT
+  system". Sessions, users, CSRF, and TLS all belong to a reverse proxy if the
+  deployment story ever changes; ARCHITECTURE.md's Security Considerations now
+  says so instead of the old blanket "Web UI has no authentication".
+  `/api/status` and `/api/stats` stay open — read-only, and the dashboard
+  polls `/api/status` every 250 ms, so gating them would have meant putting the
+  secret in a page that has no auth in front of it anyway.
+  **Dashboard:** the template only renders a token field when a token is
+  configured (`control_token_required` is passed to `render_template`), stores
+  what's typed in `localStorage`, and sends it as the header — so the existing
+  Sync Controller Time button keeps working in all three cases without the
+  server ever embedding the secret in the page.
+  **Not tested in-repo:** Flask and Jinja2 aren't installed in this
+  environment, so the policy was verified against a stubbed `flask` module
+  (24 checks: loopback classification incl. `127.5.5.5`/`[::1]`/unresolvable
+  names, all three policy cases, prefix-mismatch, non-ASCII header, and the
+  whitespace-only token being treated as unset). A real Flask-test-client case
+  belongs to ROADMAP 4e, which already lists `WebUI` and owns the fixture
+  strategy; the template render is unverified by machine here.

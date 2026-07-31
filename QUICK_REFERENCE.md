@@ -194,9 +194,18 @@ controller.pulse_output(3, 2.0)  # Pulse 2 seconds
 ```python
 from ntcip_monitor.ui import WebUI
 
-web_ui = WebUI(app, port=5000)
+web_ui = WebUI(app, port=5000)          # binds 127.0.0.1 by default
 web_ui.start()
 # Open http://localhost:5000
+
+# LAN access + hardware control: bind wide AND set a shared secret,
+# otherwise /api/control/* is refused (403) on a non-loopback bind.
+web_ui = WebUI(app, host='0.0.0.0', port=5000, control_token='...')
+```
+```bash
+python3 run.py --web-host 0.0.0.0 --web-port 5000   # or web_ui.host in config.json
+export NTCIP_WEB_CONTROL_TOKEN='...'                # keeps the secret out of config
+curl -X POST -H 'X-NTCIP-Control-Token: ...' http://host:5000/api/control/time
 ```
 
 ## Troubleshooting
