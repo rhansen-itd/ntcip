@@ -123,12 +123,26 @@ built to respect that.**
   the gate moved to fire time, which is a real behavior change (the
   `orphan_watch_*` slots hold one candidate each; arming junk would evict live
   candidates) — deliberately not done. See DESIGN_HISTORY 2026-08-01.
-- [ ] **C2 — re-score on a peak-hour run.** The 2026-07-31 sample is off-peak:
-  max detector duty **32.8 %**, against the **80–94 %** that motivated this
-  scope. The high-duty advisory never fired and the false-trigger storm
-  condition is untested. Needs another ≥ 2 h engine run at peak (16:00–18:00)
-  with a matching datZ pull — the datZ side of that window already exists, the
-  engine side does not. That run now also produces the first real
+- [ ] **C2 — re-score on a high-duty run.** The 2026-07-31 sample reached max
+  detector duty **32.8 %**, against the **80–94 %** that motivated this scope.
+  The high-duty advisory never fired and the false-trigger storm condition is
+  untested. Needs another ≥ 2 h engine run **in a high-duty regime**, with a
+  matching datZ pull — the datZ side is continuous on the controller, the
+  engine side is what's missing.
+
+  **"Peak hour (16:00–18:00)" was the original wording and it is wrong for
+  this site (corrected 2026-08-01).** The criterion is detector ON-duty, and
+  duty is *queueing*, not throughput: these are all stopbar detectors, so they
+  read high duty when vehicles are **standing** on them. Free-flowing volume
+  can be enormous at near-zero duty. Intersection 201 is on a recreational
+  route (SH-55), where the loaded direction depends on the day of the week
+  more than the hour — heavy outbound Friday, balanced/multi-directional
+  Saturday, heavy return Sunday. **The objective acceptance signal is the
+  engine's own advisory**, not a clock: `grep "sampling-reliability regime"`
+  over the run's log. If it never fires, the condition still is not exercised,
+  whatever the hour was. (Advisory threshold: a pair's *minimum* detector duty
+  over a rolling 120 s window exceeds `high_duty_warn_fraction`, default 0.8;
+  rate-limited to one WARNING per pair per 600 s.) That run now also produces the first real
   `engine_decisions.csv`, so score it with
   `__accuracy_report.py engine_decisions.csv <gt> --recording-log
   discrepancies_log.csv`: the recall number will be the first one not
