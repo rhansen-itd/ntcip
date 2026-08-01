@@ -2,11 +2,29 @@
 """__accuracy_report.py — engine-vs-ATSPM discrepancy accuracy report.
 
 Standalone dev/verification tool (``video_engine/tools/``, ``print()``
-allowed).  Compares the discrepancy engine's trigger log
-(``discrepancies_log.csv``, written by the video-buffer backends) against an
-ATSPM ground-truth export from the sibling ``pyatspm`` project, and measures
+allowed).  Compares the discrepancy engine's trigger log against an ATSPM
+ground-truth export from the sibling ``pyatspm`` project, and measures
 **correspondence** — not raw counts, which diverge by design because of the
 per-pair cooldown and the ~0.2 s NTCIP poll.
+
+Two engine-log formats are accepted, auto-detected from the CSV header:
+
+  * **``engine_decisions.csv``** (preferred, written by the engine itself as
+    of ROADMAP 9C1) — one row per trigger the engine *emitted*, with exact
+    Unix event windows.  Rows are complete: nothing downstream can suppress
+    one, so recall measured against this file is an estimate, not a floor.
+  * **``discrepancies_log.csv``** (legacy, written by the video-buffer
+    backends) — one row per clip actually *recorded*.  A trigger dropped by
+    the ``max_concurrent_writers`` cap or a low-disk abort leaves no row, so
+    **recall read from this file is a floor** (measured 2026-07-31: the cap
+    accounted for 43 % of the apparent misses).  Timing has to be
+    reconstructed from a 1-second local timestamp plus a regex over the
+    description, which is why ``--tz`` matters there and not in the new
+    format.
+
+Pass ``--recording-log`` alongside a decision log to quantify that gap
+directly: decisions with no matching recording row are counted and broken
+down by rule.
 
 For every engine trigger it asks "is there a ground-truth event of the
 corresponding type (rule1 ↔ extended_disagreement, rule2 ↔ isolated_pulse) on
@@ -38,7 +56,8 @@ clocks on rule 2 rows and warns when the timezone looks wrong.
 Usage::
 
     python3 video_engine/tools/__accuracy_report.py \
-        discrepancies_log.csv Discrepancies_20260719_140000_20260719_160000.csv \
+        engine_decisions.csv Discrepancies_20260719_140000_20260719_160000.csv \
+        [--recording-log discrepancies_log.csv] \
         [--tz America/Boise] [--tolerance 3.0] [--poll 0.2] [--cooldown 60] \
         [--post-roll 20] [--gap 600] [--coverage-margin 30] [--verbose]
 """
@@ -68,16 +87,18 @@ _RE_RULE1 = re.compile(r"for ([\d.]+)s \(threshold=")
 @dataclass
 class EngineTrigger:
     fire_ts: float          # wall-clock when the trigger fired (Unix)
-    start_ts: float         # reconstructed start of the underlying event
-    end_ts: float           # reconstructed end (rule2) or == fire_ts (rule1)
+    start_ts: float         # start of the underlying event
+    end_ts: float           # end (rule2) or == fire_ts (rule1)
     rule: str
     pair: Tuple[str, str]
     description: str
+    trigger_id: str = ""    # decision-log only; keys the recording cross-ref
     matched_gt: Optional["GTEvent"] = None
     nearest_diff: Optional[float] = None  # diagnostic for unmatched rows
     # A rule 2 row repeating an earlier row's exact pulse window: the stale-
     # refire bug (fixed 2026-07-19) re-firing on unchanged detector state.
     stale_refire: bool = False
+    recorded: Optional[bool] = None  # set only when --recording-log is given
 
 
 @dataclass
@@ -97,57 +118,140 @@ def _pair_key(a: str, b: str) -> Tuple[str, str]:
     return tuple(sorted((str(a).strip(), str(b).strip())))
 
 
-def _parse_engine_csv(path: str, tz_name: str) -> List[EngineTrigger]:
+def _parse_engine_csv(path: str, tz_name: str) -> Tuple[List[EngineTrigger], str]:
+    """Load an engine log, auto-detecting which of the two formats it is.
+
+    Returns:
+        ``(triggers, fmt)`` where ``fmt`` is ``"decision"`` or ``"recording"``.
+    """
+    with open(path, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        fields = reader.fieldnames or []
+        rows = list(reader)
+
+    if "event_timestamp" in fields:
+        return _parse_decision_rows(rows), "decision"
+    if "Rule_Type" in fields:
+        return _parse_recording_rows(rows, tz_name), "recording"
+    raise SystemExit(
+        f"{path}: unrecognised engine log — expected either an "
+        f"'event_timestamp' column (engine_decisions.csv) or a 'Rule_Type' "
+        f"column (discrepancies_log.csv); got {fields}"
+    )
+
+
+def _parse_decision_rows(rows: List[dict]) -> List[EngineTrigger]:
+    """Parse ``engine_decisions.csv`` — exact Unix columns, no reconstruction.
+
+    ``stop`` rows are skipped: they close a Rule 1 recording rather than
+    reporting a detection, and counting them would double every Rule 1 event.
+    """
+    triggers: List[EngineTrigger] = []
+    seen_windows: set = set()
+    missing_window = 0
+
+    for row in rows:
+        if row.get("action", "start").strip() != "start":
+            continue
+        rule = row["rule"].strip()
+        if rule not in _ENGINE_TO_GT_TYPE:
+            continue
+
+        fire_ts = float(row["event_timestamp"])
+        pair = _pair_key(row["det_a"], row["det_b"])
+
+        start_txt = (row.get("event_start_ts") or "").strip()
+        end_txt = (row.get("event_end_ts") or "").strip()
+        if start_txt:
+            start_ts = float(start_txt)
+        else:
+            # Only expected for a rule the engine did not window; fall back to
+            # the same arithmetic the legacy format uses.
+            missing_window += 1
+            start_ts = fire_ts - float(row.get("disagreement_sec") or 0.0)
+        # A rule 1 start has no end yet — the disagreement is still open, so
+        # the trigger's own fire time is the best available bound.
+        end_ts = float(end_txt) if end_txt else fire_ts
+
+        window_key = (pair, start_ts, end_ts)
+        triggers.append(EngineTrigger(
+            fire_ts=fire_ts, start_ts=start_ts, end_ts=end_ts,
+            rule=rule, pair=pair,
+            description=row.get("description", ""),
+            trigger_id=row.get("trigger_id", "").strip(),
+            stale_refire=(rule == "rule2_orphan_pulse"
+                          and window_key in seen_windows),
+        ))
+        if rule == "rule2_orphan_pulse":
+            seen_windows.add(window_key)
+
+    if missing_window:
+        print(f"WARN: {missing_window} decision rows had no event_start_ts; "
+              f"their start times were reconstructed from disagreement_sec.")
+
+    triggers.sort(key=lambda t: t.start_ts)
+    return triggers
+
+
+def _parse_recording_rows(rows: List[dict], tz_name: str) -> List[EngineTrigger]:
+    """Parse the legacy ``discrepancies_log.csv`` (recordings, not decisions).
+
+    Timing is reconstructed: rule 2 windows come from the description's
+    embedded Unix window, rule 1 starts from ``Local_Timestamp − duration``,
+    so ``tz_name`` must match the intersection.  See the module docstring for
+    why recall from this file is a floor.
+    """
     tz = pytz.timezone(tz_name)
     triggers: List[EngineTrigger] = []
     clock_diffs: List[float] = []
     seen_windows: set = set()
 
-    with open(path, newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            rule = row["Rule_Type"].strip()
-            if rule not in _ENGINE_TO_GT_TYPE:
+    for row in rows:
+        rule = row["Rule_Type"].strip()
+        if rule not in _ENGINE_TO_GT_TYPE:
+            continue
+        desc = row["Description"]
+        pair = _pair_key(row["Det_A"], row["Det_B"])
+
+        # Local_Timestamp is "YYYY-mm-dd HH:MM:SS <TZABBREV>"; drop the
+        # abbreviation (strptime %Z is unreliable) and localize via --tz.
+        ts_txt = row["Local_Timestamp"].strip().rsplit(" ", 1)[0]
+        naive = datetime.strptime(ts_txt, "%Y-%m-%d %H:%M:%S")
+        fire_ts = tz.localize(naive).timestamp()
+
+        if rule == "rule2_orphan_pulse":
+            m = _RE_RULE2.search(desc)
+            if not m:
+                print(f"WARN: unparseable rule2 description: {desc!r}")
                 continue
-            desc = row["Description"]
-            pair = _pair_key(row["Det_A"], row["Det_B"])
-
-            # Local_Timestamp is "YYYY-mm-dd HH:MM:SS <TZABBREV>"; drop the
-            # abbreviation (strptime %Z is unreliable) and localize via --tz.
-            ts_txt = row["Local_Timestamp"].strip().rsplit(" ", 1)[0]
-            naive = datetime.strptime(ts_txt, "%Y-%m-%d %H:%M:%S")
-            fire_ts = tz.localize(naive).timestamp()
-
-            if rule == "rule2_orphan_pulse":
-                m = _RE_RULE2.search(desc)
-                if not m:
-                    print(f"WARN: unparseable rule2 description: {desc!r}")
-                    continue
-                dur = float(m.group(1))
-                w_start, w_end = float(m.group(2)), float(m.group(3))
-                # window = [pulse_on − thr, pulse_off + thr] and
-                # dur = pulse_off − pulse_on  ⇒  pulse_on = (a + b − dur) / 2.
-                pulse_on = (w_start + w_end - dur) / 2.0
-                window_key = (pair, w_start, w_end)
-                triggers.append(EngineTrigger(
-                    fire_ts=fire_ts, start_ts=pulse_on,
-                    end_ts=pulse_on + dur, rule=rule, pair=pair,
-                    description=desc,
-                    stale_refire=window_key in seen_windows,
-                ))
-                seen_windows.add(window_key)
-                # The trigger fires right at window_end; use that to sanity-
-                # check the Local_Timestamp → Unix conversion.
-                clock_diffs.append(fire_ts - w_end)
-            else:
-                m = _RE_RULE1.search(desc)
-                if not m:
-                    print(f"WARN: unparseable rule1 description: {desc!r}")
-                    continue
-                dur = float(m.group(1))
-                triggers.append(EngineTrigger(
-                    fire_ts=fire_ts, start_ts=fire_ts - dur,
-                    end_ts=fire_ts, rule=rule, pair=pair, description=desc,
-                ))
+            dur = float(m.group(1))
+            w_start, w_end = float(m.group(2)), float(m.group(3))
+            # window = [pulse_on − thr, pulse_off + thr] and
+            # dur = pulse_off − pulse_on  ⇒  pulse_on = (a + b − dur) / 2.
+            pulse_on = (w_start + w_end - dur) / 2.0
+            window_key = (pair, w_start, w_end)
+            triggers.append(EngineTrigger(
+                fire_ts=fire_ts, start_ts=pulse_on,
+                end_ts=pulse_on + dur, rule=rule, pair=pair,
+                description=desc,
+                trigger_id=row.get("Trigger_ID", "").strip(),
+                stale_refire=window_key in seen_windows,
+            ))
+            seen_windows.add(window_key)
+            # The trigger fires right at window_end; use that to sanity-
+            # check the Local_Timestamp → Unix conversion.
+            clock_diffs.append(fire_ts - w_end)
+        else:
+            m = _RE_RULE1.search(desc)
+            if not m:
+                print(f"WARN: unparseable rule1 description: {desc!r}")
+                continue
+            dur = float(m.group(1))
+            triggers.append(EngineTrigger(
+                fire_ts=fire_ts, start_ts=fire_ts - dur,
+                end_ts=fire_ts, rule=rule, pair=pair, description=desc,
+                trigger_id=row.get("Trigger_ID", "").strip(),
+            ))
 
     if clock_diffs:
         clock_diffs.sort()
@@ -159,6 +263,32 @@ def _parse_engine_csv(path: str, tz_name: str) -> List[EngineTrigger]:
 
     triggers.sort(key=lambda t: t.start_ts)
     return triggers
+
+
+def _annotate_recorded(triggers: List[EngineTrigger], recording_csv: str) -> int:
+    """Mark which decisions produced an actual clip.
+
+    Joins on ``Trigger_ID``, which both artifacts carry verbatim from the
+    trigger payload.  Returns the number of decisions with no recording — the
+    triggers the video buffer dropped (writer-cap saturation, a low-disk
+    abort, or no matching camera), which is precisely the population that made
+    recall unmeasurable from the recording log alone.
+    """
+    recorded_ids = set()
+    with open(recording_csv, newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            tid = (row.get("Trigger_ID") or "").strip()
+            if tid:
+                recorded_ids.add(tid)
+
+    unrecorded = 0
+    for t in triggers:
+        if not t.trigger_id:
+            continue
+        t.recorded = t.trigger_id in recorded_ids
+        if not t.recorded:
+            unrecorded += 1
+    return unrecorded
 
 
 def _parse_gt_csv(path: str) -> List[GTEvent]:
@@ -276,10 +406,17 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description="Precision/recall report: engine log vs ATSPM ground truth."
     )
-    ap.add_argument("engine_csv", help="discrepancies_log.csv from the engine")
+    ap.add_argument("engine_csv",
+                    help="engine_decisions.csv (preferred) or the legacy "
+                         "discrepancies_log.csv; the format is auto-detected")
     ap.add_argument("gt_csv", help="ATSPM ground-truth export CSV")
+    ap.add_argument("--recording-log", default=None,
+                    help="discrepancies_log.csv to cross-reference against a "
+                         "decision log, measuring how many decisions the video "
+                         "buffer dropped")
     ap.add_argument("--tz", default="America/Boise",
-                    help="IANA timezone of the engine log's Local_Timestamp")
+                    help="IANA timezone of the engine log's Local_Timestamp "
+                         "(legacy format only; decision logs carry Unix time)")
     ap.add_argument("--tolerance", type=float, default=3.0,
                     help="max start-time difference for a match, seconds "
                          "(≈ poll interval + SNMP lag + clock skew)")
@@ -298,13 +435,28 @@ def main() -> int:
     args = ap.parse_args()
 
     tz = pytz.timezone(args.tz)
-    all_triggers = _parse_engine_csv(args.engine_csv, args.tz)
+    all_triggers, fmt = _parse_engine_csv(args.engine_csv, args.tz)
     gt_events = _parse_gt_csv(args.gt_csv)
+    if fmt == "decision":
+        print("Engine log format: engine_decisions.csv (decisions; exact "
+              "Unix event windows).")
+    else:
+        print("Engine log format: discrepancies_log.csv (RECORDINGS, not "
+              "decisions — triggers the video buffer dropped are absent, so "
+              "recall below is a FLOOR, not an estimate).")
     print(f"Parsed {len(all_triggers)} engine triggers, "
           f"{len(gt_events)} ground-truth events.")
     if not all_triggers or not gt_events:
         print("Nothing to compare.")
         return 1
+
+    unrecorded = None
+    if args.recording_log:
+        if fmt != "decision":
+            print("WARN: --recording-log is only meaningful with a decision "
+                  "log; ignoring it.")
+        else:
+            unrecorded = _annotate_recorded(all_triggers, args.recording_log)
 
     # The GT export has its own time window; engine triggers outside it can
     # never match and must not count against precision.
@@ -403,6 +555,28 @@ def main() -> int:
           f"(counts expected misses against the engine)")
     print(f"  adjusted recall = {adjusted:.1%}   "
           f"(expected misses excluded)")
+
+    # ── Decision → recording delivery ────────────────────────────────────
+    # The gap between what the engine decided and what the buffer recorded.
+    # These decisions are correctly scored above (they are engine output) but
+    # have no clip on disk, so an operator cannot review them.
+    if unrecorded is not None:
+        joinable = [t for t in triggers if t.recorded is not None]
+        dropped = [t for t in joinable if not t.recorded]
+        print("\nDELIVERY — decisions that became clips "
+              f"({len(joinable)} decisions joinable by Trigger_ID)")
+        share = len(dropped) / len(joinable) if joinable else float("nan")
+        print(f"  no recording written:           {len(dropped)}  "
+              f"= {share:.1%} of decisions")
+        for rule in sorted({t.rule for t in dropped}):
+            n = sum(1 for t in dropped if t.rule == rule)
+            print(f"    {rule}: {n}")
+        tp_dropped = sum(1 for t in dropped if t.matched_gt is not None)
+        print(f"  …of which ground-truth-matched: {tp_dropped}  "
+              f"(real events with no reviewable clip)")
+        print("  These rows are the exact population missing from the "
+              "recording log;\n  recall measured from that file alone "
+              "understates the engine by this much.")
 
     # ── Per-pair breakdown ───────────────────────────────────────────────
     # A pair with many triggers and zero matches usually means the engine's

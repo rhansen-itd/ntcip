@@ -1205,3 +1205,78 @@ decided. Entries after this point are logged as the decision lands.
   and says so with the exact command when the import fails. Export committed as
   `gt_anomalies_20260731_1830-2130.csv`; regenerate with the two-command chain
   above. **9C stays open** pending the decision log and the peak-hour run.
+
+- 2026-08-01 — **Item 9C1: the engine logs its own decisions, in a file the
+  video buffer cannot suppress.** `discrepancies_log.csv` is written by
+  `remux_video_buffer._handle_start` *after* `_writer_semaphore.acquire()`
+  succeeds, so a trigger dropped by the `max_concurrent_writers=2` cap leaves
+  no row anywhere; the 2026-07-31 measurement showed that population is not
+  small or random (cap saturated 11.6 % of wall clock, but 43 % of the 108
+  apparent misses started inside a saturated stretch, a 3.3× enrichment over
+  the 13 % base rate). Recall computed from that artifact charges the engine
+  for the buffer's back-pressure. `DiscrepancyMonitor` now appends
+  **`engine_decisions.csv`** from `_log_decision`, called at the end of
+  `_fire_trigger` — after the atomic Hot Folder rename, before any post-write
+  state management. **Why there:** a row then means exactly "this trigger
+  reached the spool directory", which is the true boundary of engine
+  responsibility; logging before the rename would credit deliveries that
+  failed, and logging inside the state machine would tangle measurement with
+  the cooldown/active-trigger interaction the module docstring warns against
+  touching.
+
+  **The path is injected, not discovered.** `system_runner` passes
+  `decision_log_path=output_dir / "engine_decisions.csv"`, defaulting to
+  `None` (disabled) everywhere else — the same composition-root discipline as
+  the sampling floor, and it keeps the two artifacts side by side in one
+  directory so the accuracy chain has nothing to hunt for. No new config key:
+  the value is fully determined by `output_dir`, and CLAUDE.md's rule is to
+  add config surface only when a deployment could reasonably want it
+  different.
+
+  **Rows carry exact Unix event windows.** `event_start_ts` / `event_end_ts`
+  are written as floats, so a consumer never reconstructs timing from a
+  1-second local timestamp plus a regex over a human-readable description —
+  which is what `__accuracy_report.py` had to do, and why it needed a `--tz`
+  it could silently get wrong. Either column may be blank where the rule does
+  not define it: a Rule 1 `start` knows when the disagreement began but not
+  when it ends, and a `stop` describes neither. The window reaches
+  `_fire_trigger` as a single optional `event_window` tuple rather than two
+  scalars, because ROADMAP 4h already wants that signature *shorter*; when 4h
+  builds its `TriggerSpec` dataclass this folds in as one field. It is
+  deliberately **not** added to the trigger payload — the video buffer has no
+  use for it, and the Hot Folder schema is intentionally expensive to grow
+  (both sides plus `config_manager.py`'s canonical docstring must agree).
+
+  **Failure is contained by contract.** A failed append logs an ERROR and is
+  swallowed: measurement degrading is acceptable, a full or read-only disk
+  stopping a recording is not. `_DECISION_LOG_FIELDS` is append-only for the
+  same reason the header is written only to an empty file — the log survives
+  restarts, so a column inserted mid-list would desynchronize a resumed file
+  from its own header. The engine is the single writer (every `_fire_trigger`
+  call site is on the evaluator thread), so the append needs no lock.
+
+  **`__accuracy_report.py` takes either format**, auto-detected on the
+  presence of an `event_timestamp` column and announced in its first line of
+  output, with the legacy reconstruction path kept intact — re-running the
+  committed 2026-07-31 artifacts reproduces that run exactly (precision
+  89.4 %, rule 2 93.9 %, adjusted recall 59.9 %, zero phantoms), which is what
+  makes the refactor safe to trust. `stop` rows are skipped by the decision
+  parser; counting them would double every Rule 1 event. New `--recording-log`
+  joins the two artifacts on `Trigger_ID` and prints a DELIVERY section: how
+  many decisions never became clips, split by rule, and how many of those were
+  ground-truth-matched (real events with no reviewable footage — an
+  operational finding, not an accuracy one).
+
+  **What this does *not* do:** it does not revise the 59.9 %. That number was
+  measured on an artifact predating this log, and only a fresh engine run
+  produces a decision log to score. It also does not record decisions *not* to
+  fire — cooldown- and floor-suppressed candidates are still only counters and
+  DEBUG lines, so `__accuracy_report.py` keeps *simulating* suppression
+  windows and its cooldown category stays an upper bound. Logging real
+  suppressions would mean adding a decision point inside `_evaluate_pair`,
+  which §Item C rules out until C2 is settled. Tests: nine new cases in
+  `video_engine/tests/test_discrepancy_rules.py` (59 total, all green),
+  covering the exact rule 2 pulse window, Rule 1's open window, the `stop`
+  row's shared trigger ID, header-once-across-restarts, the Trigger_ID join
+  with the Hot Folder payload, and that an unwritable log path still delivers
+  the trigger.

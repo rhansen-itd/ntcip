@@ -162,7 +162,11 @@ class SystemRunner:
         config_path: Path to the ``intersections.json`` file.
         trigger_dir: Hot Folder directory shared by the engines and the
             video buffer.  Created automatically if absent.
-        output_dir: Directory where completed MP4 clips are stored.
+        output_dir: Directory where completed MP4 clips are stored, alongside
+            the video buffer's ``discrepancies_log.csv`` (one row per
+            *recording*) and the engine's ``engine_decisions.csv`` (one row per
+            *decision*).  The two are separate artifacts on purpose — see the
+            discrepancy engine's module docstring.
         min_free_disk_mb: Abort a recording if free disk space falls below
             this threshold (passed through to :class:`VideoBufferManager`).
         max_concurrent_writers: Hard cap on simultaneous encoder threads.
@@ -261,6 +265,11 @@ class SystemRunner:
                 next(iter(cameras_cfg.values()), {}).get("post_roll_sec", 20)
             ),
             max_duration_sec=300.0,
+            # The engine's own record of what it decided, alongside — never
+            # instead of — the buffer's record of what it recorded.  The two
+            # differ by exactly the triggers back-pressure dropped, which is
+            # the only way to tell an engine miss from a busy writer pool.
+            decision_log_path=self._output_dir / "engine_decisions.csv",
         )
 
         # The engine must not evaluate detector evidence finer than the rate

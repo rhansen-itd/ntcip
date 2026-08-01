@@ -5,7 +5,8 @@ partner overlap), ``_compute_on_duty_fraction``, and
 ``DiscrepancyMonitor._maybe_register_orphan`` (including the 2026-07-19
 stale-refire guard and the 2026-07-30 sampling-floor gate), plus a set of
 integration tests that drive ``DiscrepancyMonitor._evaluate_pair`` directly
-(no evaluator thread) against a stub ``ConfigProvider`` and a temp Hot Folder.
+(no evaluator thread) against a stub ``ConfigProvider`` and a temp Hot Folder,
+and the 2026-08-01 decision log (``engine_decisions.csv``).
 
 Run from anywhere:
 
@@ -15,6 +16,7 @@ Run from anywhere:
 
 from __future__ import annotations
 
+import csv
 import json
 import logging
 import sys
@@ -317,7 +319,9 @@ class _StubProvider(ConfigProvider):
         return ["test_int"]
 
 
-def _build_monitor(trigger_dir, threshold=0.2, floor=None, **extra_cfg):
+def _build_monitor(
+    trigger_dir, threshold=0.2, floor=None, decision_log=None, **extra_cfg
+):
     """Build a two-detector DiscrepancyMonitor over a temp Hot Folder.
 
     Args:
@@ -325,6 +329,7 @@ def _build_monitor(trigger_dir, threshold=0.2, floor=None, **extra_cfg):
         threshold: ``lag_threshold_sec`` for both detectors.
         floor: When given, injected via ``set_sampling_floor`` the way
             ``system_runner`` does in production.
+        decision_log: When given, the engine's decision-log CSV path.
         **extra_cfg: Extra top-level intersection config keys (e.g.
             ``suppress_high_duty_pairs``).
 
@@ -346,6 +351,7 @@ def _build_monitor(trigger_dir, threshold=0.2, floor=None, **extra_cfg):
         config_provider=_StubProvider(cfg),
         trigger_dir=trigger_dir,
         cooldown_sec=60.0,
+        decision_log_path=decision_log,
     )
     if floor is not None:
         monitor.set_sampling_floor(floor)
@@ -611,6 +617,170 @@ class TestHighDutyAdvisory(unittest.TestCase):
 
         time.sleep(self.THRESHOLD + 0.05)
         monitor._evaluate_pair("1:2", "1", "2")
+        self.assertEqual(
+            len(sorted(Path(self._tmp.name).glob("trigger_*.json"))), 1
+        )
+
+
+# ---------------------------------------------------------------------------
+# Decision log (ROADMAP 9C1)
+# ---------------------------------------------------------------------------
+
+class TestDecisionLog(unittest.TestCase):
+    """The engine's own record of every trigger it emitted.
+
+    Distinct from the video buffer's ``discrepancies_log.csv``, which only
+    covers triggers that won a writer slot — see the engine module docstring.
+    """
+
+    THRESHOLD = 0.2
+    FLOOR = 0.01
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.log_path = Path(self._tmp.name) / "out" / "engine_decisions.csv"
+        self.monitor = _build_monitor(
+            self._tmp.name, threshold=self.THRESHOLD, floor=self.FLOOR,
+            decision_log=self.log_path,
+        )
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def rows(self):
+        with self.log_path.open(newline="", encoding="utf-8") as fh:
+            return list(csv.DictReader(fh))
+
+    def pulse(self, det_id: str, duration: float):
+        self.monitor.on_detector_on(det_id)
+        time.sleep(duration)
+        self.monitor.on_detector_off(det_id)
+
+    def fire_rule2(self):
+        """Drive one confirmed orphan pulse on detector 1."""
+        self.pulse("1", 0.05)
+        time.sleep(self.THRESHOLD + 0.05)
+        self.monitor._evaluate_pair("1:2", "1", "2")
+
+    def fire_rule1_start(self):
+        """Drive one Rule 1 start trigger."""
+        self.monitor.on_detector_on("1")
+        self.monitor._evaluate_pair("1:2", "1", "2")   # arm the timer
+        time.sleep(self.THRESHOLD + 0.05)
+        self.monitor._evaluate_pair("1:2", "1", "2")   # fires
+
+    def test_no_path_writes_nothing(self):
+        monitor = _build_monitor(
+            self._tmp.name, threshold=self.THRESHOLD, floor=self.FLOOR
+        )
+        monitor.on_detector_on("1")
+        monitor._evaluate_pair("1:2", "1", "2")
+        time.sleep(self.THRESHOLD + 0.05)
+        monitor._evaluate_pair("1:2", "1", "2")
+        self.assertFalse(self.log_path.exists())
+
+    def test_parent_directory_is_created(self):
+        self.fire_rule2()
+        self.assertTrue(self.log_path.exists())
+
+    def test_rule2_row_carries_the_exact_pulse_window(self):
+        self.fire_rule2()
+        rows = self.rows()
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(row["rule"], "rule2_orphan_pulse")
+        self.assertEqual(row["action"], "start")
+        self.assertEqual(row["pair_key"], "1:2")
+        self.assertEqual(row["cameras"], "cam1")
+        # The window is the pulse itself, not the observation window, and its
+        # span must equal the reported disagreement.
+        start, end = float(row["event_start_ts"]), float(row["event_end_ts"])
+        self.assertLess(start, end)
+        self.assertAlmostEqual(
+            end - start, float(row["disagreement_sec"]), places=2
+        )
+        # The decision is rendered after the pulse closed, never before it.
+        self.assertGreaterEqual(float(row["event_timestamp"]), end)
+
+    def test_rule1_start_row_has_an_open_window(self):
+        self.fire_rule1_start()
+        rows = self.rows()
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(row["rule"], "rule1_continuous_disagreement")
+        self.assertEqual(row["action"], "start")
+        # The disagreement has a known beginning but is still open.
+        self.assertAlmostEqual(
+            float(row["event_timestamp"]) - float(row["event_start_ts"]),
+            float(row["disagreement_sec"]),
+            places=2,
+        )
+        self.assertEqual(row["event_end_ts"], "")
+
+    def test_rule1_stop_is_logged_and_shares_the_trigger_id(self):
+        self.fire_rule1_start()
+        start_id = self.rows()[0]["trigger_id"]
+
+        # Resolve the disagreement, then let the post-roll elapse.
+        self.monitor.on_detector_off("1")
+        self.monitor._post_roll_sec = 0.0
+        self.monitor._evaluate_pair("1:2", "1", "2")   # starts post-roll
+        self.monitor._evaluate_pair("1:2", "1", "2")   # sends the stop
+
+        rows = self.rows()
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[1]["action"], "stop")
+        self.assertEqual(rows[1]["trigger_id"], start_id)
+        # A stop closes a recording; it reports no detection window.
+        self.assertEqual(rows[1]["event_start_ts"], "")
+        self.assertEqual(rows[1]["event_end_ts"], "")
+
+    def test_trigger_id_matches_the_hot_folder_file(self):
+        # The Trigger_ID join used to cross-reference the recording log only
+        # works if both artifacts name the same trigger.
+        self.fire_rule2()
+        payloads = [
+            json.loads(p.read_text(encoding="utf-8"))
+            for p in sorted(Path(self._tmp.name).glob("trigger_*.json"))
+        ]
+        self.assertEqual(len(payloads), 1)
+        self.assertEqual(self.rows()[0]["trigger_id"], payloads[0]["trigger_id"])
+
+    def test_header_written_once_across_appends(self):
+        self.fire_rule2()
+        self.monitor._pair_runtime["1:2"].cooldown_active = False
+        self.fire_rule2()
+        self.assertEqual(len(self.rows()), 2)
+        lines = self.log_path.read_text(encoding="utf-8").strip().splitlines()
+        self.assertEqual(len(lines), 3)                     # header + 2 rows
+        self.assertEqual(lines[0].split(",")[0], "event_timestamp")
+
+    def test_existing_log_is_appended_not_reheadered(self):
+        self.fire_rule2()
+        first = self.log_path.read_text(encoding="utf-8")
+        # A fresh monitor over the same path — the restart case.
+        monitor = _build_monitor(
+            self._tmp.name, threshold=self.THRESHOLD, floor=self.FLOOR,
+            decision_log=self.log_path,
+        )
+        monitor.on_detector_on("1")
+        time.sleep(0.05)
+        monitor.on_detector_off("1")
+        time.sleep(self.THRESHOLD + 0.05)
+        monitor._evaluate_pair("1:2", "1", "2")
+        self.assertTrue(
+            self.log_path.read_text(encoding="utf-8").startswith(first)
+        )
+        self.assertEqual(len(self.rows()), 2)
+
+    def test_write_failure_does_not_block_the_trigger(self):
+        # A full or read-only disk must degrade measurement, never recording.
+        self.monitor._decision_log_path = (
+            Path(self._tmp.name) / "not-a-dir.txt" / "decisions.csv"
+        )
+        Path(self._tmp.name, "not-a-dir.txt").write_text("blocker")
+        with self.assertLogs("discrepancy_engine.test_int", level="ERROR"):
+            self.fire_rule2()
         self.assertEqual(
             len(sorted(Path(self._tmp.name).glob("trigger_*.json"))), 1
         )

@@ -29,27 +29,30 @@ highest used so far.
 
 ---
 
-> **Status at a glance (2026-07-31).**
+> **Status at a glance (2026-08-01).**
 >
-> **Waiting on the owner + a controller — one round trip closes both:**
-> restart the monitor with the new `snmp_chunk_size: 8`, rerun
-> `__capture_ntcip.py` (~10 min) with a matching datZ pull, and run the engine
-> ≥ 2 h with a matching ATSPM export. That single capture session feeds **4a
-> steps 3–4** (verify the sweep got faster) and **9C** (the accuracy
-> re-baseline). Don't capture twice.
+> **Waiting on the owner + a controller — one round trip:** **9C2** needs a
+> ≥ 2 h engine run at *peak* (16:00–18:00) with a matching datZ pull. The
+> 2026-07-31 round trip already closed **4a steps 3–4** (sweep verified: cycle
+> 1.53 s → ~0.33 s, edge capture 26 % → 94 %) and produced 9C's first
+> measurement, but off-peak — max detector duty 32.8 % against the 80–94 %
+> that motivated the scope, so the false-trigger storm condition is still
+> untested.
 >
 > **Ready to start now, no hardware:** **4d / 4b / 5** (Sonnet — mechanical,
 > precedents set), **6** (Opus, fold into 5), **2**, **3**, **10**.
 >
-> **Suggested order:** 4d → 4b/5 → 6, with the owner's round trip
-> (4a 3–4, then 9C) slotted in whenever the controller is available.
+> **Suggested order:** 4d → 4b/5 → 6, with the owner's peak-hour run (9C2)
+> slotted in whenever the controller is available.
 >
 > Items **8** (remux manager thread-safety + the single-camera assumption) and
 > **4f** (web UI: loopback default + shared-secret control endpoints) landed
 > 2026-07-31 — see DESIGN_HISTORY.  Item **11** (Live Video Overlay) was
 > scoped and finished the same day, 11a→11d: `/overlay` renders live shapes
 > over a still image *or* a live MJPEG feed, and `tools/` holds the
-> deploy-time config sync and calibration-still grabber.
+> deploy-time config sync and calibration-still grabber.  **9C1** (the engine
+> decision log) landed 2026-08-01, so the next run's recall is measurable for
+> the first time.
 >
 > Model routing follows the Fable-era principle: the *thinking* for the
 > remaining items is pre-done in the item text, so the Target line says who
@@ -80,23 +83,35 @@ Design and code in [[SCOPE_sampling_floor.md]]; A and B are **done**, C is
   --poll 0.33`; the export is committed as
   `gt_anomalies_20260731_1830-2130.csv`.
 
-**Two things block a clean pass, in this order. Neither is a rule change, and
-§Item C says don't touch rule code until they're settled.**
+**C1 has landed; C2 is now the only thing between here and a clean pass, and
+it needs a controller. Neither is a rule change, and §Item C says don't touch
+rule code until they're settled.**
 
-- [ ] **C1 — log engine decisions separately from recordings.** `discrepancies_
-  log.csv` is written by `remux_video_buffer._handle_start` *after*
-  `_writer_semaphore.acquire()` succeeds, so a trigger the
+- [x] **C1 — log engine decisions separately from recordings** (2026-08-01).
+  `discrepancies_log.csv` is written by `remux_video_buffer._handle_start`
+  *after* `_writer_semaphore.acquire()` succeeds, so a trigger the
   `max_concurrent_writers=2` cap drops leaves no row. The cap was saturated
   11.6 % of the run's wall clock but accounts for **43 % of the 108 "misses"**
   (vs 13 % of non-missed GT events — a 3.3× enrichment that controls for
-  traffic clustering). **Recall is not fairly measurable from this artifact**,
-  so fix the logging before reading anything into the 59.9 %.
+  traffic clustering), which is why recall was not fairly measurable from that
+  artifact. The engine now appends `engine_decisions.csv` itself
+  (`_log_decision`, path injected by `system_runner`), with exact Unix event
+  windows; `__accuracy_report.py` auto-detects either format and takes
+  `--recording-log` to count decisions that never became clips. See
+  DESIGN_HISTORY 2026-08-01. **The 59.9 % still stands unrevised** — it was
+  measured on an artifact that predates this log, and only a fresh engine run
+  produces a decision log to re-score.
 - [ ] **C2 — re-score on a peak-hour run.** The 2026-07-31 sample is off-peak:
   max detector duty **32.8 %**, against the **80–94 %** that motivated this
   scope. The high-duty advisory never fired and the false-trigger storm
   condition is untested. Needs another ≥ 2 h engine run at peak (16:00–18:00)
   with a matching datZ pull — the datZ side of that window already exists, the
-  engine side does not.
+  engine side does not. That run now also produces the first real
+  `engine_decisions.csv`, so score it with
+  `__accuracy_report.py engine_decisions.csv <gt> --recording-log
+  discrepancies_log.csv`: the recall number will be the first one not
+  depressed by writer-cap drops, and the DELIVERY section says how big that
+  correction was.
 
 **Two rule-level findings recorded, deliberately not acted on:**
 
@@ -109,11 +124,12 @@ Design and code in [[SCOPE_sampling_floor.md]]; A and B are **done**, C is
   5.03–5.06 s against the 5.0 s threshold. Requiring `threshold + one sampling
   cycle` would remove every one, at some cost to recall.
 
-Suggested prompt (after C1, or with a peak-hour run in hand):
-> In the ntcip project, continue Item 9C of ROADMAP.md: land C1 (a decision log
-> distinct from the recording log) and re-score with
-> `__decode_datz.py` → `__make_gt_export.py` → `__accuracy_report.py`. Report
-> each pass/fail number against SCOPE_sampling_floor.md §"Item C".
+Suggested prompt (needs a peak-hour engine run + matching datZ in hand):
+> In the ntcip project, continue Item 9C of ROADMAP.md: run C2 and re-score
+> with `__decode_datz.py` → `__make_gt_export.py` → `__accuracy_report.py`,
+> passing the run's `engine_decisions.csv` (not `discrepancies_log.csv`) plus
+> `--recording-log`. Report each pass/fail number against
+> SCOPE_sampling_floor.md §"Item C".
 
 ---
 

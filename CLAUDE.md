@@ -139,8 +139,8 @@ disable Rules 1+2 for such pairs. Because the duty computation reads the same
 changes.
 
 The rule functions are pinned by `video_engine/tests/test_discrepancy_rules.py`
-(50 stdlib-`unittest` cases, incl. the stale-refire guard and the floor gate)
-— run it after any engine change:
+(59 stdlib-`unittest` cases, incl. the stale-refire guard, the floor gate, and
+the decision log) — run it after any engine change:
 `python3 video_engine/tests/test_discrepancy_rules.py`.
 Accuracy vs. an ATSPM ground-truth export is measured with
 `video_engine/tools/__accuracy_report.py` (correspondence-based
@@ -149,16 +149,42 @@ counts. Build the export with `__decode_datz.py` → `__make_gt_export.py`, and
 pass the *same* intersection config the engine ran with — the three
 intersection JSONs disagree on pairs, and scoring against the wrong set
 invents misses. Last measured 2026-07-31 (ROADMAP 9C): precision 89.4 %,
-adjusted recall 59.9 %.
+adjusted recall 59.9 % — but that recall was read off the *recording* log and
+is a floor; see the next paragraph.
 
-**`discrepancies_log.csv` is a log of *recordings*, not of engine decisions
-(load-bearing for anyone measuring recall).** `remux_video_buffer.
-_handle_start` calls `_log_discrepancy_to_csv` only after
-`_writer_semaphore.acquire()` succeeds, so a trigger dropped by the
-`max_concurrent_writers` cap leaves no row anywhere. Measured on the
-2026-07-31 run, the cap was saturated 11.6 % of wall clock yet accounts for
-43 % of the apparent misses. Recall read off this file is a floor, not an
-estimate; ROADMAP 9C1 tracks giving the engine its own decision log.
+**Two logs, and they mean different things (2026-08-01, ROADMAP 9C1 —
+load-bearing for anyone measuring accuracy).** Both land in `output_dir`:
+
+- **`engine_decisions.csv`** — written by `discrepancy_engine._log_decision`,
+  one row per trigger the engine emitted, appended right after the Hot Folder
+  rename succeeds and before any post-write state management. Nothing
+  downstream can suppress a row. **Score accuracy against this file.** The
+  path is injected by `system_runner` (`decision_log_path=output_dir /
+  "engine_decisions.csv"`); `None` disables it, which is the default for any
+  other construction path. Writing is best-effort — a failed append logs an
+  ERROR and is swallowed, because a full disk must never stop a recording.
+  Rows carry the underlying event's `event_start_ts` / `event_end_ts` as exact
+  Unix floats (either blank where the rule doesn't define it: a Rule 1 `start`
+  has no end yet, a `stop` has neither), so no consumer has to recover timing
+  from a 1-second local stamp plus a regex. `_DECISION_LOG_FIELDS` is
+  **append-only** — an existing log is never rewritten, so a new column
+  inserted mid-list desynchronizes a resumed file from its header. The event
+  window reaches `_fire_trigger` as one optional `event_window` tuple and is
+  deliberately **not** added to the trigger payload (the video buffer has no
+  use for it, and the Hot Folder schema is intentionally hard to grow).
+- **`discrepancies_log.csv`** — written by the video-buffer backend, one row
+  per clip actually *recorded*. `remux_video_buffer._handle_start` calls
+  `_log_discrepancy_to_csv` only after `_writer_semaphore.acquire()` succeeds,
+  so a trigger dropped by the `max_concurrent_writers` cap leaves no row.
+  Measured on the 2026-07-31 run, the cap was saturated 11.6 % of wall clock
+  yet accounted for 43 % of the apparent misses. **Recall read off this file
+  is a floor, not an estimate.**
+
+`__accuracy_report.py` auto-detects which format it was handed (on the
+presence of an `event_timestamp` column) and says so in its first line; the
+legacy path is preserved so the committed 2026-07-31 artifacts still score
+identically. Pass `--recording-log` alongside a decision log to get a DELIVERY
+section counting decisions that never became clips.
 
 ## Config abstraction
 

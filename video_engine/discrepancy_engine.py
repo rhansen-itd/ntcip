@@ -159,6 +159,32 @@ Three consequences, in order of how much they change behavior:
    (default **false**) fully disables Rules 1+2 for those pairs — a
    deployment decision, off until the owner opts in.
 
+Decision log vs. recording log
+──────────────────────────────
+The engine appends one row to its own **decision log** (``engine_decisions.
+csv``, path injected by ``system_runner``) for every trigger it successfully
+emits — *before* anything downstream decides whether that trigger becomes a
+clip.  This is deliberately **not** the same artifact as
+``discrepancies_log.csv``, which the video-buffer backend writes only after
+``_writer_semaphore.acquire()`` succeeds: a trigger dropped by the
+``max_concurrent_writers`` cap, by a low-disk abort, or by an unmatched camera
+leaves no row there at all.  Measuring engine recall against the recording log
+therefore charges the engine for the buffer's back-pressure (on the 2026-07-31
+run the cap was saturated 11.6 % of wall clock yet accounted for 43 % of the
+apparent misses).  Score accuracy against *this* log; diff the two to measure
+what the buffer dropped.
+
+Rows carry the underlying event's start/end as exact Unix floats
+(``event_start_ts`` / ``event_end_ts``) rather than leaving a consumer to
+recover them from a 1-second local timestamp and a regex over the description.
+Either may be blank where the rule does not define it — a Rule 1 ``start``
+knows when the disagreement began but not when it ends, and a ``stop`` row
+describes neither.
+
+Writing is best-effort and strictly downstream of trigger delivery: a failed
+append logs an ERROR and is otherwise swallowed, because a full or read-only
+disk must never stop a clip from being recorded.
+
 Thread-safety contract
 ──────────────────────
 ``on_detector_on`` / ``on_detector_off`` are called from the NTCIP monitor's
@@ -183,6 +209,7 @@ assignment, with a one-tick stale read tolerated by design.
 
 from __future__ import annotations
 
+import csv
 import json
 import logging
 import os
@@ -246,6 +273,35 @@ _DUTY_EVAL_INTERVAL_SEC = 5.0
 # Minimum spacing between high-duty WARNINGs for the same pair.  The condition
 # is a standing property of the channel, so this is a heartbeat, not an event.
 _HIGH_DUTY_WARN_INTERVAL_SEC = 600.0
+
+# ---------------------------------------------------------------------------
+# Decision log (ROADMAP 9C1 — see the module docstring)
+# ---------------------------------------------------------------------------
+
+# Column order of ``engine_decisions.csv``.  Append-only: readers key on the
+# header, and an existing file is never rewritten, so new columns go on the
+# END of this list or a resumed log's rows stop lining up with its header.
+# ``event_timestamp`` doubles as the format discriminator for consumers that
+# also accept the video-buffer's ``discrepancies_log.csv``.
+_DECISION_LOG_FIELDS = (
+    "event_timestamp",      # exact Unix float — when the engine decided
+    "local_timestamp",      # same instant, intersection-local, for humans
+    "intersection_id",
+    "trigger_id",
+    "action",               # "start" | "stop"
+    "rule",
+    "pair_key",
+    "det_a",
+    "det_b",
+    "det_a_type",
+    "det_b_type",
+    "event_start_ts",       # exact Unix start of the underlying event, or ""
+    "event_end_ts",         # exact Unix end of the underlying event, or ""
+    "disagreement_sec",
+    "max_duration_sec",
+    "cameras",              # ";"-joined camera IDs, as sent in the trigger
+    "description",
+)
 
 # ---------------------------------------------------------------------------
 # Timezone resolution helper
@@ -576,6 +632,11 @@ class DiscrepancyMonitor:
         max_duration_sec: Hard recording cap used as ``max_duration_sec``
             for Rule 1 triggers only (video-buffer safety net if the stop
             trigger is somehow missed).
+        decision_log_path: Optional CSV path receiving one row per emitted
+            trigger — the engine's own record of what it decided, kept
+            separate from the video buffer's record of what it managed to
+            record (see the module docstring).  ``None`` disables it.
+            Parent directories are created on first write.
 
     Sampling-floor configuration (read from the intersection config; see the
     module docstring for why these exist):
@@ -616,6 +677,7 @@ class DiscrepancyMonitor:
         pre_roll_sec: float = 10.0,
         post_roll_sec: float = 20.0,
         max_duration_sec: float = 300.0,
+        decision_log_path: Optional[str | Path] = None,
     ) -> None:
         self._intersection_id = intersection_id
         self._trigger_dir = Path(trigger_dir)
@@ -624,6 +686,9 @@ class DiscrepancyMonitor:
         self._pre_roll_sec = pre_roll_sec
         self._post_roll_sec = post_roll_sec
         self._max_duration_sec = max_duration_sec
+        self._decision_log_path = (
+            Path(decision_log_path) if decision_log_path else None
+        )
         self._log = logging.getLogger(f"{__name__}.{intersection_id}")
 
         self._trigger_dir.mkdir(parents=True, exist_ok=True)
@@ -1084,6 +1149,8 @@ class DiscrepancyMonitor:
                     action="start",
                     # No duration_override for Rule 1 — max_duration_sec is
                     # only a hard safety cap; the engine sends an explicit stop.
+                    # The disagreement is still open, so it has no end yet.
+                    event_window=(now - duration, None),
                 )
                 # Reset timer; active_trigger_id now set by _fire_trigger.
                 rt.disagreement_start = None
@@ -1133,6 +1200,7 @@ class DiscrepancyMonitor:
                     event_ts=now,
                     action="start",
                     duration_override=exact_duration,
+                    event_window=(pulse_on, pulse_off),
                 )
                 rt.orphan_watch_a = None
                 return
@@ -1165,6 +1233,7 @@ class DiscrepancyMonitor:
                     event_ts=now,
                     action="start",
                     duration_override=exact_duration,
+                    event_window=(pulse_on, pulse_off),
                 )
                 rt.orphan_watch_b = None
                 return
@@ -1317,6 +1386,7 @@ class DiscrepancyMonitor:
         action: str = "start",
         duration_override: Optional[float] = None,
         trigger_id_override: Optional[str] = None,
+        event_window: Optional[Tuple[Optional[float], Optional[float]]] = None,
     ) -> None:
         """Write an atomic trigger JSON file and update pair runtime state.
 
@@ -1357,6 +1427,14 @@ class DiscrepancyMonitor:
                 this hex string as ``trigger_id`` so the video-buffer layer can
                 correlate the stop with its start.  A fresh UUID is generated
                 when ``None`` (appropriate for ``"start"`` actions).
+            event_window: ``(start_ts, end_ts)`` of the *underlying detector
+                event* in Unix time, recorded verbatim in the decision log so a
+                consumer never has to reconstruct it from a local timestamp and
+                a description.  Either element may be ``None`` where the rule
+                does not define it (Rule 1's ``start`` knows the beginning of
+                the disagreement but not its end).  Not part of the trigger
+                payload — the video buffer has no use for it, and the Hot
+                Folder schema is deliberately hard to grow.
         """
         rt = self._pair_runtime[pair_key]
 
@@ -1446,6 +1524,12 @@ class DiscrepancyMonitor:
             },
         )
 
+        # Record the decision now that it has actually been handed off.  This
+        # is deliberately after the rename and before any state management:
+        # what the log claims the engine emitted is exactly what reached the
+        # Hot Folder, whether or not the buffer later finds a writer slot.
+        self._log_decision(payload, pair_key, event_window, local_tz)
+
         # ── Post-write state management ───────────────────────────────────
 
         if action == "stop":
@@ -1470,6 +1554,96 @@ class DiscrepancyMonitor:
             rt.cooldown_active    = True
             rt.triggered_at       = time.time()
             rt.disagreement_start = None
+
+    def _log_decision(
+        self,
+        payload: dict,
+        pair_key: str,
+        event_window: Optional[Tuple[Optional[float], Optional[float]]],
+        local_tz: "pytz.BaseTzInfo",
+    ) -> None:
+        """Append one row to the engine's decision log.
+
+        Called from :meth:`_fire_trigger` for every trigger that reached the
+        Hot Folder.  Unlike the video buffer's ``discrepancies_log.csv``, no
+        downstream condition can suppress a row here — that difference is the
+        whole point of the file (see the module docstring).
+
+        Best-effort by contract: any write failure is logged and swallowed, so
+        a full or read-only disk degrades measurement, never recording.  The
+        engine is the single writer (all call sites are on the evaluator
+        thread), so the append needs no lock.
+
+        Args:
+            payload: The trigger payload just written, used as the source of
+                truth for the fields the two artifacts share.
+            pair_key: Canonical pair key the decision was made for.
+            event_window: ``(start_ts, end_ts)`` of the underlying detector
+                event; either element may be ``None``, and ``None`` for the
+                whole tuple means the rule/action defines neither.
+            local_tz: Timezone already resolved by the caller, reused so the
+                row's human-readable stamp cannot disagree with the trigger
+                filename's.
+        """
+        if self._decision_log_path is None:
+            return
+
+        meta = payload.get("metadata", {})
+        event_ts = payload["event_timestamp"]
+        start_ts, end_ts = event_window if event_window else (None, None)
+
+        try:
+            local_stamp = datetime.fromtimestamp(
+                event_ts, tz=local_tz
+            ).strftime("%Y-%m-%d %H:%M:%S.%f")
+        except (ValueError, OSError, OverflowError):
+            local_stamp = ""
+
+        row = {
+            "event_timestamp":  f"{event_ts:.3f}",
+            "local_timestamp":  local_stamp,
+            "intersection_id":  payload["intersection_id"],
+            "trigger_id":       payload["trigger_id"],
+            "action":           payload["action"],
+            "rule":             meta.get("rule", ""),
+            "pair_key":         pair_key,
+            "det_a":            meta.get("det_a", ""),
+            "det_b":            meta.get("det_b", ""),
+            "det_a_type":       meta.get("det_a_type", ""),
+            "det_b_type":       meta.get("det_b_type", ""),
+            "event_start_ts":   "" if start_ts is None else f"{start_ts:.3f}",
+            "event_end_ts":     "" if end_ts is None else f"{end_ts:.3f}",
+            "disagreement_sec": meta.get("disagreement_sec", ""),
+            "max_duration_sec": payload["max_duration_sec"],
+            "cameras":          ";".join(payload.get("cameras", [])),
+            "description":      meta.get("description", ""),
+        }
+
+        try:
+            self._decision_log_path.parent.mkdir(parents=True, exist_ok=True)
+            # Header only for a genuinely new (or truncated) file — the log
+            # survives restarts and must not gain a header mid-stream.
+            write_header = (
+                not self._decision_log_path.exists()
+                or self._decision_log_path.stat().st_size == 0
+            )
+            with self._decision_log_path.open(
+                "a", newline="", encoding="utf-8"
+            ) as fh:
+                writer = csv.DictWriter(fh, fieldnames=list(_DECISION_LOG_FIELDS))
+                if write_header:
+                    writer.writeheader()
+                writer.writerow(row)
+        except OSError as exc:
+            self._log.error(
+                "Failed to append to the engine decision log",
+                extra={
+                    "intersection_id": self._intersection_id,
+                    "trigger_id":      payload["trigger_id"],
+                    "path":            str(self._decision_log_path),
+                    "error":           str(exc),
+                },
+            )
 
     # ------------------------------------------------------------------
     # Initialisation helpers
