@@ -46,25 +46,24 @@ subscribes to `ntcip_monitor` detector events in-process (via `system_runner.py`
 which wires both packages together), but the moment a discrepancy is confirmed,
 the *only* way it reaches the video buffer is by writing a trigger file to a
 spool directory (the "Hot Folder"). Never add a direct import from
-`discrepancy_engine.py`/`video_buffer.py` into `ntcip_monitor`, or vice versa —
+`discrepancy_engine.py`/`remux_video_buffer.py` into `ntcip_monitor`, or vice versa —
 this decoupling is intentional so the two halves can be deployed, tested, and
 swapped independently (e.g., a future non-NTCIP discrepancy source should be
 able to drive the same video engine with zero video_engine changes).
 
 ### Hot Folder pattern (the bridge)
 
-Implemented in `discrepancy_engine.py` (writer) and both video-buffer backends
-as readers (`video_buffer.py` and `remux_video_buffer.py`, identical
-`Path.glob("trigger_*.json")` oldest-first poll loop).
+Implemented in `discrepancy_engine.py` (writer) and `remux_video_buffer.py`
+(reader — a `Path.glob("trigger_*.json")` oldest-first poll loop).
 
 - Filename: `trigger_{iso8601}_{uuid4_short}.json`
 - Writer: write full JSON to `*.tmp`, then atomic `os.rename()` to `*.json`.
   Never write the final filename directly — a reader could see a partial file.
 - Reader: poll the directory (current interval ~2–5s region, see
-  `video_buffer.py` poll loop), sorted oldest-first, never with a sleep inside
-  the frame-capture loop itself.
+  `remux_video_buffer.py` poll loop), sorted oldest-first, never with a sleep
+  inside the frame-capture loop itself.
 
-Trigger file schema (enforced in `video_buffer.py`; the canonical, field-by-field
+Trigger file schema (enforced in `remux_video_buffer.py`; the canonical, field-by-field
 reference is `config_manager.py`'s module docstring — a real section as of
 2026-07-31, previously only claimed to exist):
 
@@ -84,7 +83,7 @@ reference is `config_manager.py`'s module docstring — a real section as of
 }
 ```
 
-**Single-camera assumption (both backends, load-bearing).** `_handle_start`
+**Single-camera assumption (load-bearing).** `_handle_start`
 resolves `cameras` against the configured streams and records only
 `target_cams[0]` — one writer per trigger. A multi-camera trigger logs a WARNING
 with `cameras_requested`/`cameras_recorded` and is otherwise honored for the
@@ -94,8 +93,8 @@ Note a pair whose two detectors name different `camera_id`s does produce a
 two-camera trigger, so the warning is reachable in real config.
 
 Don't add fields casually — both sides (writer in `discrepancy_engine.py`,
-reader in `video_buffer.py`) need to agree, and `config_manager.py`'s docstring
-is the canonical schema reference.
+reader in `remux_video_buffer.py`) need to agree, and `config_manager.py`'s
+docstring is the canonical schema reference.
 
 ### Discrepancy rules (the "brain")
 
@@ -198,39 +197,38 @@ deployment path with a dict lookup that bypasses the abstraction.
 
 ## Hardware constraints (edge = J1900-class CPU)
 
-There are now **two video-buffer backends**, selected by the intersection
-config's `video_backend` key (thin import switch in
-`SystemRunner._build_video_manager`; both expose the same `VideoBufferConfig` /
-`VideoBufferManager` surface):
+There is **one video-buffer backend**: `video_engine/remux_video_buffer.py`
+(PyAV stream-copy — demux to encoded packets, RAM-bounded time-windowed packet
+pre-roll, copy to disk using the source's own timestamps, no decode/encode).
+It meets every constraint below.
 
-- **`remux` (default, edge)** — `video_engine/remux_video_buffer.py`. PyAV
-  stream-copy: demux to encoded packets, RAM-bounded time-windowed packet
-  pre-roll, copy to disk using the source's own timestamps (no decode/encode).
-  Meets all the constraints below, including the previously-violated one.
-- **`full` (central/server)** — `video_engine/video_buffer.py`. The legacy CFR
-  `cv2.VideoWriter` path; RAM-unbounded (see below), viable only on ample-RAM
-  hosts.
+The `full` CFR `cv2.VideoWriter` backend (`video_engine/video_buffer.py`) was
+**retired 2026-08-01** (ROADMAP Item 6) — no deployment ever selected it, it
+lost to `remux` on all three edge constraints, and its `DiskWriter._write_loop`
+collected every raw frame of a clip into an in-memory list before writing (to
+compute an exact FPS from total frames / total elapsed), making it
+RAM-unbounded: tens of GB for a multi-minute 1080p clip. `_build_video_manager`
+still *reads* `video_backend` purely to WARN that a stale value is being
+ignored; it is no longer a switch, and there is nothing to switch to. **If a
+central decoded/re-encode need ever appears, build it as a new RAM-bounded
+branch** (`ClipRemuxer`'s lifecycle is deliberately separable from its `_mux`
+write step for exactly this) — do not restore the CFR file from history.
 
 Constraint status:
 
-- **Zero-drift capture**: the stream-read loop has no `time.sleep()`. ✅ (both;
-  `remux` iterates `container.demux()` which blocks on I/O naturally).
-- **RAM pre-roll**: `collections.deque`. ✅ `remux` holds *encoded packets*
-  bounded by a **time window** (`pre_roll_sec + keyframe_margin_sec`),
-  independent of clip length; `full` holds decoded frames sized to the window.
+- **Zero-drift capture**: the stream-read loop has no `time.sleep()` — it
+  iterates `container.demux()`, which blocks on I/O naturally. ✅
+- **RAM pre-roll**: `collections.deque` of *encoded packets* bounded by a
+  **time window** (`pre_roll_sec + keyframe_margin_sec`), independent of clip
+  length. ✅
 - **Concurrent-recording cap**: `threading.Semaphore(max_concurrent_writers)`,
-  default 2. ✅ (both).
+  default 2. ✅
 - **Disk check**: free space checked before a recording starts, aborts + logs
-  below `min_free_disk_mb`. ✅ (both).
-- **"Dump pre-roll, then route live frames directly to disk"**:
-  - `remux`: ✅ **satisfied.** `ClipRemuxer` muxes packets to disk incrementally
-    (pre-roll then live), never accumulating the clip in RAM. Verified: RSS flat
-    (~1 MB growth) across a genuine 240s clip in `__replay_verify.py`.
-  - `full`: ❌ **still violated.** `DiskWriter._write_loop` in `video_buffer.py`
-    collects every raw frame of the *entire* clip into an in-memory list and only
-    writes on stop (to compute an exact FPS from total frames / total elapsed
-    time) — RAM-unbounded, a multi-minute 1080p clip is tens of GB. This is why
-    `full` is central/server-only, never an edge default.
+  below `min_free_disk_mb`. ✅
+- **"Dump pre-roll, then route live frames directly to disk"**: ✅ `ClipRemuxer`
+  muxes packets to disk incrementally (pre-roll then live), never accumulating
+  the clip in RAM. Verified: RSS flat (~1 MB growth) across a genuine 240s clip
+  in `__replay_verify.py`. (This was the constraint the CFR path violated.)
 
 **Manager thread-safety in `remux` (2026-07-31, ROADMAP 8 — load-bearing).**
 `VideoBufferManager`'s writer bookkeeping (`_active_writers`, `_stop_timers`,
@@ -242,8 +240,7 @@ acquire, `buf.subscribe`/`unsubscribe`, or any I/O (`_auto_stop` re-enters
 `_stop_trigger` from a Timer thread, so a join under the lock deadlocks the reap
 path). `_stop_timers` maps `trigger_id -> (generation, timer)`; the generation
 lets a timer whose `cancel()` lost a race against `extend` detect that it has
-been superseded and do nothing. The `full` backend has no Timer-driven
-bookkeeping and is unchanged. Tests:
+been superseded and do nothing. Tests:
 `python3 video_engine/tests/test_remux_manager.py` (22 stubbed-remuxer cases).
 
 Clip length in `remux` is accurate **by construction** (= source PTS span = true
@@ -444,7 +441,7 @@ deliberate; preserve it when adding cases.
 ## Style conventions already in use
 
 - **Logging**: structured JSON-lines via a shared `_JsonFormatter` pattern
-  (see `video_buffer.py`, `system_runner.py`). Use `logging`, not `print()`,
+  (see `remux_video_buffer.py`, `system_runner.py`). Use `logging`, not `print()`,
   for anything in the monitor/discrepancy/buffer business logic. (`print()` is
   fine in the standalone manual tools under `video_engine/tools/` like
   `record_clip.py`, `drop_trigger.py`, `simulate_playback.py` — those are debug
@@ -463,14 +460,14 @@ As of this writing:
   packages have been removed (none were imported anywhere). The superseded
   drafts that were never committed are preserved at commit `1f48bfa` if ever
   needed again; the rest are recoverable from their normal file history.
-- `video_engine/_edge_video_buffer.py` and `video_engine/_old_video_buffer.py`
-  are **superseded** as of the 2026-07-14 remux decision (ROADMAP #1): both are
-  interim RAM-bounded CFR attempts, and the remux backend
-  (`remux_video_buffer.py`) replaces the whole CFR-for-edge approach, making the
-  old "which one was verified" provenance question moot for production. They're
-  still on disk (nothing imports them); with Item 1 now complete and verified
-  (2026-07-15), retiring them is ROADMAP #5 — don't wire either into
-  `system_runner.py`.
+- **All three CFR video buffers are gone** (deleted 2026-08-01, ROADMAP #5 and
+  #6): `_edge_video_buffer.py` and `_old_video_buffer.py` (interim RAM-bounded
+  CFR attempts, superseded by the 2026-07-14 remux decision and imported by
+  nothing), and `video_buffer.py` (the `full` central/server backend — see the
+  hardware-constraints section). All three are recoverable from git history;
+  they last exist at commit `0c2e11b`. `remux_video_buffer.py` is the only
+  buffer. Don't restore any of them — a future decoded backend is a new
+  RAM-bounded branch, not a revival.
 - `ntcip_monitor/monitors/ring_monitor.py` — new, not yet committed to git.
 - `tools/` (repo root) is **not** clutter and is distinct from
   `video_engine/tools/`: it holds the deploy-time scripts described above

@@ -170,9 +170,10 @@ detectors mapping (detector_id → DetectorConfig)
 Hot Folder trigger schema (canonical reference)
 ────────────────────────────────────────────────────────────────────────────
 
-Written by ``discrepancy_engine.py`` and consumed by both video-buffer backends
-(``remux_video_buffer.py``, ``video_buffer.py``).  Written to ``*.tmp`` and
-atomically renamed to ``trigger_{iso8601}_{uuid4_short}.json``.
+Written by ``discrepancy_engine.py`` and consumed by the video buffer
+(``remux_video_buffer.py`` — the only backend since ROADMAP Item 6 retired the
+CFR ``full`` one on 2026-08-01).  Written to ``*.tmp`` and atomically renamed
+to ``trigger_{iso8601}_{uuid4_short}.json``.
 
 .. code-block:: json
 
@@ -197,7 +198,7 @@ atomically renamed to ``trigger_{iso8601}_{uuid4_short}.json``.
 ``reason``              str   — Trigger cause.  ``discrepancy_engine.py``
                                  currently always writes
                                  ``"detector_disagreement"``, which is also the
-                                 value both backends key on when appending to
+                                 value the buffer keys on when appending to
                                  ``discrepancies_log.csv``; ``"detector_lag"`` /
                                  ``"no_actuation"`` / ``"phase_mismatch"`` are
                                  reserved for future sources.
@@ -205,7 +206,7 @@ atomically renamed to ``trigger_{iso8601}_{uuid4_short}.json``.
 ``timezone``            str   — IANA name copied from the intersection config;
                                  used only to render local times in the CSV log.
 ``cameras``             list  — Camera IDs, or ``["all"]``.  **Single-camera
-                                 assumption:** both backends resolve this list
+                                 assumption:** the buffer resolves this list
                                  against the configured streams and record only
                                  the **first** match, logging a WARNING with
                                  ``cameras_requested`` / ``cameras_recorded``

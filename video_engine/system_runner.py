@@ -63,9 +63,9 @@ from typing import Any, Dict, Optional
 # Config layer (Session 2)
 from config_manager import JsonFileConfigProvider, ConfigProviderError
 
-# Video buffer (Session 1). The concrete backend (edge "remux" vs. central
-# "full") is selected at runtime in SystemRunner.__init__ from the intersection
-# config's "video_backend" key, so the import is deferred to _build_video_manager.
+# Video buffer (Session 1). remux_video_buffer is the only backend; its import
+# stays deferred to _build_video_manager so importing this module doesn't pull
+# in PyAV (the CFR "full" backend was retired 2026-08-01, ROADMAP Item 6).
 
 # Discrepancy engine (Session 3)
 from discrepancy_engine import DiscrepancyMonitor
@@ -489,19 +489,16 @@ class SystemRunner:
         max_concurrent_writers: int,
         min_free_disk_mb: float,
     ) -> Any:
-        """Build the configured video-buffer backend.
+        """Build the video-buffer backend.
 
-        The intersection config's ``"video_backend"`` key selects the concrete
-        implementation (both expose the same ``VideoBufferConfig`` /
-        ``VideoBufferManager`` surface, so this is a thin import switch, not a
-        rewrite):
-
-        - ``"remux"`` (default) — the PyAV stream-copy edge backend
-          (``remux_video_buffer``): accurate clip length by construction,
-          near-zero CPU, RAM bounded by a time window not clip length.
-        - ``"full"`` — the legacy CFR ``cv2.VideoWriter`` backend
-          (``video_buffer``): buffers whole clips in RAM for exact-FPS output;
-          viable only on an ample-RAM central/server host, not a J1900 edge box.
+        ``remux_video_buffer`` (PyAV stream-copy) is the only backend: accurate
+        clip length by construction, near-zero CPU, RAM bounded by a time
+        window rather than by clip length. The legacy ``"full"`` CFR
+        ``cv2.VideoWriter`` backend was retired 2026-08-01 (ROADMAP Item 6) —
+        it was unselected by every deployment, strictly worse on all three edge
+        constraints, and buffered a whole clip in RAM. A config still carrying
+        ``"video_backend"`` is honored as remux and warned about rather than
+        rejected, so a stale deployment config keeps recording.
 
         Args:
             stream_map: Mapping of ``camera_id`` -> stream URL.
@@ -513,28 +510,10 @@ class SystemRunner:
             A constructed (not yet started) video buffer manager.
         """
         backend = str(self._intersection_cfg.get("video_backend", "remux")).lower()
-
-        if backend == "full":
-            from video_buffer import VideoBufferConfig, VideoBufferManager
-
-            log.info(
-                "Using 'full' (CFR) video backend",
-                extra={"intersection_id": self._intersection_id},
-            )
-            video_cfg = VideoBufferConfig(
-                streams=stream_map,
-                trigger_dir=str(self._trigger_dir),
-                output_dir=str(self._output_dir),
-                pre_roll_sec=pre_roll_sec,
-                poll_interval_sec=2.0,
-                max_concurrent_writers=max_concurrent_writers,
-                min_free_disk_mb=min_free_disk_mb,
-            )
-            return VideoBufferManager(video_cfg)
-
         if backend != "remux":
             log.warning(
-                "Unknown video_backend — defaulting to 'remux'",
+                "Ignoring 'video_backend' — 'remux' is the only backend "
+                "(the CFR 'full' backend was retired; see ROADMAP Item 6)",
                 extra={
                     "intersection_id": self._intersection_id,
                     "video_backend": backend,

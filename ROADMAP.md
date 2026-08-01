@@ -39,12 +39,11 @@ highest used so far.
 > that motivated the scope, so the false-trigger storm condition is still
 > untested.
 >
-> **Ready to start now, no hardware:** **5** (Sonnet — mechanical, precedents
-> set), **6** (Opus, fold into 5), **2**, **3**, **10**, and **4e / 4h**
+> **Ready to start now, no hardware:** **2**, **3**, **10**, and **4e / 4h**
 > (unblocked by 4d).
 >
-> **Suggested order:** 5 → 6, with the owner's peak-hour run (9C2) slotted
-> in whenever the controller is available.
+> **Suggested order:** **2** or **3** (both self-contained), with the owner's
+> peak-hour run (9C2) slotted in whenever the controller is available.
 >
 > Items **8** (remux manager thread-safety + the single-camera assumption) and
 > **4f** (web UI: loopback default + shared-secret control endpoints) landed
@@ -53,7 +52,9 @@ highest used so far.
 > over a still image *or* a live MJPEG feed, and `tools/` holds the
 > deploy-time config sync and calibration-still grabber.  **9C1** (the engine
 > decision log) landed 2026-08-01, so the next run's recall is measurable for
-> the first time, and **4b** (unused-import sweep) closed the same day.
+> the first time; **4b** (unused-import sweep) and **5 + 6** (all three CFR
+> video buffers deleted — `remux_video_buffer.py` is now the only backend)
+> closed the same day.
 >
 > Model routing follows the Fable-era principle: the *thinking* for the
 > remaining items is pre-done in the item text, so the Target line says who
@@ -270,7 +271,11 @@ Subjects: `DetectorMonitor`, `OutputMonitor`,
 `PhaseMonitor`, `ControllerControl`, `NTCIPMonitorApp`, `WebUI`,
 `DiscrepancyEngine.__init__` error handling, `RoutineScheduler`,
 `ConfigProvider`/`JsonFileConfigProvider`/`SqliteCentralConfigProvider`,
-`VideoBufferServer`.
+`VideoBufferServer`. **Note:** `VideoBufferServer` names no class in this repo
+and never did (checked 2026-08-01 against the CFR files Items 5/6 deleted, at
+commit `0c2e11b`) — treat it as a stale finding and cover
+`remux_video_buffer.VideoBufferManager` instead, which
+`test_remux_manager.py` already partly does.
 
 ### 4f. Harden the web UI — **done 2026-07-31**
 
@@ -310,61 +315,6 @@ segmented network, not a code change.
   valid nitpick, low value: it's a top-level orchestrator constructor called
   from exactly one place (`main()`) with sensible defaults. Skip unless doing
   a broader `system_runner.py` pass anyway.
-
----
-
-## 5 — Retire the superseded CFR buffers (Target: Sonnet, mechanical)
-
-Item 1 (remux backend) is complete and real-stream verified (see
-DESIGN_HISTORY.md 2026-07-15), which unblocks the follow-up cleanup the plan
-deferred: `video_engine/_old_video_buffer.py` and
-`video_engine/_edge_video_buffer.py` are superseded interim CFR attempts,
-imported by nothing. Move them to a `legacy/` folder or delete them (they're
-recoverable from git history either way), and update CLAUDE.md's "Known repo
-clutter" note when done. Do **not** touch `video_buffer.py` — it remains the
-supported `full` (central/server) backend.
-
-Suggested prompt:
-> [Sonnet] In the ntcip project, do Item 5 of ROADMAP.md: remove (or move to
-> `video_engine/legacy/`) the superseded `_old_video_buffer.py` and
-> `_edge_video_buffer.py`, confirm nothing imports them, update CLAUDE.md's
-> clutter note, and add a DESIGN_HISTORY.md one-liner.
-
----
-
-## 6 — Retire the `full` (CFR) video backend (Target: Opus)
-
-`video_engine/video_buffer.py` is the legacy `full`/CFR `cv2.VideoWriter`
-backend. As of 2026-07-15 it is **unused** (no intersection config sets
-`video_backend`, so every deployment defaults to `remux`), **strictly worse**
-than `remux` on the three edge constraints (clip-length accuracy, CPU, RAM), and
-carries the documented **RAM-unboundedness bug** (`DiskWriter._write_loop`
-buffers a whole clip in memory — tens of GB for a multi-minute 1080p clip).
-Nothing consumes decoded pixels today, and the flagged *future* decoded path is
-explicitly a new bounded branch, not this file — so `full` is not the seam for
-it either.
-
-Decide and implement one of:
-- **(a, recommended)** delete `video_buffer.py` and collapse
-  `system_runner._build_video_manager` to remux-only (drop the backend switch
-  and the `full` config docs); or
-- **(b)** if a central re-encode/decoded need turns out to be real, keep the
-  *switch* but rebuild that need as a **RAM-bounded decoded** backend — do not
-  ship the CFR one.
-
-Coordinate with **Item 5**: that item removes `_old_`/`_edge_` and currently says
-"do not touch `video_buffer.py` — it remains the supported `full` backend"; this
-item reopens exactly that decision (it's the last CFR file). Do Item 5 first or
-fold both into one sweep. On completion, update CLAUDE.md's hardware-constraints
-/ "two backends" section and the `config_manager.py` config docs.
-
-Suggested prompt:
-> [Opus] In the ntcip project, do Item 6 of ROADMAP.md: retire the `full` (CFR)
-> video backend. Confirm nothing selects it, then remove `video_buffer.py` and
-> simplify `system_runner._build_video_manager` to remux-only (or, if a central
-> decoded need is confirmed, replace it with a RAM-bounded decoded backend — not
-> the CFR one). Update CLAUDE.md's backends section and `config_manager.py` docs,
-> and land a DESIGN_HISTORY.md entry.
 
 ---
 

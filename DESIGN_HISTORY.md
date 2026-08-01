@@ -1358,3 +1358,64 @@ decided. Entries after this point are logged as the decision lands.
   three false positives (`from __future__ import annotations` in two
   `video_engine` files, the `__init__.py` re-export idiom, the "uncached
   config reads" finding) were not touched, as that item directs.
+
+- 2026-08-01 — **Items 5 + 6 folded into one sweep: every CFR video buffer is
+  deleted.** ROADMAP 6 explicitly said to do 5 first or fold both, because 5's
+  standing instruction ("do not touch `video_buffer.py` — it remains the
+  supported `full` backend") is exactly what 6 reopens. Doing them separately
+  would have meant writing that instruction into CLAUDE.md's clutter note and
+  deleting it hours later. Three files gone —
+  `_old_video_buffer.py` (31 KB), `_edge_video_buffer.py` (42 KB), and
+  `video_buffer.py` (547 lines) — leaving `remux_video_buffer.py` as the only
+  backend. All three are recoverable from git history at commit `0c2e11b`,
+  which is recorded in CLAUDE.md rather than left for someone to bisect for.
+
+  **Deleted, not moved to `legacy/`.** ROADMAP 5 offered either. A `legacy/`
+  folder inside `video_engine/` renames the clutter rather than removing it,
+  and adds a directory that looks importable; the repo already set the opposite
+  precedent when `video_engine/archive/` and the `* - Copy.py` backups were
+  deleted outright on the same reasoning. Git history is the archive.
+
+  **Item 6 took option (a), on evidence rather than on the recommendation.**
+  Checked before deleting: no config anywhere sets `video_backend` (all four
+  intersection/config JSONs, plus the two untracked ones — the only repo hit is
+  a stale permission string in `.claude/settings.local.json`); nothing imports
+  `video_buffer` except the deferred switch itself; and all four buffer-using
+  tools (`record_clip`, `__replay_verify`, `__probe_adversarial`,
+  `simulate_playback`) import `remux_video_buffer`. Option (b) — keep the switch
+  for a central decoded/re-encode need — was rejected because that need is not
+  real today: nothing consumes decoded pixels, and the one live decoder in the
+  repo is the overlay's (`ntcip_monitor/ui/overlay/source.py`), which is in the
+  *other* package and would not be served by a `video_engine` backend. The seam
+  survives anyway: `ClipRemuxer`'s lifecycle is deliberately separable from its
+  `_mux` write step, so a future bounded `ClipEncoder` swaps the write step
+  rather than reviving CFR.
+
+  **`_build_video_manager` still reads `video_backend`, but only to warn.** The
+  obvious collapse deletes the key entirely, which would make a deployed
+  `"video_backend": "full"` silently produce remux. An operator who set that
+  value chose it for a reason (exact-FPS output) and should be told it is gone,
+  so the key is read, ignored, and WARNed about, and recording continues. That
+  is a one-branch remnant, not a switch — there is nothing to switch to.
+
+  **Doc surgery was the bulk of the work,** because `video_buffer.py` was cited
+  as the *normative* reference in four places it had no business being the
+  reference for: the Hot Folder reader, the trigger-schema enforcer, the
+  `_JsonFormatter` logging exemplar, and the module named in the
+  "never import across packages" rule. All four now name
+  `remux_video_buffer.py`. CLAUDE.md's "two backends" section became one
+  backend with the RAM-unboundedness bug rewritten as the *reason for the
+  retirement* rather than a live caveat; `config_manager.py`'s canonical schema
+  docstring lost its "both backends" phrasing; and
+  `VIDEO_BUFFER_REMUX_PLAN.md` got a dated historical note instead of an edit,
+  since a completed plan document should keep describing the state it was
+  written against.
+
+  **One stale name found in passing, not acted on:** ROADMAP 4e's test backlog
+  lists `VideoBufferServer`, a class that exists in no file and never existed in
+  the two deleted drafts either (checked at `0c2e11b`). Left for 4e to resolve,
+  since that item owns the list. Three generic "the `video_buffer` layer/package"
+  phrases in `routine_scheduler.py` and `discrepancy_engine.py` docstrings were
+  also left alone — they name the video-buffering half of the system, not the
+  module, and editing the discrepancy engine for a docstring word is not worth
+  the diff. All 234 tests green throughout.

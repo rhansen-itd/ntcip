@@ -1,9 +1,10 @@
 """
 remux_video_buffer.py — Edge-viable video buffer via PyAV remux / stream-copy.
 
-This is the **edge default** backend (ROADMAP Item 1). It replaces the
-constant-frame-rate ``cv2.VideoWriter`` path in ``video_buffer.py`` (kept as the
-``full`` central/server backend) with a *remux* path built on PyAV:
+This is the **only** video backend (ROADMAP Item 1; ROADMAP Item 6 retired the
+alternative on 2026-08-01). It replaced the constant-frame-rate
+``cv2.VideoWriter`` path in ``video_buffer.py`` — since deleted, recoverable
+from git history — with a *remux* path built on PyAV:
 
     demux the RTSP/HTTP stream into **encoded packets**, keep a RAM-bounded
     rolling pre-roll of packets, and on a trigger copy packets straight to disk
@@ -62,9 +63,10 @@ uses (``subscribe`` / ``on_packet`` / ``prime_preroll`` / ``finish`` / ``join`` 
 start/stop/extend, semaphore, disk check, finalize) is kept separable from its
 *write step* (``_mux``), so a future ``ClipEncoder`` (decode -> process -> encode)
 can reuse the lifecycle and swap only the write step. Selecting decoded would be
-a *third* ``backend`` value later — out of scope now.
+a *second* ``backend`` value later — out of scope now, and per ROADMAP Item 6 it
+must be RAM-bounded, never a revival of the CFR path.
 
-Contracts preserved from ``video_buffer.py`` (do not break): the Hot Folder
+Contracts inherited from ``video_buffer.py`` (do not break): the Hot Folder
 trigger schema and ``start``/``stop``/``extend`` actions, oldest-first polling
 with no sleep in the capture loop, ``Semaphore(max_concurrent_writers)``, the
 disk-free check, and structured JSON-lines logging.
@@ -115,8 +117,9 @@ def _resolve_pytz(tz_name: str, fallback_log: logging.Logger) -> pytz.BaseTzInfo
 class VideoBufferConfig:
     """Configuration for the remux video buffer.
 
-    Mirrors ``video_buffer.VideoBufferConfig`` so ``system_runner.py`` can select
-    either backend by config, and adds the remux-specific knobs.
+    Originally mirrored ``video_buffer.VideoBufferConfig`` so ``system_runner.py``
+    could select either backend by config; that backend is gone (ROADMAP Item 6)
+    and this is now the whole surface, remux-specific knobs included.
 
     Args:
         streams: Mapping of ``camera_id`` -> stream URL (RTSP/HTTP) or, for the
@@ -127,8 +130,8 @@ class VideoBufferConfig:
         poll_interval_sec: Trigger-directory scan interval.
         max_concurrent_writers: Hard cap on simultaneous ``ClipRemuxer`` threads.
         min_free_disk_mb: Abort a clip start below this free-space threshold.
-        backend: ``"remux"`` (this module) — recorded for provenance; the actual
-            backend selection happens in ``system_runner.py``.
+        backend: ``"remux"`` (this module) — recorded for provenance only; there
+            is no longer a second value to select between.
         keyframe_margin_sec: Extra seconds retained behind the pre-roll horizon so
             a keyframe is always available before the window start. Default ~2x a
             typical GOP.
@@ -1054,7 +1057,7 @@ class VideoBufferManager:
     def _handle_extend(self, trigger: dict) -> None:
         """Push the max-duration deadline out for an in-progress clip.
 
-        Unlike the ``full`` backend (where ``extend`` currently behaves as
+        Unlike the retired ``full`` backend (where ``extend`` behaved as
         ``stop``), the remux backend honors ``extend`` per the plan: it reschedules
         the auto-stop timer for another ``max_duration_sec`` from now.
         """
@@ -1129,7 +1132,7 @@ class VideoBufferManager:
             buf.unsubscribe(remuxer)
         remuxer.finish()
 
-    # -- CSV discrepancy log (parity with the full backend) ----------------
+    # -- CSV discrepancy log (inherited from the retired full backend) ------
 
     def _log_discrepancy_to_csv(self, trigger: dict, video_path: Path) -> None:
         """Append a row to ``discrepancies_log.csv`` for detector-disagreement triggers."""

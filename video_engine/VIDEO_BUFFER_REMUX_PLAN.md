@@ -11,6 +11,13 @@ real-stream Fable verification (§8) passed 2026-07-15 against the owner's
 capture (`video_engine/tests/fixtures/sample.ts`) — all standard checks and
 adversarial probes green, no code defects; outcome logged in DESIGN_HISTORY.md.
 
+> **Historical note (2026-08-01).** All three CFR files this plan compares
+> against — `video_buffer.py`, `_edge_video_buffer.py`, `_old_video_buffer.py` —
+> were deleted by ROADMAP Items 5 and 6; `remux_video_buffer.py` is the only
+> backend. References to them below describe the state at planning time and are
+> left intact as a record. They are recoverable from git history at commit
+> `0c2e11b`.
+
 ---
 
 ## 1. Decision
