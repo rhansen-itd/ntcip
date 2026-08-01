@@ -46,6 +46,20 @@ Everything left over is a **true miss** (candidate engine defect), and every
 engine trigger without a ground-truth counterpart is a **candidate false
 positive**.
 
+**Check for controller clock skew before believing a bad report.** The two
+sides are stamped by different clocks — the engine by the monitoring machine
+(`time.time()`), the ground truth by the Econolite controller — and nothing
+keeps them in sync. A skew larger than ``--tolerance`` makes almost every
+trigger miss its counterpart, so precision collapses toward zero while the
+per-pair table shows triggers and GT events in healthy numbers on the *same*
+pairs. The tell is in the candidate-FP list: every entry reports nearly the
+**same** ``nearest GT Δ``. Measure the skew by comparing engine-observed
+detector edges (``engine_suppressions.csv`` / rule-2 rows of
+``engine_decisions.csv`` carry exact Unix ON/OFF windows) against the
+controller's 82/81 codes, then pass ``--clock-offset``. Measured +4.49 s on
+the 2026-08-01 run and ~0 s on 2026-07-31 — it is not a constant of the
+deployment, so re-measure per run.
+
 Engine-row timing is reconstructed without trusting the 1-second
 ``Local_Timestamp`` column where possible: rule 2 descriptions embed the exact
 Unix observation window (pulse start/end are recovered from it); rule 1 rows
@@ -291,13 +305,25 @@ def _annotate_recorded(triggers: List[EngineTrigger], recording_csv: str) -> int
     return unrecorded
 
 
-def _parse_gt_csv(path: str) -> List[GTEvent]:
+def _parse_gt_csv(path: str, clock_offset: float = 0.0) -> List[GTEvent]:
+    """Read an ATSPM ground-truth export, optionally correcting clock skew.
+
+    Args:
+        path: Path to the ground-truth anomalies CSV.
+        clock_offset: Seconds the *controller* clock runs ahead of the
+            monitoring machine's, subtracted from every ground-truth
+            timestamp so both sides share the engine's clock. ``0.0``
+            (the default) compares the two logs as written.
+
+    Returns:
+        Ground-truth events sorted by start time.
+    """
     events: List[GTEvent] = []
     with open(path, newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
             events.append(GTEvent(
-                start=float(row["start_timestamp"]),
-                end=float(row["end_timestamp"]),
+                start=float(row["start_timestamp"]) - clock_offset,
+                end=float(row["end_timestamp"]) - clock_offset,
                 duration=float(row["duration_sec"]),
                 gt_type=row["anomaly_type"].strip(),
                 pair=_pair_key(row["det_a_id"], row["det_b_id"]),
@@ -422,6 +448,13 @@ def main() -> int:
                          "(≈ poll interval + SNMP lag + clock skew)")
     ap.add_argument("--poll", type=float, default=0.2,
                     help="NTCIP poll interval, seconds (aliasing model)")
+    ap.add_argument("--clock-offset", type=float, default=0.0,
+                    help="seconds the CONTROLLER clock runs ahead of the "
+                         "monitoring machine's; subtracted from every GT "
+                         "timestamp. Measure it before trusting a report — a "
+                         "skew beyond --tolerance collapses precision to near "
+                         "zero and every FP shows the same nearest-GT delta "
+                         "(see the module docstring)")
     ap.add_argument("--cooldown", type=float, default=60.0,
                     help="engine per-pair cooldown, seconds")
     ap.add_argument("--post-roll", type=float, default=20.0,
@@ -436,7 +469,10 @@ def main() -> int:
 
     tz = pytz.timezone(args.tz)
     all_triggers, fmt = _parse_engine_csv(args.engine_csv, args.tz)
-    gt_events = _parse_gt_csv(args.gt_csv)
+    gt_events = _parse_gt_csv(args.gt_csv, args.clock_offset)
+    if args.clock_offset:
+        print(f"Clock-skew correction: ground truth shifted "
+              f"{-args.clock_offset:+.2f}s onto the engine's clock.")
     if fmt == "decision":
         print("Engine log format: engine_decisions.csv (decisions; exact "
               "Unix event windows).")

@@ -1537,3 +1537,111 @@ decided. Entries after this point are logged as the decision lands.
   run with no baseline for either. Running C2 first also *measures* the
   duplicate population (same-group rows in the decision log within N seconds),
   so the dedup window comes from data rather than a guess.
+
+- 2026-08-01 — **ROADMAP 9C2 run and scored: Item 9C passes all four criteria,
+  and controller clock skew nearly hid it.** The owner delivered a 3.3 h engine
+  run (13:27–16:47, 523 `start` decisions) plus a matching 15-file datZ pull.
+  Scored per the §Item C protocol: **overall precision 96.5 %** (500/518),
+  **rule 1 precision 96.8 %** (268/277), **rule 2 precision 96.3 %** (232/241,
+  criterion ≥ 80 % ✓), **adjusted recall 86.2 %** (criterion ≥ 70 % ✓), **zero
+  stale-refire phantoms** (✓), and **no zero-correspondence pair** (✓ — the
+  worst is 26:33 at 7 matched / 14 triggers). This supersedes the 2026-07-31
+  off-peak run's 89.4 % / 59.9 %.
+
+  **The high-duty condition was genuinely exercised this time**, which was the
+  entire point of C2. Reconstructing ON intervals from the controller's own
+  0.1 s record: **14 of 17 pairs peak above the 0.80 advisory threshold over a
+  rolling 120 s window, max 0.966**, against 32.8 % on 2026-07-31 and the
+  80–94 % that motivated the scope. Note precision went **up** under load, not
+  down — the false-trigger storm the sampling-floor work was defending against
+  did not materialize at the post-4a ~0.33 s cycle. Caveat recorded: the run's
+  engine *log* was not in the bundle, so the literal acceptance signal
+  (`grep "sampling-reliability regime"`) could not be run; the duty numbers
+  come from the controller's record, which is authoritative for the physical
+  condition but is not proof the engine's own advisory fired. Next bundle
+  should include the log.
+
+  **The finding that matters most for anyone repeating this: the two sides are
+  stamped by different clocks and nothing syncs them.** The engine uses the
+  monitoring machine's `time.time()`; the ground truth is stamped by the
+  Econolite controller. On this run the controller ran **+4.49 s ahead** — it
+  was ~0 s on 2026-07-31, so this is not a constant of the deployment. Scored
+  as-is, that exceeds `__accuracy_report.py`'s 3.0 s match tolerance and the
+  report says **overall precision 11.6 %, rule 1 precision 0.4 %** — which
+  reads exactly like a catastrophic regression and is nothing of the kind. It
+  was caught from the shape of the output rather than the magnitude: every
+  candidate false positive reported nearly the *same* `nearest GT Δ` (4.0–5.2 s),
+  while the per-pair table still showed healthy trigger and GT counts on the
+  same pairs. A real accuracy collapse does not produce a constant offset.
+
+  The skew was then measured independently of any rule semantics, by comparing
+  **engine-observed detector edges against the controller's raw 82/81 codes** —
+  `engine_suppressions.csv` and the rule-2 rows of `engine_decisions.csv` carry
+  exact Unix ON/OFF windows, which is a use for the C1/C3 logs nobody
+  anticipated when they were built. A global-offset scan peaks sharply at
+  **+4.45 s** (52.9 % of engine edges within 0.25 s of a controller edge, vs
+  6.5 % at zero offset), the per-detector medians agree across all 12 detectors
+  (4.42–4.59 s, sd ≈ 0.25), and there is no monotonic drift across the run
+  (±0.35 s wander). Refined estimate **+4.49 s**.
+  `__accuracy_report.py` gained a `--clock-offset` flag and a docstring section
+  on the signature. **The corrected result is insensitive to the exact value**
+  — offsets of 3.5 through 5.5 s all score identically, since the offset only
+  has to land inside the tolerance — so the flag is a coarse correction, not a
+  calibration; what matters is not leaving it at zero. Verified the committed
+  2026-07-31 artifacts still score 89.4 % / 93.9 % / 59.9 % unchanged.
+
+  **Residual populations, categorized before touching any rule code** (per
+  §Item C's instruction). 18 candidate FPs: 9 rule 1, 9 rule 2, and **7 of the
+  18 are pair 26:33** — the same pair that dominated 2026-07-31, now as
+  1.32–1.94 s orphan pulses on det 26 rather than det 33. It is also the only
+  pair with poor precision and *zero* true misses, which confirms the
+  asymmetric-floor-gate diagnosis: the gate bounds the orphan's duration but
+  says nothing about whether the partner is resolvable. A partner-side gate is
+  now the highest-value rule change available (~96.5 % → ~97.8 % overall).
+  80 true misses: 65 `isolated_pulse` (45 of them ≤ 1.0 s, i.e. within ~3
+  sampling cycles) and 15 `extended_disagreement`.
+
+  **A previously recorded finding was corrected here.** The 2026-07-31 note
+  "all 12 of 12 rule 1 FPs measured 5.03–5.06 s against the 5.0 s threshold,
+  so `threshold + one cycle` hysteresis would remove every one" is not
+  diagnostic. All 9 rule 1 FPs again measured 5.033–5.081 s — but **all 281
+  rule 1 triggers measure ≤ 5.1 s**, because the engine fires the instant the
+  disagreement crosses the threshold, so `disagreement_sec` is the duration
+  *at fire time*, not the event's true length. The statistic describes every
+  rule 1 trigger and separates FPs from nothing. Judged properly against
+  ground-truth durations, the 15 true-missed `extended_disagreement` events run
+  5.1–8.0 s (median 5.4, **9 of 15 ≤ 5.5 s**), so firing at 5.33 s would push a
+  meaningful share of genuine events under the bar to remove 9 FPs out of 518
+  triggers. Recorded as net-negative pending a proper GT-duration derivation.
+
+  **C4's duplicate population is now sized rather than guessed**, which was the
+  stated reason for sequencing it after C2. Connected components over
+  `_intersections.json`[201] derive **exactly the 7 groups the design
+  predicted** (5 triangles + `26:33` + `29:43`), all phase-coherent, so the
+  over-grouping WARN is clean on today's config. Of 523 `start` decisions,
+  **103 land on the same group at the identical 0.1 s tick** and **137 (26.2 %)
+  fall within a 1.0 s window** (rule 1: 84, rule 2: 53); 2.0 s catches 162 and
+  5.0 s catches 181, so the curve flattens after ~1 s and **1.0 s is the window
+  to implement**. The payoff is concrete: the `max_concurrent_writers` cap
+  dropped **174 decisions (33.6 %)**, 167 of which were ground-truth-matched
+  real events with no reviewable clip, so removing ~137 duplicate starts
+  recovers most of that contention.
+
+  Floor-gate cost, from the first real `engine_suppressions.csv`: 998 rows over
+  **710 distinct pulses**, median duration **0.34 s** — sub-cycle blips at a
+  ~0.33 s sampling floor, not lost signal. The C3 decision to store
+  `sampling_floor_sec` and `min_pulse_floor_multiple` as separate columns paid
+  off immediately: the counterfactual is recoverable without another controller
+  session, and at `min_pulse_floor_multiple=1.5` **368** of those rows would
+  have passed the gate (669 at 1.0). Also confirmed the floor injection works
+  in production — 30 rows carry the 1.6 s startup default and every row
+  thereafter carries the measured cycle (median **0.3289 s**, p95 0.3467 s),
+  matching the ~0.33 s figure 4a established.
+
+  Artifacts committed for reproducibility, following the 2026-07-31 precedent:
+  `engine_decisions_20260801.csv`, `engine_suppressions_20260801.csv`,
+  `discrepancies_log_20260801.csv`, `banks_events_20260801_1300-1645.csv`,
+  `gt_anomalies_20260801_1300-1645.csv`. Reproduce with
+  `__accuracy_report.py engine_decisions_20260801.csv
+  gt_anomalies_20260801_1300-1645.csv --recording-log
+  discrepancies_log_20260801.csv --poll 0.33 --clock-offset 4.49`.

@@ -130,8 +130,11 @@ landed, intersection 201 measures ~0.33 s, so the Rule 2 gate is ~0.65 s and
 the rule is fully live (114 of 180 triggers in the 2026-07-31 run). Before 4a
 the same default put the gate at 3.2 s, above a typical 2.0 s
 `lag_threshold_sec`, which disabled Rule 2 in practice; if you read that
-statement anywhere else, it is pre-2026-07-31. Rule 2's precision at the new
-floor is unvalidated until ROADMAP 9C runs. A rolling 120 s ON-duty fraction per pair
+statement anywhere else, it is pre-2026-07-31. **Rule 2's precision at the new
+floor is now validated: 96.3 % on the 2026-08-01 high-duty run (ROADMAP 9C2).**
+The gate suppressed 710 distinct pulses over that run (998 rows, one per
+affected pair), median duration 0.34 s — i.e. sub-cycle blips, not lost
+signal. A rolling 120 s ON-duty fraction per pair
 drives a rate-limited WARNING; `suppress_high_duty_pairs` (default false) can
 disable Rules 1+2 for such pairs. Because the duty computation reads the same
 `on_intervals` deque, its retention horizon is now
@@ -149,9 +152,30 @@ precision/recall; models cooldown + poll aliasing), not by comparing raw
 counts. Build the export with `__decode_datz.py` → `__make_gt_export.py`, and
 pass the *same* intersection config the engine ran with — the three
 intersection JSONs disagree on pairs, and scoring against the wrong set
-invents misses. Last measured 2026-07-31 (ROADMAP 9C): precision 89.4 %,
-adjusted recall 59.9 % — but that recall was read off the *recording* log and
-is a floor; see the next paragraph.
+invents misses. **Last measured 2026-08-01 (ROADMAP 9C2, the high-duty run):
+overall precision 96.5 %, rule 2 precision 96.3 %, adjusted recall 86.2 %,
+zero stale-refire phantoms, no zero-correspondence pair — all four §Item C
+criteria pass.** Artifacts are committed as `engine_decisions_20260801.csv`,
+`engine_suppressions_20260801.csv`, `discrepancies_log_20260801.csv`,
+`banks_events_20260801_1300-1645.csv` and
+`gt_anomalies_20260801_1300-1645.csv`. The superseded 2026-07-31 figures
+(89.4 % / 59.9 %) were read off the *recording* log and were a floor.
+
+**Controller clock skew is real and must be measured per run (2026-08-01 —
+load-bearing).** The engine stamps events with the monitoring machine's clock;
+the ground truth is stamped by the Econolite controller. Nothing keeps them in
+sync, and on the 2026-08-01 run the controller ran **+4.49 s ahead** (vs ~0 s
+on 2026-07-31). Uncorrected, that is larger than `--tolerance` (3.0 s) and
+drags overall precision from 96.5 % to **11.6 %** — a collapse that looks like
+a catastrophic engine regression and is not one. The tell: every candidate
+false positive reports nearly the *same* `nearest GT Δ`, while the per-pair
+table still shows healthy trigger and GT counts on the same pairs. Measure the
+skew by comparing engine-observed detector edges (`engine_suppressions.csv`
+and rule-2 rows of `engine_decisions.csv` carry exact Unix ON/OFF windows)
+against the controller's 82/81 codes, then pass `--clock-offset` to
+`__accuracy_report.py`. The result is insensitive to the exact value (3.5–5.5 s
+all score identically, since the offset only has to land inside the tolerance)
+— what matters is not leaving it at zero.
 
 **Three logs, and they mean different things (2026-08-01, ROADMAP 9C1 + 9C3 —
 load-bearing for anyone measuring accuracy).** All land in `output_dir`:
