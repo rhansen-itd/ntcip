@@ -145,7 +145,20 @@ The rule functions are pinned by `video_engine/tests/test_discrepancy_rules.py`
 Accuracy vs. an ATSPM ground-truth export is measured with
 `video_engine/tools/__accuracy_report.py` (correspondence-based
 precision/recall; models cooldown + poll aliasing), not by comparing raw
-counts.
+counts. Build the export with `__decode_datz.py` → `__make_gt_export.py`, and
+pass the *same* intersection config the engine ran with — the three
+intersection JSONs disagree on pairs, and scoring against the wrong set
+invents misses. Last measured 2026-07-31 (ROADMAP 9C): precision 89.4 %,
+adjusted recall 59.9 %.
+
+**`discrepancies_log.csv` is a log of *recordings*, not of engine decisions
+(load-bearing for anyone measuring recall).** `remux_video_buffer.
+_handle_start` calls `_log_discrepancy_to_csv` only after
+`_writer_semaphore.acquire()` succeeds, so a trigger dropped by the
+`max_concurrent_writers` cap leaves no row anywhere. Measured on the
+2026-07-31 run, the cap was saturated 11.6 % of wall clock yet accounts for
+43 % of the apparent misses. Recall read off this file is a floor, not an
+estimate; ROADMAP 9C1 tracks giving the engine its own decision log.
 
 ## Config abstraction
 
@@ -441,6 +454,12 @@ As of this writing:
   own** decoder helpers by file path, and applies the datZ header's sub-minute
   offset, which an ad-hoc extraction once dropped: see the 2026-07-31
   DESIGN_HISTORY entry and note `banks_events_20260719_1730.csv` is 1 s early),
+  `__make_gt_export.py` (those events → the ATSPM anomaly export
+  `__accuracy_report.py` scores against, via pyatspm's own
+  `analyze_discrepancies()`, with pairs and `lag_threshold_sec` read from the
+  intersection config so they can't drift from the engine run — **run it under
+  pyatspm's interpreter**, it needs pandas/numpy which this repo deliberately
+  doesn't depend on),
   `__correlate_channels.py` (MCC waveform correlation of a capture against a
   controller high-res export — verifies the channel map; see the 2026-07-19
   and 2026-07-31 DESIGN_HISTORY entries), plus `simulate_playback.py`.
@@ -452,10 +471,10 @@ As of this writing:
   `video_engine/` modules (`record_clip`, `__replay_verify`,
   `__probe_adversarial`, `simulate_playback`) add a `sys.path` bootstrap
   (`.../tools/` → parent) so they run from any working directory; the others
-  (`__capture_rtsp`, `drop_trigger`, `__accuracy_report`, `__decode_datz`)
-  don't import them and are location-independent (`__accuracy_report` needs
-  `pytz`; `__decode_datz` resolves the sibling pyatspm checkout from its own
-  path, overridable with `--pyatspm`).
+  (`__capture_rtsp`, `drop_trigger`, `__accuracy_report`, `__decode_datz`,
+  `__make_gt_export`) don't import them and are location-independent
+  (`__accuracy_report` needs `pytz`; the two datZ-chain tools resolve the
+  sibling pyatspm checkout themselves, overridable with `--pyatspm`).
 
 See [ROADMAP.md](ROADMAP.md) for open architectural decisions and planned work.
 

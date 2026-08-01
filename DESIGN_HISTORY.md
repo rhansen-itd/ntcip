@@ -1127,3 +1127,81 @@ decided. Entries after this point are logged as the decision lands.
   data (2 h 46 m of engine triggers + overlapping datZ) is in the repo; the
   precision/recall re-baseline is the next session, and the 114 Rule 2 triggers
   are unvalidated until it runs.
+
+- 2026-07-31 — **ROADMAP 9C run: 3 of 4 pass criteria met. Precision 36.5 % →
+  89.4 %; adjusted recall 36.5 % → 59.9 %, short of the 70 % bar — and the
+  categorization says the shortfall is mostly a *logging* artifact, not a rule
+  defect.** Scored the 2 h 46 m engine run (`discrepancies_log.csv`, 18:36–21:22
+  on 2026-07-31, 180 triggers) against ground truth built from the same day's
+  datZ. Chain: `__decode_datz.py` → `__make_gt_export.py` (new, below) → 451
+  anomalies over the 17 pairs of `_intersections.json` at
+  `lag_threshold_sec=5.0` → `__accuracy_report.py --poll 0.33` (the measured
+  cycle). The engine ran on `_intersections.json`, **not** the other two
+  intersection JSONs — its 16 triggering pairs are a subset of that file's 17
+  and of neither other file's 5; scoring against the wrong pair set would have
+  invented misses wholesale.
+
+  **Against SCOPE_sampling_floor.md §Item C step 3:** rule 2 precision
+  **93.9 %** (≥ 80 % ✓); **zero** stale-refire phantoms (✓); **no pair with the
+  zero-correspondence signature** — all 16 triggering pairs matched at least one
+  GT event (✓); adjusted recall **59.9 %** (≥ 70 % ✗ — rule 1 65.1 %, rule 2
+  57.5 %). Precision is insensitive to the modelled poll (89.4 % at 0.2/0.33/0.5)
+  so it is a robust number; recall is not (50.8 %/59.9 %/69.4 %), but **fails
+  even at the most generous 0.5 s**, so the verdict does not hinge on that knob.
+
+  **The 108 true misses are not the sampling floor.** The report already
+  excludes 138 sub-0.7 s pulses as poll-aliased, and resampling the controller's
+  0.1 s waveforms at 0.325 s shows all 108 remaining events were resolvable —
+  the evidence was visible. What explains them is that
+  **`discrepancies_log.csv` is a log of recordings, not of engine decisions**:
+  `remux_video_buffer._handle_start` calls `_log_discrepancy_to_csv` only after
+  `_writer_semaphore.acquire()` succeeds, so a trigger dropped by the
+  `max_concurrent_writers=2` cap leaves no row at all. Reconstructing writer
+  occupancy from the logged clips: the cap was saturated **11.6 %** of the wall
+  clock, yet **46 of 108 misses (43 %)** start inside a saturated stretch,
+  against **13 %** of the 315 non-missed in-coverage GT events — the control
+  that rules out "misses just cluster when traffic does". A 3.3× enrichment.
+  Recall measured from this artifact therefore conflates "the rule did not fire"
+  with "the buffer refused the clip", and **cannot be fairly scored until the
+  engine logs its own decisions separately from the recordings.** That is the
+  blocking item, and it is a logging change, not a rule change.
+
+  **All 19 false positives are boundary artifacts — not one is a detection of a
+  non-event.** Three mechanisms, cleanly separated: (1) **12 of 12 rule 1 FPs**
+  have durations of **5.03–5.06 s** against the 5.0 s threshold — every one
+  within a fifth of a sampling cycle of it. Disagreements truly just under 5 s
+  measure just over, because both edges carry up to ±0.33 s of sampling error.
+  (2) **6 of 7 rule 2 FPs are on pair 26:33**, and the mechanism is exact:
+  det 33 (Phase 6 Evo Radar) has a **median pulse of 0.70 s with 49 % of its
+  pulses under 0.65 s**, so when GT sees a 0.1–0.6 s partner blip inside the
+  ±5 s window and suppresses the anomaly by the chatter exception, the engine's
+  0.325 s sampling never saw that blip, read the partner as "completely OFF",
+  and fired. **This is the aliasing asymmetry Item B was written to heal, and
+  the gate as built does not reach it** — it tests the *orphan's* duration
+  (1.1–2.6 s here, comfortably above the 0.65 s gate) and says nothing about
+  whether the *partner* is resolvable at all. A partner-side gate is the
+  indicated fix; it is not written, because §Item C says categorize before
+  touching rule code. (3) The remaining rule 2 FP is a rule-boundary crossing:
+  a true 5.8 s pulse on det 8 that pyatspm bins as `extended_disagreement` and
+  the engine, measuring 4.04 s, bins as an orphan — a mislabel of a real event.
+
+  **Caveat that limits what this run proves:** it is an off-peak sample. Peak
+  detector duty here is **32.8 %** (det 17), nowhere near the **80–94 %** that
+  motivated this whole scope, so the high-duty advisory never fired and the
+  false-trigger storm condition is simply **not exercised**. The 89.4 %
+  precision is real but earned on an easier sample than the 2026-07-19 baseline
+  (a 14:00–16:00 window), and the two are not strictly comparable. The datZ set
+  does cover 16:00–18:00, but no engine ran then — closing this needs another
+  ≥ 2 h engine run at peak, which is what 9C should be re-scored on.
+
+  **Tooling:** new `video_engine/tools/__make_gt_export.py` fills the one gap in
+  the chain — `__accuracy_report.py` documented that its ground truth comes
+  "from the sibling pyatspm project" but no script produced it, and the step was
+  being hand-rolled each time. It calls pyatspm's own `analyze_discrepancies()`
+  (same three rules), reads the pairs and `lag_threshold_sec` from the
+  intersection config so they cannot silently drift from the engine run, and
+  refuses to guess when the config's thresholds disagree. It must run under
+  pyatspm's interpreter (pandas/numpy are deliberately not dependencies here)
+  and says so with the exact command when the import fails. Export committed as
+  `gt_anomalies_20260731_1830-2130.csv`; regenerate with the two-command chain
+  above. **9C stays open** pending the decision log and the peak-hour run.

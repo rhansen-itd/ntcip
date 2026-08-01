@@ -60,7 +60,8 @@ highest used so far.
 
 ## 9 — Post-4a accuracy re-baseline (Target: owner + any Claude session)
 
-Design and code in [[SCOPE_sampling_floor.md]]; A and B are **done**:
+Design and code in [[SCOPE_sampling_floor.md]]; A and B are **done**, C is
+**partially run** (2026-07-31) and blocked on C1/C2 below:
 
 - [x] **A — runtime sweep-time self-measurement** (2026-07-30). `BaseMonitor`
   EMA of `_poll()` + sleep, `effective_cycle_sec()`, `get_stats()`,
@@ -70,30 +71,49 @@ Design and code in [[SCOPE_sampling_floor.md]]; A and B are **done**:
   `sampling_floor_sec`, then every 60 s from the measured cycle); Rule 2
   refuses pulses below `min_pulse_floor_multiple × floor`; per-pair high-duty
   advisory WARNING with opt-in `suppress_high_duty_pairs`.
-- [ ] **C — post-4a re-baseline protocol.** Steps and pass/fail numbers are in
-  [[SCOPE_sampling_floor.md]] §"Item C". **Prerequisite met 2026-07-31** — 4a's
-  round trip landed and the inputs are already in the repo:
-  `discrepancies_log.csv` (2 h 46 m engine run, 18:36–21:22 on 2026-07-31, 180
-  triggers) and the overlapping `ECON_10.37.23.200_2026_07_31_1600-2130.zip`
-  datZ set. Decode ground truth with `__decode_datz.py --detectors-only`, then
-  run `__accuracy_report.py`. **This is the next session.**
+- [~] **C — post-4a re-baseline protocol.** **Run 2026-07-31: 3 of 4 criteria
+  pass.** Rule 2 precision **93.9 %** (≥ 80 % ✓), **zero** stale-refire phantoms
+  (✓), **no** zero-correspondence pair (✓), adjusted recall **59.9 %** (≥ 70 %
+  ✗). Overall precision 36.5 % → **89.4 %**. Full measurement, the miss/FP
+  categorization and the caveats are in DESIGN_HISTORY (2026-07-31). Reproduce
+  with `__decode_datz.py` → `__make_gt_export.py` → `__accuracy_report.py
+  --poll 0.33`; the export is committed as
+  `gt_anomalies_20260731_1830-2130.csv`.
 
-**Read before running C — the situation inverted on 2026-07-31.** The old note
-here said Rule 2 would show zero triggers by design, because at the 1.6 s
-default floor its gate (3.2 s) exceeded a typical 2.0 s `lag_threshold_sec`.
-After 4a the runtime measures a **~0.33 s** cycle and injects it, so the gate is
-now **~0.65 s** and Rule 2 is fully live: it produced **114 of the 180**
-triggers in the pushed run, none of them yet validated against ground truth.
-Rule 2 precision is therefore the main open question C answers. The floor is now
-set by the runtime measurement — don't pin `sampling_floor_sec` back to 1.6
-unless C shows a reason to.
+**Two things block a clean pass, in this order. Neither is a rule change, and
+§Item C says don't touch rule code until they're settled.**
 
-Suggested prompt:
-> In the ntcip project, do Item 9C of ROADMAP.md: run the re-baseline
-> protocol in SCOPE_sampling_floor.md §"Item C" against the 2026-07-31 engine
-> run and datZ set already in the repo, and report each pass/fail number.
-> Pay particular attention to Rule 2, which the faster sweep re-enabled. Categorize residual
-> misses/FPs before touching any rule code. DESIGN_HISTORY entry + check off.
+- [ ] **C1 — log engine decisions separately from recordings.** `discrepancies_
+  log.csv` is written by `remux_video_buffer._handle_start` *after*
+  `_writer_semaphore.acquire()` succeeds, so a trigger the
+  `max_concurrent_writers=2` cap drops leaves no row. The cap was saturated
+  11.6 % of the run's wall clock but accounts for **43 % of the 108 "misses"**
+  (vs 13 % of non-missed GT events — a 3.3× enrichment that controls for
+  traffic clustering). **Recall is not fairly measurable from this artifact**,
+  so fix the logging before reading anything into the 59.9 %.
+- [ ] **C2 — re-score on a peak-hour run.** The 2026-07-31 sample is off-peak:
+  max detector duty **32.8 %**, against the **80–94 %** that motivated this
+  scope. The high-duty advisory never fired and the false-trigger storm
+  condition is untested. Needs another ≥ 2 h engine run at peak (16:00–18:00)
+  with a matching datZ pull — the datZ side of that window already exists, the
+  engine side does not.
+
+**Two rule-level findings recorded, deliberately not acted on:**
+
+- **Rule 2's floor gate is asymmetric.** It gates the *orphan's* duration but
+  says nothing about whether the *partner* is resolvable. Pair 26:33 produced 6
+  of the 7 rule 2 FPs: det 33 has a median pulse of 0.70 s with **49 % under
+  0.65 s**, so GT's chatter exception sees a 0.1–0.6 s partner blip the engine's
+  0.325 s sampling cannot. A partner-side gate is the indicated fix.
+- **Rule 1's threshold has no hysteresis.** All **12 of 12** rule 1 FPs measured
+  5.03–5.06 s against the 5.0 s threshold. Requiring `threshold + one sampling
+  cycle` would remove every one, at some cost to recall.
+
+Suggested prompt (after C1, or with a peak-hour run in hand):
+> In the ntcip project, continue Item 9C of ROADMAP.md: land C1 (a decision log
+> distinct from the recording log) and re-score with
+> `__decode_datz.py` → `__make_gt_export.py` → `__accuracy_report.py`. Report
+> each pass/fail number against SCOPE_sampling_floor.md §"Item C".
 
 ---
 
