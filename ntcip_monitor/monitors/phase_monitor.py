@@ -4,7 +4,7 @@ Phase Monitor - Monitors phases 1-16 and overlaps 1-8
 
 from ..core.event_monitor import BaseMonitor, EVENT_PHASE_CHANGE, EVENT_PHASE_GREEN_START, EVENT_PHASE_RED_START, EVENT_PHASE_YELLOW_START, EVENT_OVERLAP_CHANGE
 from ..core.oid_definitions import get_phase_oids, OVERLAP_REDS, OVERLAP_YELLOWS, OVERLAP_GREENS, PED_1_8_DW, PED_1_8_FDW, PED_1_8_W
-from ..core.data_models import parse_phases_from_bitmask, SignalState, PhaseStatus, OverlapStatus
+from ..core.data_models import parse_phases_from_bitmask, SignalState, OverlapStatus
 from ..core.snmp_client import SNMPError
 
 

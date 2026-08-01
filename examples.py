@@ -8,7 +8,7 @@ This script demonstrates common usage patterns for the NTCIP Monitor system.
 import time
 from datetime import datetime
 from ntcip_monitor import NTCIPMonitorApp
-from ntcip_monitor.core import SignalState, DetectorState, OutputState
+from ntcip_monitor.core import SignalState
 
 
 def example_1_basic_monitoring():

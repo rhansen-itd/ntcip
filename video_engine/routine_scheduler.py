@@ -103,7 +103,7 @@ import threading
 import time
 import uuid
 import pytz
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 

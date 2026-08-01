@@ -4,7 +4,6 @@ Main Application - Orchestrates all monitors and services
 
 import logging
 import time
-import sys
 import threading
 from typing import Optional
 

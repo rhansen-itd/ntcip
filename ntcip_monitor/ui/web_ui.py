@@ -56,7 +56,6 @@ import ipaddress
 import logging
 import threading
 import time
-from ..core.data_models import SignalState, DetectorState, OutputState
 from .overlay import (
     ShapeConfig,
     create_background_source,

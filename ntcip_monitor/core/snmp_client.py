@@ -1,7 +1,7 @@
 from pysnmp.hlapi import (
     getCmd, setCmd, CommunityData, UdpTransportTarget,
     ContextData, ObjectType, ObjectIdentity, SnmpEngine,
-    Integer32, Counter32, Unsigned32, Gauge32
+    Integer32
 )
 import threading
 

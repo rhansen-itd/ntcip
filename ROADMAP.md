@@ -39,11 +39,11 @@ highest used so far.
 > that motivated the scope, so the false-trigger storm condition is still
 > untested.
 >
-> **Ready to start now, no hardware:** **4b / 5** (Sonnet — mechanical,
-> precedents set), **6** (Opus, fold into 5), **2**, **3**, **10**, and now
-> **4e / 4h** (unblocked by 4d).
+> **Ready to start now, no hardware:** **5** (Sonnet — mechanical, precedents
+> set), **6** (Opus, fold into 5), **2**, **3**, **10**, and **4e / 4h**
+> (unblocked by 4d).
 >
-> **Suggested order:** 4b/5 → 6, with the owner's peak-hour run (9C2) slotted
+> **Suggested order:** 5 → 6, with the owner's peak-hour run (9C2) slotted
 > in whenever the controller is available.
 >
 > Items **8** (remux manager thread-safety + the single-camera assumption) and
@@ -53,7 +53,7 @@ highest used so far.
 > over a still image *or* a live MJPEG feed, and `tools/` holds the
 > deploy-time config sync and calibration-still grabber.  **9C1** (the engine
 > decision log) landed 2026-08-01, so the next run's recall is measurable for
-> the first time.
+> the first time, and **4b** (unused-import sweep) closed the same day.
 >
 > Model routing follows the Fable-era principle: the *thinking* for the
 > remaining items is pre-done in the item text, so the Target line says who
@@ -171,10 +171,10 @@ Suggested prompt:
 
 Findings from Jules's ongoing automated review, triaged against current code
 when logged. Grouped by how they should be tackled; each lettered sub-item is
-a session-sized unit. Remaining: **4b** (mechanical), then **4e**/**4h**,
-which 4d has now unblocked. **4c** and **4g** are don't-action lists.
-**4f** (security), **4a** (SNMP sweep speed) landed 2026-07-31 and **4d**
-(tests) 2026-08-01 — see DESIGN_HISTORY.
+a session-sized unit. Remaining: **4e** and **4h**, both unblocked by 4d.
+**4c** and **4g** are don't-action lists. **4f** (security) and **4a** (SNMP
+sweep speed) landed 2026-07-31; **4d** (tests) and **4b** (unused imports)
+2026-08-01 — see DESIGN_HISTORY.
 
 ### 4a. SNMP sweep speed — **done 2026-07-31**
 
@@ -198,26 +198,20 @@ it, and read the 2026-07-19 entry's "+1.08 s skew" as +429 ms.
 Note the outputs OIDs failed the 2026-07-20 probe for an unrelated reason — see
 Item 10.
 
-### 4b. Unused-import cleanup (one mechanical sweep, zero behavior risk)
+### 4b. Unused-import cleanup — **done 2026-08-01**
 
-All confirmed still unused (grep shows zero other references besides the
-import line). Safe to remove in a single pass:
-
-- `ntcip_monitor/core/snmp_client.py:1` — `Counter32`, `Unsigned32`, `Gauge32`
-  (keep `Integer32`, used in `set()`).
-- `ntcip_monitor/monitors/phase_monitor.py:7` — `PhaseStatus`.
-- `examples.py:11` — `DetectorState`, `OutputState` (keep `SignalState`).
-- `video_engine/routine_scheduler.py:106` — `timezone` (keep `date`, `datetime`).
-- `ntcip_monitor/main.py:6` — `sys`.
-- `ntcip_monitor/utils/config_loader.py:8` — `datetime`.
-- `ntcip_monitor/utils/controller_control.py:12` — `Counter32`, `Integer32`.
-- `ntcip_monitor/ui/web_ui.py:35` — `SignalState`, `DetectorState`, `OutputState`.
-
-Suggested prompt:
-> [Sonnet] In the ntcip project, do Item 4b of ROADMAP.md: remove the confirmed
-> unused imports listed there in one mechanical pass (keep the named
-> exceptions). Do NOT touch the false positives called out in 4c. DESIGN_HISTORY
-> one-liner + check off.
+All eight sites swept in one pass, one line each, no behavior change:
+`Counter32`/`Unsigned32`/`Gauge32` (`core/snmp_client.py`, `Integer32` kept),
+`PhaseStatus` (`phase_monitor.py`), `DetectorState`/`OutputState`
+(`examples.py`, `SignalState` kept), `datetime.timezone`
+(`video_engine/routine_scheduler.py`), `sys` (`main.py`), `datetime`
+(`utils/config_loader.py`), the whole `pysnmp.hlapi` line
+(`utils/controller_control.py`), and the whole `data_models` line
+(`ui/web_ui.py`). Each name re-confirmed unreferenced before removal and
+un-re-imported after; all six suites green (234 cases) and every touched module
+imports cleanly at runtime. 4c's false positives untouched. See DESIGN_HISTORY
+2026-08-01 for the two things deliberately left in place (`set()`'s docstring
+mention of `Counter32`, and `main.py`'s commented-out `sys.exit(1)`).
 
 ### 4c. False positives / non-issues to skip — don't action these
 

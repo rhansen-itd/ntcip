@@ -1333,3 +1333,28 @@ decided. Entries after this point are logged as the decision lands.
   guard is a robustness change, not test coverage, so 4d left it. Tests now
   total 234 across six suites; the inventory is in CLAUDE.md's new "Tests"
   section.
+
+- 2026-08-01 — **Item 4b: the eight confirmed unused imports are gone.** One
+  mechanical pass, one line touched per site, no behavior change: `Counter32`/
+  `Unsigned32`/`Gauge32` from `core/snmp_client.py`, `PhaseStatus` from
+  `phase_monitor.py`, `DetectorState`/`OutputState` from `examples.py`,
+  `datetime.timezone` from `video_engine/routine_scheduler.py`, `sys` from
+  `main.py`, `datetime` from `utils/config_loader.py`, `Counter32`/`Integer32`
+  (the whole `pysnmp.hlapi` line) from `utils/controller_control.py`, and the
+  whole `data_models` line from `ui/web_ui.py`. Verified before removal that
+  each name has zero references outside its import line, and after removal that
+  nothing re-imports it *from* these modules — `utils/__init__.py`,
+  `core/__init__.py` and `monitors/__init__.py` re-export only names that stay.
+  All six suites green (234 cases), and every touched module imports cleanly at
+  runtime, not just under `py_compile`.
+
+  **Two things left deliberately in place.** `snmp_client.set()`'s docstring
+  still names `Counter32` as an example `asn_type` — that is correct and stays
+  correct: the caller supplies the class, so the parameter's contract does not
+  depend on this module importing it. And `main.py` line 77 keeps a
+  commented-out `sys.exit(1)` inside a commented-out connection test; the
+  import is dead today, and reviving that block is a decision that should
+  restore its own import rather than a reason to carry one. `ROADMAP 4c`'s
+  three false positives (`from __future__ import annotations` in two
+  `video_engine` files, the `__init__.py` re-export idiom, the "uncached
+  config reads" finding) were not touched, as that item directs.

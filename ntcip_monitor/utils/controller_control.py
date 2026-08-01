@@ -9,7 +9,6 @@ Functions to:
 
 import time
 from datetime import datetime
-from pysnmp.hlapi import Counter32, Integer32
 from ..core.oid_definitions import GLOBAL_TIME, PHASE_1_8_VEH_CALL, PHASE_9_16_VEH_CALL, get_output_oid
 from ..core.snmp_client import SNMPError
 
