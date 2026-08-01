@@ -139,8 +139,8 @@ disable Rules 1+2 for such pairs. Because the duty computation reads the same
 changes.
 
 The rule functions are pinned by `video_engine/tests/test_discrepancy_rules.py`
-(59 stdlib-`unittest` cases, incl. the stale-refire guard, the floor gate, and
-the decision log) — run it after any engine change:
+(67 stdlib-`unittest` cases, incl. the stale-refire guard, the floor gate, the
+decision log, and `_resolve_pytz`) — run it after any engine change:
 `python3 video_engine/tests/test_discrepancy_rules.py`.
 Accuracy vs. an ATSPM ground-truth export is measured with
 `video_engine/tools/__accuracy_report.py` (correspondence-based
@@ -420,6 +420,27 @@ them relaxes the rule that the two packages don't import each other.
   pyatspm produces. A browser-based calibrator would drop the pyatspm/Tkinter
   dependency entirely; it's parked in ROADMAP's Future section.
 
+## Tests
+
+Six suites, all **stdlib `unittest`** (pytest is not installed here), one file
+per subject, each runnable directly from any working directory via its own
+`sys.path` bootstrap. 234 cases total as of 2026-08-01:
+
+| Suite | Cases | Subject |
+|---|---|---|
+| `video_engine/tests/test_discrepancy_rules.py` | 67 | rule functions, `_evaluate_pair` integration, decision log, `_resolve_pytz` |
+| `video_engine/tests/test_remux_manager.py` | 22 | manager writer/timer bookkeeping (stubbed remuxer) |
+| `video_engine/tests/test_config_manager.py` | 9 | `ConfigProviderError` |
+| `ntcip_monitor/tests/test_overlay_shapes.py` | 86 | shape reader, status resolution, live source (stubbed PyAV) |
+| `ntcip_monitor/tests/test_oid_helpers.py` | 33 | OID math + `parse_signal_state` |
+| `ntcip_monitor/tests/test_snmp_batching.py` | 17 | chunking, batched poll loops, cycle EMA (stubbed pysnmp) |
+
+Suites import the module under test as directly as possible — `test_oid_helpers`
+puts `ntcip_monitor/core/` on `sys.path` and imports the leaf modules rather
+than the package, because `core/__init__.py` re-exports `snmp_client` and would
+drag in pysnmp. Keeping every suite runnable on a bare interpreter is
+deliberate; preserve it when adding cases.
+
 ## Style conventions already in use
 
 - **Logging**: structured JSON-lines via a shared `_JsonFormatter` pattern
@@ -490,9 +511,9 @@ As of this writing:
   controller high-res export — verifies the channel map; see the 2026-07-19
   and 2026-07-31 DESIGN_HISTORY entries), plus `simulate_playback.py`.
   `video_engine/tests/` holds the unit tests
-  (`test_discrepancy_rules.py` and `test_remux_manager.py`, stdlib `unittest` —
-  the layout precedent for ROADMAP 4d) and `video_engine/tests/fixtures/` the
-  captured test data
+  (`test_discrepancy_rules.py`, `test_remux_manager.py`,
+  `test_config_manager.py`; stdlib `unittest`) and
+  `video_engine/tests/fixtures/` the captured test data
   (`sample.ts` + its `.packets.jsonl` profile). The four tools that import
   `video_engine/` modules (`record_clip`, `__replay_verify`,
   `__probe_adversarial`, `simulate_playback`) add a `sys.path` bootstrap

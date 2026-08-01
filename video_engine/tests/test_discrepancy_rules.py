@@ -6,7 +6,8 @@ partner overlap), ``_compute_on_duty_fraction``, and
 stale-refire guard and the 2026-07-30 sampling-floor gate), plus a set of
 integration tests that drive ``DiscrepancyMonitor._evaluate_pair`` directly
 (no evaluator thread) against a stub ``ConfigProvider`` and a temp Hot Folder,
-and the 2026-08-01 decision log (``engine_decisions.csv``).
+the 2026-08-01 decision log (``engine_decisions.csv``), and ``_resolve_pytz``
+(ROADMAP 4d).
 
 Run from anywhere:
 
@@ -23,7 +24,10 @@ import sys
 import tempfile
 import time
 import unittest
+from datetime import datetime
 from pathlib import Path
+
+import pytz
 
 # Bootstrap: make video_engine/ importable regardless of working directory
 # (same pattern as the tools/ scripts).
@@ -39,6 +43,7 @@ from discrepancy_engine import (  # noqa: E402
     _check_rule1_continuous,
     _check_rule2_orphan,
     _compute_on_duty_fraction,
+    _resolve_pytz,
 )
 
 # The engine logs a WARNING for high-duty pairs.  Without a handler, logging's
@@ -620,6 +625,74 @@ class TestHighDutyAdvisory(unittest.TestCase):
         self.assertEqual(
             len(sorted(Path(self._tmp.name).glob("trigger_*.json"))), 1
         )
+
+
+# ---------------------------------------------------------------------------
+# Timezone resolution (ROADMAP 4d)
+# ---------------------------------------------------------------------------
+
+class TestResolvePytz(unittest.TestCase):
+    """``_resolve_pytz`` — IANA name → pytz zone, UTC + a warning on failure.
+
+    The contract is string input (config's ``timezone`` key); the point of the
+    function is that it reads pytz's *bundled* database, so it works on hosts
+    with no system zone files and never raises on an unknown name.
+    """
+
+    LOGGER = "discrepancy_engine.tz_test"
+
+    def setUp(self):
+        self.log = logging.getLogger(self.LOGGER)
+
+    def test_canonical_name_resolves(self):
+        self.assertIs(
+            _resolve_pytz("America/Boise", self.log),
+            pytz.timezone("America/Boise"),
+        )
+
+    def test_legacy_alias_resolves_without_falling_back(self):
+        # intersections.json ships "US/Mountain" — a legacy alias.  pytz's
+        # bundled database knows it; a tzdata-dependent implementation might
+        # not, which is exactly the failure this function exists to avoid.
+        resolved = _resolve_pytz("US/Mountain", self.log)
+        self.assertIs(resolved, pytz.timezone("US/Mountain"))
+        self.assertIsNot(resolved, pytz.utc)
+
+    def test_utc_resolves_to_the_utc_singleton(self):
+        # _fire_trigger normalises tz_name by identity against pytz.utc, so
+        # this must be the same object, not merely an equal one.
+        self.assertIs(_resolve_pytz("UTC", self.log), pytz.utc)
+
+    def test_unknown_name_falls_back_to_utc(self):
+        with self.assertLogs(self.LOGGER, level="WARNING"):
+            self.assertIs(_resolve_pytz("Mars/Olympus_Mons", self.log), pytz.utc)
+
+    def test_fallback_warning_names_the_offending_zone(self):
+        with self.assertLogs(self.LOGGER, level="WARNING") as caught:
+            _resolve_pytz("Not/AZone", self.log)
+        self.assertEqual(len(caught.records), 1)
+        self.assertEqual(caught.records[0].timezone, "Not/AZone")
+
+    def test_empty_and_none_fall_back_rather_than_raise(self):
+        for bad in ("", None):
+            with self.subTest(tz_name=bad):
+                with self.assertLogs(self.LOGGER, level="WARNING"):
+                    self.assertIs(_resolve_pytz(bad, self.log), pytz.utc)
+
+    def test_a_valid_name_logs_nothing(self):
+        # assertNoLogs needs 3.10+; assertLogs on a sentinel record is the
+        # portable equivalent — only that record should come back.
+        with self.assertLogs(self.LOGGER, level="WARNING") as caught:
+            _resolve_pytz("America/Boise", self.log)
+            self.log.warning("sentinel")
+        self.assertEqual([r.getMessage() for r in caught.records], ["sentinel"])
+
+    def test_resolved_zone_actually_localizes(self):
+        # Guards against returning something zone-shaped but unusable.
+        tz = _resolve_pytz("US/Mountain", self.log)
+        stamp = datetime.fromtimestamp(1754000000.0, tz=tz)
+        self.assertIsNotNone(stamp.tzinfo)
+        self.assertIn("M", stamp.strftime("%Z"))    # MST or MDT
 
 
 # ---------------------------------------------------------------------------

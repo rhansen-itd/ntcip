@@ -1280,3 +1280,56 @@ decided. Entries after this point are logged as the decision lands.
   row's shared trigger ID, header-once-across-restarts, the Trigger_ID join
   with the Hot Folder payload, and that an unwritable log path still delivers
   the trigger.
+
+- 2026-08-01 — **Item 4d: the six untested pure functions are covered.** 51 new
+  stdlib-`unittest` cases, no mocking anywhere (the whole point of the
+  selection — every one of these is deterministic). Layout follows Item 7's
+  precedent unmodified: per-package `tests/`, one file per subject, a
+  `sys.path` bootstrap so each runs from any working directory. Three
+  judgement calls are worth recording.
+
+  **Where each function's tests live.** `_resolve_pytz` went into the existing
+  `test_discrepancy_rules.py` rather than a new file — it is a
+  `discrepancy_engine` function and that suite is already "tests for the
+  discrepancy engine". `ConfigProviderError` got a **new**
+  `video_engine/tests/test_config_manager.py` even though it is nine cases
+  for a nine-line class: 4e's backlog lists `ConfigProvider`,
+  `JsonFileConfigProvider`, and `SqliteCentralConfigProvider`, and they belong
+  in that file, so creating it now means 4e adds cases instead of relitigating
+  placement. The four `ntcip_monitor` functions share
+  `ntcip_monitor/tests/test_oid_helpers.py` — they are all "compute an OID or
+  a state from a number", one subject.
+
+  **`test_oid_helpers.py` imports the leaf modules, not the package.** It puts
+  `ntcip_monitor/core/` on `sys.path` and imports `oid_definitions` and
+  `data_models` directly, because `core/__init__.py` re-exports `snmp_client`
+  and would drag pysnmp into a suite that has no need of it. pysnmp *is*
+  installed on this machine, so this buys nothing today — it buys that the
+  suite keeps running on a bare interpreter, which is the property
+  `test_overlay_shapes.py` was built around and which makes these tests usable
+  as a smoke check on an edge box that has not had its dependencies installed
+  yet. The alternative (stubbing pysnmp the way `test_snmp_batching.py` does)
+  is more machinery for less isolation when the module under test genuinely
+  has no SNMP dependency.
+
+  **`get_output_oid`'s expectations pin what the code emits, not what the
+  controller accepts.** ROADMAP 10 records that `OUTPUT_BASE`
+  (`…1206.4.2.1.3.14.1.2.{1..16}`) returns SNMPv1 `noSuchName` on the Cobalt
+  at 10.37.23.200 — the OID is very likely wrong. Writing tests that assert
+  the current value creates a small trap: a future reader can mistake a green
+  suite for evidence the OID is correct. Rather than skip the function or
+  encode a guess at the right column, the test class docstring says plainly
+  that these are change-detectors and that Item 10 will move them. Coverage
+  and correctness are different claims; the tests should only make the one
+  they can.
+
+  **One observation, deliberately not acted on:** `_resolve_pytz` documents
+  "never raises", and that holds for every string plus `None` (pytz raises
+  `UnknownTimeZoneError` for both, which the function catches), but a
+  non-string non-`None` `timezone` value in config — expressible in JSON —
+  reaches `pytz.timezone` and raises `AttributeError`. It is contained: every
+  call site is under `_evaluator_loop`'s broad `except Exception`, so the
+  effect is a logged exception per tick, not a dead thread. Tightening the
+  guard is a robustness change, not test coverage, so 4d left it. Tests now
+  total 234 across six suites; the inventory is in CLAUDE.md's new "Tests"
+  section.

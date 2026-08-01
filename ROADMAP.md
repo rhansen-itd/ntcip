@@ -39,11 +39,12 @@ highest used so far.
 > that motivated the scope, so the false-trigger storm condition is still
 > untested.
 >
-> **Ready to start now, no hardware:** **4d / 4b / 5** (Sonnet — mechanical,
-> precedents set), **6** (Opus, fold into 5), **2**, **3**, **10**.
+> **Ready to start now, no hardware:** **4b / 5** (Sonnet — mechanical,
+> precedents set), **6** (Opus, fold into 5), **2**, **3**, **10**, and now
+> **4e / 4h** (unblocked by 4d).
 >
-> **Suggested order:** 4d → 4b/5 → 6, with the owner's peak-hour run (9C2)
-> slotted in whenever the controller is available.
+> **Suggested order:** 4b/5 → 6, with the owner's peak-hour run (9C2) slotted
+> in whenever the controller is available.
 >
 > Items **8** (remux manager thread-safety + the single-camera assumption) and
 > **4f** (web UI: loopback default + shared-secret control endpoints) landed
@@ -56,8 +57,8 @@ highest used so far.
 >
 > Model routing follows the Fable-era principle: the *thinking* for the
 > remaining items is pre-done in the item text, so the Target line says who
-> executes. Deferred by design: **4e** (needs a fixture strategy session,
-> after 4d), **4h** (refactors, after 4d). Don't-action lists: **4c**, **4g**.
+> executes. **4e** (fixture strategy session) and **4h** (refactors) were
+> gated on 4d and are now open. Don't-action lists: **4c**, **4g**.
 
 ---
 
@@ -170,10 +171,10 @@ Suggested prompt:
 
 Findings from Jules's ongoing automated review, triaged against current code
 when logged. Grouped by how they should be tackled; each lettered sub-item is
-a session-sized unit. Remaining order: **4d** (tests) → **4b** (mechanical),
-with **4e**/**4h** after 4d. **4c** and **4g** are don't-action lists.
-**4f** (security) landed 2026-07-31 and **4a** (SNMP sweep speed) 2026-07-31 —
-see DESIGN_HISTORY.
+a session-sized unit. Remaining: **4b** (mechanical), then **4e**/**4h**,
+which 4d has now unblocked. **4c** and **4g** are don't-action lists.
+**4f** (security), **4a** (SNMP sweep speed) landed 2026-07-31 and **4d**
+(tests) 2026-08-01 — see DESIGN_HISTORY.
 
 ### 4a. SNMP sweep speed — **done 2026-07-31**
 
@@ -243,52 +244,35 @@ Suggested prompt:
   is just an in-memory deep-copy, not disk I/O. The hot-loop pattern the
   rationale describes doesn't actually exist here.
 
-### 4d. Cover the remaining untested pure functions
+### 4d. Cover the remaining untested pure functions — **done 2026-08-01**
 
-Six "lacks test coverage" findings that are genuinely valid and all
-pure/deterministic — no mocking needed. Both `tests/` directories now exist
-(`video_engine/tests/`, `ntcip_monitor/tests/`), so this is breadth over
-established scaffolding, not new layout work:
+All six now covered, 51 new cases across three files, no mocking anywhere:
 
-- `ntcip_monitor/core/oid_definitions.py:109` — `get_phase_oids(group)`.
-- `ntcip_monitor/core/oid_definitions.py:127` — `get_detector_oid(detector_num)`.
-- `ntcip_monitor/core/oid_definitions.py:146` — `get_output_oid(output_num)`.
-- `ntcip_monitor/core/data_models.py:179` — `parse_signal_state(red_bit, yellow_bit, green_bit)`.
-- `video_engine/config_manager.py:262` — `ConfigProviderError` (tiny exception
-  subclass; test just instantiates it and checks `args`/`__cause__`).
-- `video_engine/discrepancy_engine.py:141` — `_resolve_pytz(tz_name, log)`.
-  (Jules's finding cites this as `get_safe_timezone` at line 194 — that name/
-  line is stale; it's the same function, just renamed/moved since. Still
-  genuinely untested: feed it an invalid IANA name and assert it falls back
-  to `pytz.utc` and logs a warning — no mocking needed,
-  `unittest.TestCase.assertLogs` covers the log assertion.)
+| Function | Home | Cases |
+|---|---|---|
+| `get_phase_oids` / `get_detector_oid` / `get_output_oid` (`oid_definitions.py`), `parse_signal_state` (`data_models.py`) | **new** `ntcip_monitor/tests/test_oid_helpers.py` | 33 |
+| `ConfigProviderError` (`config_manager.py`) | **new** `video_engine/tests/test_config_manager.py` | 9 |
+| `_resolve_pytz` (`discrepancy_engine.py`) | `video_engine/tests/test_discrepancy_rules.py` | 8 |
 
-**Sequencing (2026-07-19):** Item 7 has landed and established the layout
-precedent: per-package tests (`video_engine/tests/test_discrepancy_rules.py`),
-**stdlib `unittest`** (pytest is not installed in the deployment env; the
-tests run via `python3 video_engine/tests/test_discrepancy_rules.py` or
-unittest discovery, and remain pytest-compatible if it's ever added). Mirror
-that: put the ntcip_monitor cases in `ntcip_monitor/tests/`, use `unittest`,
-and for the `_resolve_pytz` log assertion use
-`unittest.TestCase.assertLogs` instead of pytest's `caplog`. With the layout
-decision removed, 4d is pure mechanical breadth over deterministic functions —
-hence the Sonnet target below, not Opus.
+Jules's finding cited the last one as `get_safe_timezone` at line 194 — stale
+name and line, same function. The test layout follows Item 7's precedent
+unchanged (per-package `tests/`, stdlib `unittest`, `assertLogs` for the
+warning assertion). See DESIGN_HISTORY 2026-08-01 for the two judgement calls:
+importing `ntcip_monitor/core`'s leaf modules rather than the package, and
+pinning `get_output_oid` to the OID the code emits today rather than the one
+the controller accepts (ROADMAP 10 moves it).
 
-Suggested prompt:
-> [Sonnet] In the ntcip project, do Item 4d of ROADMAP.md: cover the six
-> pure/deterministic functions listed there with stdlib `unittest` (pytest is
-> not installed). Do NOT invent a new
-> test layout — follow the `tests/` layout Item 7 already established (check
-> `video_engine/tests/` and the DESIGN_HISTORY entry from 7) and place the
-> `ntcip_monitor` tests in the matching per-package location. No mocking needed.
-> DESIGN_HISTORY one-liner + check off. (4e and 4h build on this.)
+This unblocks **4e** and **4h**.
 
-### 4e. Broader test backlog — needs mocking/fixtures, defer until after 4d
+### 4e. Broader test backlog — needs mocking/fixtures (4d has landed; open)
 
 The remaining "lacks test coverage" findings all need a mocked `snmp_client`,
 a Flask test client, an in-memory SQLite DB, or similar fixtures — a much
-bigger lift than 4d's pure functions. Worth a real test-strategy session once
-4d's `unittest` scaffolding exists, not ad hoc: `DetectorMonitor`, `OutputMonitor`,
+bigger lift than 4d's pure functions. Worth a real test-strategy session, not
+ad hoc. Note two stubbing precedents now exist to copy rather than reinvent:
+`test_snmp_batching.py` injects a fake `pysnmp.hlapi` into `sys.modules`, and
+`test_overlay_shapes.py` overrides the live source's three PyAV seams.
+Subjects: `DetectorMonitor`, `OutputMonitor`,
 `PhaseMonitor`, `ControllerControl`, `NTCIPMonitorApp`, `WebUI`,
 `DiscrepancyEngine.__init__` error handling, `RoutineScheduler`,
 `ConfigProvider`/`JsonFileConfigProvider`/`SqliteCentralConfigProvider`,
@@ -314,18 +298,20 @@ CLAUDE.md/ARCHITECTURE.md as a hardware constraint, alongside port 501 and
 real mitigation is deployment-level: keep controller traffic on an isolated/
 segmented network, not a code change.
 
-### 4h. Lower priority — readability, do after 4d exists
+### 4h. Lower priority — readability (4d has landed; open)
 
-- **`_evaluate_pair`, `video_engine/discrepancy_engine.py:584`** (244 lines)
-  and **`_fire_trigger`, `video_engine/discrepancy_engine.py:924`** (11 args)
+- **`_evaluate_pair`** (244 lines) and **`_fire_trigger`** (**12 args** since
+  9C1 added `event_window`; line numbers in the original finding are stale)
   — both legitimate, but both sit inside the discrepancy engine's
   carefully-worked-out state machine (the cooldown/active-trigger-id
   interaction documented in the module's own docstring — see CLAUDE.md).
   Refactoring either without tests in place first risks silently breaking
-  behavior that took real effort to get right. Do this *after* 4d (and
-  ideally after extending 4d's tests to cover `_evaluate_pair`'s rules
-  directly), not before. `_fire_trigger`'s fix is probably a small
-  `TriggerSpec`-like dataclass to replace the 11 positional args.
+  behavior that took real effort to get right. Item 7 + 9C1 now pin
+  `_evaluate_pair` through 20-odd integration and decision-log cases, so the
+  safety net exists; extending it further before refactoring is still the
+  cheaper order. `_fire_trigger`'s fix is a small `TriggerSpec`-like dataclass
+  to replace the positional args — 9C1's `event_window` was passed as a single
+  tuple specifically so it collapses into one field when that happens.
 - **`SystemRunner.__init__`, `video_engine/system_runner.py:162`** (7 args) —
   valid nitpick, low value: it's a top-level orchestrator constructor called
   from exactly one place (`main()`) with sensible defaults. Skip unless doing
