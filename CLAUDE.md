@@ -120,14 +120,18 @@ is discarded, never fired late (the pre-roll footage is gone by then).
 The engine must not evaluate evidence finer than its own sampling resolution.
 The floor is **injected, never imported**: `system_runner` calls
 `DiscrepancyMonitor.set_sampling_floor()` at startup from the config's
-`sampling_floor_sec` (default 1.6 = the measured NTCIP reality) and every 60 s
+`sampling_floor_sec` (default 1.6 = the *pre-4a* NTCIP reality) and every 60 s
 thereafter from `DetectorMonitor.effective_cycle_sec()` — do not "simplify"
 this by importing `ntcip_monitor` into the engine. Rule 2 refuses orphan
 pulses shorter than `min_pulse_floor_multiple × floor` (default 2.0×),
-counting them in the per-pair `below_floor_suppressed`; **at the default floor
-that gate is 3.2 s, above a typical 2.0 s `lag_threshold_sec`, so Rule 2 is
-effectively disabled until the sweep gets faster** (intended — see the
-2026-07-30 DESIGN_HISTORY entry). A rolling 120 s ON-duty fraction per pair
+counting them in the per-pair `below_floor_suppressed`. **The runtime
+measurement, not the 1.6 default, is what governs in production** — since 4a
+landed, intersection 201 measures ~0.33 s, so the Rule 2 gate is ~0.65 s and
+the rule is fully live (114 of 180 triggers in the 2026-07-31 run). Before 4a
+the same default put the gate at 3.2 s, above a typical 2.0 s
+`lag_threshold_sec`, which disabled Rule 2 in practice; if you read that
+statement anywhere else, it is pre-2026-07-31. Rule 2's precision at the new
+floor is unvalidated until ROADMAP 9C runs. A rolling 120 s ON-duty fraction per pair
 drives a rate-limited WARNING; `suppress_high_duty_pairs` (default false) can
 disable Rules 1+2 for such pairs. Because the duty computation reads the same
 `on_intervals` deque, its retention horizon is now
@@ -235,16 +239,19 @@ the 2026-07-15 DESIGN_HISTORY entry.
   per-OID loops), and `system_runner` polls only the detector groups the
   config's detectors occupy. `stats['reads']` counts poll cycles, not OIDs.
   Tests: `ntcip_monitor/tests/test_snmp_batching.py` (stubbed pysnmp).
-- **Measured 2026-07-19 (load-bearing):** because of `CHUNK_SIZE = 1`, one
-  detector sweep = 8 sequential SNMP round trips, so the **effective sampling
-  cycle is ~1.0–1.5 s wall-clock** regardless of `poll_interval` (which is
-  only the inter-sweep sleep). NTCIP therefore catches only ~7–42 % of true
-  detector edges on fast-cycling channels; discrepancy rules on high-duty
-  presence zones (intersection 201 phases 2/6/7) operate below this sampling
-  floor and mass-produce false triggers. The per-channel *mapping* in
-  `_intersections.json` was verified correct against controller high-res data
-  (`__correlate_channels.py`) — do not "fix" accuracy problems by remapping
-  channels; fix the sweep speed (ROADMAP 4a) or gate the rules.
+- **Measured 2026-07-31, post-4a (load-bearing):** with `snmp_chunk_size: 8`
+  the whole detector sweep is one PDU, and on intersection 201 the **effective
+  sampling cycle is ~0.33 s** (~0.125 s sweep + the 0.2 s `poll_interval`
+  sleep), catching **~94 % of true detector edges** (97 % of ON pulses).
+  Baseline before the flip, for contrast: 8 sequential round trips, a
+  1.0–1.5 s cycle, and only ~26 % of edges — which is why the pre-2026-07-31
+  guidance treated every high-duty-channel trigger as unreliable. The
+  per-channel *mapping* in `_intersections.json` is verified correct against
+  controller high-res data (`__correlate_channels.py`, twice: 2026-07-19 and
+  again post-flip) — never "fix" accuracy problems by remapping channels.
+  **Neither number transfers to another controller**: 8 is set only for 201,
+  and `poll_interval` still bounds the cycle from below. Trust
+  `effective_cycle_sec()` (below) over either figure.
 - **The monitor measures its own cycle** (2026-07-30, ROADMAP 9A):
   `BaseMonitor` folds each `_poll()`-plus-sleep into an EMA (α=0.1) exposed as
   `effective_cycle_sec()` and in a new `get_stats()`, and logs a rate-limited
@@ -425,10 +432,19 @@ As of this writing:
   (engine-log vs ATSPM-export precision/recall report), `__capture_ntcip.py`
   (raw NTCIP detector-edge capture, all 64 channels, ATSPM 82/81 event codes —
   for channel-mapping audits against the pyatspm DB; reuses the production
-  SNMP client/OID math, `--simulate` for offline smoke tests),
+  SNMP client/OID math **including one batched `get(*group_oids)` per sweep**,
+  so its reported median/p95 sweep time represents the monitor's — pass
+  `--chunk-size` or a `--config` carrying `snmp_chunk_size` to match
+  production, and `--simulate` for offline smoke tests),
+  `__decode_datz.py` (controller `.datZ`/`.zip` → `timestamp,event_code,
+  parameter` CSV — the ground truth the next two tools eat; calls **pyatspm's
+  own** decoder helpers by file path, and applies the datZ header's sub-minute
+  offset, which an ad-hoc extraction once dropped: see the 2026-07-31
+  DESIGN_HISTORY entry and note `banks_events_20260719_1730.csv` is 1 s early),
   `__correlate_channels.py` (MCC waveform correlation of a capture against a
   controller high-res export — verifies the channel map; see the 2026-07-19
-  DESIGN_HISTORY entries), plus `simulate_playback.py`. `video_engine/tests/` holds the unit tests
+  and 2026-07-31 DESIGN_HISTORY entries), plus `simulate_playback.py`.
+  `video_engine/tests/` holds the unit tests
   (`test_discrepancy_rules.py` and `test_remux_manager.py`, stdlib `unittest` —
   the layout precedent for ROADMAP 4d) and `video_engine/tests/fixtures/` the
   captured test data
@@ -436,8 +452,10 @@ As of this writing:
   `video_engine/` modules (`record_clip`, `__replay_verify`,
   `__probe_adversarial`, `simulate_playback`) add a `sys.path` bootstrap
   (`.../tools/` → parent) so they run from any working directory; the others
-  (`__capture_rtsp`, `drop_trigger`, `__accuracy_report`) don't import them
-  and are location-independent (`__accuracy_report` needs `pytz`).
+  (`__capture_rtsp`, `drop_trigger`, `__accuracy_report`, `__decode_datz`)
+  don't import them and are location-independent (`__accuracy_report` needs
+  `pytz`; `__decode_datz` resolves the sibling pyatspm checkout from its own
+  path, overridable with `--pyatspm`).
 
 See [ROADMAP.md](ROADMAP.md) for open architectural decisions and planned work.
 

@@ -1066,3 +1066,64 @@ decided. Entries after this point are logged as the decision lands.
   **ROADMAP Item 11 was replaced by a done-stub** per the workflow rule for
   finished items, keeping the pyatspm reference map, the verified-facts list and
   the two live risks (calibration staleness, sampling floor) that outlive it.
+
+- 2026-07-31 — **ROADMAP 4a closed: the batched SNMP sweep is verified on the
+  controller. Effective sampling cycle 1.53 s → ~0.33 s; edge capture 26 % →
+  94 %.** The owner pushed the post-flip round trip (10-min
+  `ntcip_capture_20260731_181108.csv`, the 16:00–21:30 datZ set, and a 2 h 46 m
+  engine run in `discrepancies_log.csv`); this session decoded and verified it.
+  **Channel map re-confirmed** — all 27 active channels self-match under
+  `__correlate_channels.py` (best score = own number, every configured detector
+  `ok ✓`), so the 2026-07-19 mapping verdict still holds after the chunk-size
+  change. **The sweep-speed number did not come from the capture**, and that is
+  the methodological finding worth keeping: `__capture_ntcip.py` still read one
+  group OID per `client.get()` in a per-group loop, so `snmp_chunk_size` never
+  touched it — its cycle only drifted 1.08 s → 0.83 s on ambient RTT, and an
+  edge-capture ratio computed from it (67 % edges / 72 % pulses) measures *the
+  tool*, not production. The production monitor's cycle was instead recovered
+  from the engine's own output: Rule 2 orphan-pulse durations in
+  `discrepancies_log.csv` are quantized by the sampling cycle, and the 114
+  logged pulses land on clean multiples of **~0.325 s** (0.65, 0.975, 1.30,
+  1.625, …). With `poll_interval_sec: 0.2` that implies a **~0.125 s sweep**,
+  matching the 2026-07-20 probe's 93 ms prediction for the 6-group production
+  shape (~10× the ~1.3 s baseline sweep). The floor gate corroborates it
+  independently: the shortest pulse Rule 2 accepted was 0.645 s, and the gate
+  is `2.0 × floor`, so the injected floor was ≤ 0.323 s. **Edge capture at the
+  production cycle is 94 % (97 % of ON pulses)**, from a phase-averaged
+  resampling of the controller's own 0.1 s waveforms at 0.325 s; the same model
+  predicts 71 %/79 % at the capture tool's 0.834 s cycle against 67 %/72 %
+  measured, which is what validates it. Baseline for the same computation on
+  the 2026-07-19 pair: 26 % edges / 27 % pulses. Target (≥ 90 %) met.
+  **Two fixes landed rather than leaving the gap.** (1) `__capture_ntcip.py`
+  now issues one batched `client.get(*group_oids)` per sweep — the same call
+  shape as `detector_monitor._poll` — takes `--chunk-size` (defaulting to the
+  config's `snmp_chunk_size`), and prints median/p95 sweep time plus the
+  implied sampling cycle in its summary, so the next capture measures the
+  production path directly instead of needing this inference. The simulated
+  client's `get()` was widened to `*oids` to match. (2) New
+  `video_engine/tools/__decode_datz.py` — datZ → `timestamp,event_code,
+  parameter` CSV, expanding `.zip` bundles, with `--detectors-only` and
+  `--start/--end` window filters. It calls **pyatspm's own** decoder helpers by
+  file path (`_extract_header_fields` + `_parse_binary_payload`), bypassing
+  `parse_datz_bytes` only because that returns a pandas DataFrame and pandas
+  isn't installed here. It exists because the ad-hoc 2026-07-19 extraction
+  **omitted the header's sub-minute offset**: binary offsets are measured from
+  the `Controller Data Log Beginning` instant, 0.0–1.0 s past the filename's
+  clock boundary, and `banks_events_20260719_1730.csv` is consequently **1.0 s
+  early** throughout. That inflated the era's headline skew — the
+  "+1.08 s NTCIP-behind-controller" figure in the 2026-07-19 entry re-measures
+  as **+429 ms** once the offset is applied, which is the physically sensible
+  answer (≈ half of that capture's 1.08 s cycle) and lines up with the +437 ms
+  measured on 07-31 at a 0.83 s cycle. The committed 07-19 CSV is left as-is as
+  a historical artifact; treat its timestamps as 1 s early, or re-decode from
+  the datZ, which is also committed. Correct decode of the new window is
+  committed as `banks_events_20260731_1811.csv`.
+  **Consequence for ROADMAP 9 that outranks 4a itself:** at a ~0.33 s measured
+  floor the Rule 2 gate is ~0.65 s, not the 3.2 s the 1.6 s default implied, so
+  **Rule 2 is no longer effectively disabled** — it fired 114 of the 180
+  triggers in the pushed run, versus zero by design under the old floor. The
+  runtime floor injection did this on its own with no config change, which is
+  the 9B design working as intended. 9C's prerequisite is now met and its input
+  data (2 h 46 m of engine triggers + overlapping datZ) is in the repo; the
+  precision/recall re-baseline is the next session, and the 114 Rule 2 triggers
+  are unvalidated until it runs.

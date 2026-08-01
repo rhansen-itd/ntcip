@@ -10,12 +10,21 @@ to discover the *true* NTCIP-channel → physical-zone mapping — including
 channels the intersection config doesn't currently claim.
 
 It deliberately reuses the production stack — ``EconoliteSNMPClient``
-(SNMPv1, port 501, CHUNK_SIZE=1) and the same ``DETECTOR_GROUPS`` OIDs +
-LSB-first bit unpacking as ``DetectorMonitor``/``parse_detectors_from_bitmask``
-— so what lands in the CSV is exactly what the discrepancy engine would see,
-mapping bugs included.  (This is a standalone script, not a ``video_engine``
-module, so importing ``ntcip_monitor`` here does not violate the package
-boundary; the two packages themselves still never import each other.)
+(SNMPv1, port 501) and the same ``DETECTOR_GROUPS`` OIDs + LSB-first bit
+unpacking as ``DetectorMonitor``/``parse_detectors_from_bitmask`` — so what
+lands in the CSV is exactly what the discrepancy engine would see, mapping
+bugs included.  (This is a standalone script, not a ``video_engine`` module,
+so importing ``ntcip_monitor`` here does not violate the package boundary;
+the two packages themselves still never import each other.)
+
+**Including the sweep shape**: like ``detector_monitor._poll``, one cycle is a
+single batched ``client.get(*group_oids)``, and ``--chunk-size`` (or the
+config's ``snmp_chunk_size``) sets how the client splits that into PDUs.  This
+matters — before 2026-07-31 this tool read one group per ``get()`` in a loop,
+so it measured its own 8-round-trip cadence rather than the monitor's, and a
+capture taken after the chunk-size flip looked unimproved for that reason
+alone (DESIGN_HISTORY 2026-07-31).  **Match the monitor's chunk size or the
+sampling cycle in the summary is not the monitor's.**
 
 Output CSV columns (edge rows use ATSPM's event vocabulary so the pyatspm
 side needs no translation):
@@ -28,8 +37,8 @@ side needs no translation):
     event         "on" / "off" / "init_on" / "init_off"
 
 One ``init_*`` row per channel records the state seen on the first successful
-poll, so a correlator knows the starting level.  A failed group read skips
-that group for the cycle (states persist; no false edges are synthesized).
+poll, so a correlator knows the starting level.  A failed sweep skips the whole
+cycle (states persist; no false edges are synthesized).
 
 Usage::
 
@@ -46,15 +55,19 @@ Usage::
     python3 video_engine/tools/__capture_ntcip.py --simulate --duration 5
 
 ``--duration 0`` runs until Ctrl-C.  ``--echo`` prints each edge live.
-A cadence summary (achieved poll rate, stalls, per-detector edge counts) is
-printed on exit — check it before trusting a capture: if the achieved cycle
-time is much worse than ``--poll``, short pulses may be aliased.
+A cadence summary (achieved poll rate, stalls, median/p95 sweep time, the
+implied sampling cycle, and per-detector edge counts) is printed on exit —
+check it before trusting a capture: if the achieved cycle time is much worse
+than ``--poll``, short pulses may be aliased.  Decode the matching controller
+datZ with ``__decode_datz.py``, then correlate with
+``__correlate_channels.py``.
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+import statistics
 import sys
 import time
 from datetime import datetime
@@ -93,18 +106,22 @@ class _SimulatedClient:
     def __init__(self):
         self.stats = {"reads": 0, "errors": 0}
 
-    def get(self, oid):
+    def get(self, *oids):
+        """Mirror ``EconoliteSNMPClient.get``: scalar for one OID, list for many."""
         self.stats["reads"] += 1
-        group_idx = DETECTOR_GROUPS.index(oid)
         now = time.time()
-        bitmask = 0
-        for bit in range(8):
-            det = group_idx * 8 + 1 + bit
-            period = 3.0 + (det % 7)          # 3–9 s cycle
-            on_frac = 0.15 + 0.05 * (det % 4)  # 0.15–0.30 duty
-            if (now / period) % 1.0 < on_frac:
-                bitmask |= 1 << bit
-        return bitmask
+        out = []
+        for oid in oids:
+            group_idx = DETECTOR_GROUPS.index(oid)
+            bitmask = 0
+            for bit in range(8):
+                det = group_idx * 8 + 1 + bit
+                period = 3.0 + (det % 7)          # 3–9 s cycle
+                on_frac = 0.15 + 0.05 * (det % 4)  # 0.15–0.30 duty
+                if (now / period) % 1.0 < on_frac:
+                    bitmask |= 1 << bit
+            out.append(bitmask)
+        return out[0] if len(oids) == 1 else out
 
 
 def _parse_detector_spec(spec: str) -> set:
@@ -137,6 +154,11 @@ def main() -> int:
                      help="SNMP port (default 501, or from --config)")
     src.add_argument("--community", default=None,
                      help="community string (default 'administrator', or from --config)")
+    src.add_argument("--chunk-size", type=int, default=None,
+                     help="OIDs per SNMP PDU (default: the config's "
+                          "snmp_chunk_size, else the client default of 1). "
+                          "Must match the production monitor's setting or the "
+                          "capture's sampling cycle will not represent it.")
 
     ap.add_argument("--detectors", default="1-64",
                     help="channels to capture, e.g. '1-64' or '1-8,17,24-33' "
@@ -158,6 +180,7 @@ def main() -> int:
 
     # ── Resolve controller address ───────────────────────────────────────
     ip, port, community = args.ip, args.port, args.community
+    chunk_size = args.chunk_size
     if args.config:
         import json
         cfg_doc = json.loads(Path(args.config).read_text(encoding="utf-8"))
@@ -171,6 +194,8 @@ def main() -> int:
         ip = ip or cfg.get("controller_ip")
         port = port or cfg.get("snmp_port")
         community = community or cfg.get("snmp_community")
+        if chunk_size is None:
+            chunk_size = cfg.get("snmp_chunk_size")
         print(f"Controller from {args.config}[{key}]: {ip}:{port or 501}")
     port = port or 501
     community = community or "administrator"
@@ -196,10 +221,12 @@ def main() -> int:
             print(f"ERROR: cannot import the SNMP client ({exc}). "
                   f"Install requirements (pysnmp) or use --simulate.")
             return 2
-        client = EconoliteSNMPClient(ip, port=port, community=community)
+        client = EconoliteSNMPClient(ip, port=port, community=community,
+                                     chunk_size=chunk_size)
 
     wanted = _parse_detector_spec(args.detectors)
     groups = sorted({(d - 1) // 8 for d in wanted})
+    group_oids = [DETECTOR_GROUPS[g] for g in groups]
     tz = pytz.timezone(args.tz)
 
     out_path = Path(args.out) if args.out else Path(
@@ -216,6 +243,7 @@ def main() -> int:
     cycles = 0
     errors = 0
     max_gap = 0.0
+    sweep_ms: list = []
     started = time.time()
     prev_cycle_ts = None
     stop_at = started + args.duration if args.duration > 0 else None
@@ -239,31 +267,39 @@ def main() -> int:
                     max_gap = max(max_gap, cycle_ts - prev_cycle_ts)
                 prev_cycle_ts = cycle_ts
 
-                for gidx in groups:
-                    try:
-                        bitmask = client.get(DETECTOR_GROUPS[gidx])
-                    except SNMPError as exc:
-                        errors += 1
-                        if errors <= 5 or errors % 100 == 0:
-                            print(f"WARN: group {gidx + 1} read failed "
-                                  f"(#{errors}): {exc}")
-                        continue
-                    ts = time.time()
-                    for bit in range(8):
-                        det = gidx * 8 + 1 + bit
-                        if det not in wanted:
-                            continue
-                        state = (bitmask >> bit) & 1
-                        prev = last_state.get(det)
-                        if prev is None:
-                            write_row(ts, det, 0, "init_on" if state else "init_off")
-                        elif state != prev:
-                            if state:
-                                write_row(ts, det, EVENT_ON, "on")
-                            else:
-                                write_row(ts, det, EVENT_OFF, "off")
-                            edge_counts[det] += 1
-                        last_state[det] = state
+                # One batched read for the whole sweep — the same call shape
+                # detector_monitor._poll uses, so the capture's sampling cycle
+                # represents the production monitor's (the client re-chunks
+                # internally per chunk_size and preserves order).
+                try:
+                    values = client.get(*group_oids)
+                    if len(group_oids) == 1:
+                        values = [values]
+                except SNMPError as exc:
+                    errors += 1
+                    if errors <= 5 or errors % 100 == 0:
+                        print(f"WARN: detector sweep failed (#{errors}): {exc}")
+                    values = None
+                ts = time.time()
+                if values is not None:
+                    sweep_ms.append((ts - cycle_ts) * 1000.0)
+                    for gidx, bitmask in zip(groups, values):
+                        for bit in range(8):
+                            det = gidx * 8 + 1 + bit
+                            if det not in wanted:
+                                continue
+                            state = (bitmask >> bit) & 1
+                            prev = last_state.get(det)
+                            if prev is None:
+                                write_row(ts, det, 0,
+                                          "init_on" if state else "init_off")
+                            elif state != prev:
+                                if state:
+                                    write_row(ts, det, EVENT_ON, "on")
+                                else:
+                                    write_row(ts, det, EVENT_OFF, "off")
+                                edge_counts[det] += 1
+                            last_state[det] = state
 
                 cycles += 1
                 f.flush()
@@ -292,6 +328,14 @@ def main() -> int:
           f"({cycles / elapsed:.1f}/s achieved vs {1.0 / args.poll:.1f}/s target), "
           f"{total_edges} edges, {errors} SNMP errors, "
           f"worst cycle gap {max_gap * 1000:.0f} ms.")
+    if sweep_ms:
+        ordered = sorted(sweep_ms)
+        p95 = ordered[min(len(ordered) - 1, int(0.95 * len(ordered)))]
+        print(f"Detector sweep ({len(groups)} group OIDs @ chunk_size="
+              f"{getattr(client, 'chunk_size', 1)}): median "
+              f"{statistics.median(sweep_ms):.0f} ms, p95 {p95:.0f} ms. "
+              f"Effective sampling cycle = sweep + {args.poll:.2f}s poll sleep "
+              f"= ~{statistics.median(sweep_ms) / 1000.0 + args.poll:.2f}s.")
     if cycles and (cycles / elapsed) < 0.5 / args.poll:
         print("WARN: achieved poll rate is far below target — short pulses may "
               "be aliased in this capture. Consider fewer --detectors groups.")

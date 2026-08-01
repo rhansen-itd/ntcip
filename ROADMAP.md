@@ -70,21 +70,29 @@ Design and code in [[SCOPE_sampling_floor.md]]; A and B are **done**:
   `sampling_floor_sec`, then every 60 s from the measured cycle); Rule 2
   refuses pulses below `min_pulse_floor_multiple × floor`; per-pair high-duty
   advisory WARNING with opt-in `suppress_high_duty_pairs`.
-- [ ] **C — post-4a re-baseline protocol.** Owner-run; steps and pass/fail
-  numbers are in [[SCOPE_sampling_floor.md]] §"Item C". **Prerequisite:** 4a's
-  controller round trip (probe → `snmp_chunk_size` → restart → recapture).
+- [ ] **C — post-4a re-baseline protocol.** Steps and pass/fail numbers are in
+  [[SCOPE_sampling_floor.md]] §"Item C". **Prerequisite met 2026-07-31** — 4a's
+  round trip landed and the inputs are already in the repo:
+  `discrepancies_log.csv` (2 h 46 m engine run, 18:36–21:22 on 2026-07-31, 180
+  triggers) and the overlapping `ECON_10.37.23.200_2026_07_31_1600-2130.zip`
+  datZ set. Decode ground truth with `__decode_datz.py --detectors-only`, then
+  run `__accuracy_report.py`. **This is the next session.**
 
-**Read before running C:** at the default 1.6 s floor the Rule 2 gate (3.2 s)
-exceeds a typical 2.0 s `lag_threshold_sec`, so **Rule 2 is effectively off
-until the sweep gets faster** — a re-baseline run before 4a lands will show
-zero Rule 2 triggers *by design*, not a regression. Set `sampling_floor_sec`
-per the probe verdict (or let the runtime measurement do it) before judging
-precision/recall.
+**Read before running C — the situation inverted on 2026-07-31.** The old note
+here said Rule 2 would show zero triggers by design, because at the 1.6 s
+default floor its gate (3.2 s) exceeded a typical 2.0 s `lag_threshold_sec`.
+After 4a the runtime measures a **~0.33 s** cycle and injects it, so the gate is
+now **~0.65 s** and Rule 2 is fully live: it produced **114 of the 180**
+triggers in the pushed run, none of them yet validated against ground truth.
+Rule 2 precision is therefore the main open question C answers. The floor is now
+set by the runtime measurement — don't pin `sampling_floor_sec` back to 1.6
+unless C shows a reason to.
 
-Suggested prompt (after the owner's 4a round trip + a ≥2 h engine run):
+Suggested prompt:
 > In the ntcip project, do Item 9C of ROADMAP.md: run the re-baseline
-> protocol in SCOPE_sampling_floor.md §"Item C" against the new capture/datZ
-> and the ATSPM export, and report each pass/fail number. Categorize residual
+> protocol in SCOPE_sampling_floor.md §"Item C" against the 2026-07-31 engine
+> run and datZ set already in the repo, and report each pass/fail number.
+> Pay particular attention to Rule 2, which the faster sweep re-enabled. Categorize residual
 > misses/FPs before touching any rule code. DESIGN_HISTORY entry + check off.
 
 ---
@@ -127,49 +135,31 @@ Suggested prompt:
 Findings from Jules's ongoing automated review, triaged against current code
 when logged. Grouped by how they should be tackled; each lettered sub-item is
 a session-sized unit. Remaining order: **4d** (tests) → **4b** (mechanical),
-with **4e**/**4h** after 4d and **4a** waiting only on the owner's capture.
-**4c** and **4g** are don't-action lists. **4f** (security) landed 2026-07-31 —
+with **4e**/**4h** after 4d. **4c** and **4g** are don't-action lists.
+**4f** (security) landed 2026-07-31 and **4a** (SNMP sweep speed) 2026-07-31 —
 see DESIGN_HISTORY.
 
-### 4a. SNMP sweep speed — verify the round trip (nearly done)
+### 4a. SNMP sweep speed — **done 2026-07-31**
 
-The original finding (per-OID poll loops) and the measurement that made it the
-top accuracy item (`CHUNK_SIZE=1` → a 1.0–1.5 s sampling cycle, 7–42 % edge
-capture) are recorded in DESIGN_HISTORY (2026-07-19). **The software half and
-the config flip are both done:**
+Batching landed 2026-07-19, `snmp_chunk_size: 8` was adopted on the probe
+verdict 2026-07-31, and the controller round trip verified it the same day:
+**effective sampling cycle 1.53 s → ~0.33 s, edge capture 26 % → 94 %** (97 %
+of ON pulses), channel map re-confirmed with every active channel self-matching.
+Full measurement, including why the number came from the engine's own Rule 2
+pulse quantization rather than from the capture, is in DESIGN_HISTORY
+(2026-07-31). Two tool fixes landed with it: `__capture_ntcip.py` now issues one
+batched `get(*group_oids)` per sweep (it had stayed per-group, so it never
+exercised the batched path) and reports median/p95 sweep time, and
+`video_engine/tools/__decode_datz.py` decodes datZ → event CSV via pyatspm's own
+helpers.
 
-- [x] **Software** (2026-07-19) — call sites batched into one `get(*oids)`,
-  `EconoliteSNMPClient(chunk_size=...)`, `detector_range` derived from the
-  config's detectors, `snmp_chunk_size` / `controller.chunk_size` config keys,
-  `stats['reads']` now counting poll cycles. Tests:
-  `ntcip_monitor/tests/test_snmp_batching.py`.
-- [x] **Probe** (owner, 2026-07-20; `snmp_batch_probe_20260720_073926.json`)
-  — **chunk 8 is clean** on the detector groups: 25/25, order + byte ranges
-  ok, median sweep **547 ms → 94 ms** (5.8×); production 6-group shape 93 ms.
-  So the Cobalt's "Too Big" history really was a dense-table effect, not a
-  multi-OID-PDU limit. (The dirty-verdict fallback — concurrent per-group
-  clients — is therefore **moot**; its design is preserved in DESIGN_HISTORY
-  2026-07-19 if a different controller ever needs it.)
-- [x] **Config** (2026-07-31) — `"snmp_chunk_size": 8` in
-  `_intersections.json`, `intersections.json`, `video_engine/intersections.json`
-  (all intersection 201 = the probed controller 10.37.23.200). Deliberately
-  **not** set for intersection 701 (10.70.10.51) or the standalone
-  `config.json` (10.37.2.68): different controllers, no probe evidence. Probe
-  each before raising it there.
+**Carried forward:** `banks_events_20260719_1730.csv` is **1.0 s early** — the
+ad-hoc extraction that produced it dropped the datZ header's sub-minute offset.
+Re-decode from the committed datZ with `__decode_datz.py` rather than reusing
+it, and read the 2026-07-19 entry's "+1.08 s skew" as +429 ms.
 
-What remains — **the same round trip Item 9C needs, so do one capture, not
-two**:
-
-3. [ ] **[Owner, controller machine]** restart the monitor (nothing takes
-   effect until then), then rerun `__capture_ntcip.py` ~10 min with a matching
-   datZ pull; push capture + datZ.
-4. [ ] **[Any Claude session, any model]** verify with
-   `__correlate_channels.py` and the edge-capture-ratio check that sweep time
-   and edge capture improved (baseline 2026-07-19: median sweep 1.53 s, 7–42 %
-   of edges seen; expected now ~0.1 s sweep and ≥ 90 % capture). Then move
-   this item to DESIGN_HISTORY.
-
-Note the outputs OIDs failed this probe for an unrelated reason — see Item 10.
+Note the outputs OIDs failed the 2026-07-20 probe for an unrelated reason — see
+Item 10.
 
 ### 4b. Unused-import cleanup (one mechanical sweep, zero behavior risk)
 
