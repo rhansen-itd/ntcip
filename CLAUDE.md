@@ -123,7 +123,8 @@ The floor is **injected, never imported**: `system_runner` calls
 thereafter from `DetectorMonitor.effective_cycle_sec()` — do not "simplify"
 this by importing `ntcip_monitor` into the engine. Rule 2 refuses orphan
 pulses shorter than `min_pulse_floor_multiple × floor` (default 2.0×),
-counting them in the per-pair `below_floor_suppressed`. **The runtime
+counting them in the per-pair `below_floor_suppressed` and recording each one
+in `engine_suppressions.csv` (below). **The runtime
 measurement, not the 1.6 default, is what governs in production** — since 4a
 landed, intersection 201 measures ~0.33 s, so the Rule 2 gate is ~0.65 s and
 the rule is fully live (114 of 180 triggers in the 2026-07-31 run). Before 4a
@@ -138,8 +139,9 @@ disable Rules 1+2 for such pairs. Because the duty computation reads the same
 changes.
 
 The rule functions are pinned by `video_engine/tests/test_discrepancy_rules.py`
-(67 stdlib-`unittest` cases, incl. the stale-refire guard, the floor gate, the
-decision log, and `_resolve_pytz`) — run it after any engine change:
+(88 stdlib-`unittest` cases, incl. the stale-refire guard, the floor gate, the
+decision log, the suppression log, and `_resolve_pytz`) — run it after any
+engine change:
 `python3 video_engine/tests/test_discrepancy_rules.py`.
 Accuracy vs. an ATSPM ground-truth export is measured with
 `video_engine/tools/__accuracy_report.py` (correspondence-based
@@ -151,8 +153,8 @@ invents misses. Last measured 2026-07-31 (ROADMAP 9C): precision 89.4 %,
 adjusted recall 59.9 % — but that recall was read off the *recording* log and
 is a floor; see the next paragraph.
 
-**Two logs, and they mean different things (2026-08-01, ROADMAP 9C1 —
-load-bearing for anyone measuring accuracy).** Both land in `output_dir`:
+**Three logs, and they mean different things (2026-08-01, ROADMAP 9C1 + 9C3 —
+load-bearing for anyone measuring accuracy).** All land in `output_dir`:
 
 - **`engine_decisions.csv`** — written by `discrepancy_engine._log_decision`,
   one row per trigger the engine emitted, appended right after the Hot Folder
@@ -178,6 +180,23 @@ load-bearing for anyone measuring accuracy).** Both land in `output_dir`:
   Measured on the 2026-07-31 run, the cap was saturated 11.6 % of wall clock
   yet accounted for 43 % of the apparent misses. **Recall read off this file
   is a floor, not an estimate.**
+- **`engine_suppressions.csv`** — written by
+  `discrepancy_engine._log_suppression`, one row per candidate the engine
+  deliberately **declined** to act on, tagged with a `reason` column. Today
+  the only reason is `below_sampling_floor` (the Rule 2 gate). Same injected
+  path (`suppression_log_path`, `None` disables) and the same best-effort
+  contract as the decision log; both share `_append_csv_row`, so the
+  never-re-header-a-resumed-file behavior cannot drift between them.
+  `_SUPPRESSION_LOG_FIELDS` is **append-only** for that reason.
+  `sampling_floor_sec` and `min_pulse_floor_multiple` are stored as separate
+  columns, not just their product, so a consumer can recompute the gate at
+  other multiples and recover the counterfactual from a finished run.
+  **A suppressed row is not a would-have-fired trigger** — the gate sits at
+  candidate registration, ahead of Rule 2's partner-overlap test, so recall
+  attributed to it is an upper bound. `reason` is a plain string precisely so
+  the other populations `__accuracy_report.py` currently *models* (cooldown,
+  grace expiry, high-duty, and ROADMAP 9C4's cross-pair duplicate) can land
+  here later as new values, with no schema change and no fourth file.
 
 `__accuracy_report.py` auto-detects which format it was handed (on the
 presence of an `event_timestamp` column) and says so in its first line; the
@@ -421,11 +440,11 @@ them relaxes the rule that the two packages don't import each other.
 
 Six suites, all **stdlib `unittest`** (pytest is not installed here), one file
 per subject, each runnable directly from any working directory via its own
-`sys.path` bootstrap. 234 cases total as of 2026-08-01:
+`sys.path` bootstrap. 255 cases total as of 2026-08-01:
 
 | Suite | Cases | Subject |
 |---|---|---|
-| `video_engine/tests/test_discrepancy_rules.py` | 67 | rule functions, `_evaluate_pair` integration, decision log, `_resolve_pytz` |
+| `video_engine/tests/test_discrepancy_rules.py` | 88 | rule functions, `_evaluate_pair` integration, decision log, suppression log, `_resolve_pytz` |
 | `video_engine/tests/test_remux_manager.py` | 22 | manager writer/timer bookkeeping (stubbed remuxer) |
 | `video_engine/tests/test_config_manager.py` | 9 | `ConfigProviderError` |
 | `ntcip_monitor/tests/test_overlay_shapes.py` | 86 | shape reader, status resolution, live source (stubbed PyAV) |

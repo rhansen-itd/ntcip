@@ -6,7 +6,8 @@ partner overlap), ``_compute_on_duty_fraction``, and
 stale-refire guard and the 2026-07-30 sampling-floor gate), plus a set of
 integration tests that drive ``DiscrepancyMonitor._evaluate_pair`` directly
 (no evaluator thread) against a stub ``ConfigProvider`` and a temp Hot Folder,
-the 2026-08-01 decision log (``engine_decisions.csv``), and ``_resolve_pytz``
+the 2026-08-01 decision log (``engine_decisions.csv``), the 2026-08-01
+suppression log (``engine_suppressions.csv``), and ``_resolve_pytz``
 (ROADMAP 4d).
 
 Run from anywhere:
@@ -40,6 +41,8 @@ from discrepancy_engine import (  # noqa: E402
     _DUTY_WINDOW_SEC,
     _ORPHAN_DECISION_GRACE_SEC,
     _PairRuntimeState,
+    _SUPPRESS_BELOW_FLOOR,
+    _SUPPRESSION_LOG_FIELDS,
     _check_rule1_continuous,
     _check_rule2_orphan,
     _compute_on_duty_fraction,
@@ -171,7 +174,7 @@ class TestMaybeRegisterOrphan(unittest.TestCase):
 
     def register(self, is_on=False, last_pulse_on=100.0, last_off=102.0,
                  min_pulse_sec=0.0):
-        DiscrepancyMonitor._maybe_register_orphan(
+        return DiscrepancyMonitor._maybe_register_orphan(
             self.rt, "a", is_on, last_pulse_on, last_off, self.THRESHOLD,
             min_pulse_sec,
         )
@@ -252,6 +255,33 @@ class TestMaybeRegisterOrphan(unittest.TestCase):
         self.assertEqual(self.rt.orphan_watch_a, (100.0, 100.001))
         self.assertEqual(self.rt.below_floor_suppressed, 0)
 
+    # ── Suppression reporting seam (ROADMAP 9C3) ──────────────────────────
+    # The helper stays static and pure; it reports the pulse it suppressed
+    # via its return value and the caller owns the log write.
+
+    def test_suppressed_pulse_is_returned(self):
+        self.assertEqual(self.register(min_pulse_sec=3.2), (100.0, 102.0))
+
+    def test_registered_pulse_returns_none(self):
+        self.assertIsNone(self.register(min_pulse_sec=0.4))
+
+    def test_early_returns_report_nothing(self):
+        # Every non-suppression path must be indistinguishable from "no
+        # candidate" to the caller, or the log gains phantom rows.
+        self.assertIsNone(self.register(is_on=True))
+        self.assertIsNone(self.register(last_pulse_on=0.0, last_off=0.0))
+        self.assertIsNone(self.register(last_pulse_on=100.0, last_off=105.0))
+
+    def test_suppression_reported_once_not_per_tick(self):
+        # Same guard as the counter: the evaluator re-examines this pulse
+        # every 0.1 s tick, and only the first call may produce a row.
+        results = [self.register(min_pulse_sec=3.2) for _ in range(5)]
+        self.assertEqual(results, [(100.0, 102.0), None, None, None, None])
+
+    def test_already_watched_pulse_reports_nothing(self):
+        self.register(min_pulse_sec=0.4)                    # arms the slot
+        self.assertIsNone(self.register(min_pulse_sec=3.2))  # same pulse
+
 
 # ---------------------------------------------------------------------------
 # ON-duty fraction (feeds the high-duty advisory)
@@ -325,7 +355,8 @@ class _StubProvider(ConfigProvider):
 
 
 def _build_monitor(
-    trigger_dir, threshold=0.2, floor=None, decision_log=None, **extra_cfg
+    trigger_dir, threshold=0.2, floor=None, decision_log=None,
+    suppression_log=None, **extra_cfg
 ):
     """Build a two-detector DiscrepancyMonitor over a temp Hot Folder.
 
@@ -335,6 +366,7 @@ def _build_monitor(
         floor: When given, injected via ``set_sampling_floor`` the way
             ``system_runner`` does in production.
         decision_log: When given, the engine's decision-log CSV path.
+        suppression_log: When given, the engine's suppression-log CSV path.
         **extra_cfg: Extra top-level intersection config keys (e.g.
             ``suppress_high_duty_pairs``).
 
@@ -357,6 +389,7 @@ def _build_monitor(
         trigger_dir=trigger_dir,
         cooldown_sec=60.0,
         decision_log_path=decision_log,
+        suppression_log_path=suppression_log,
     )
     if floor is not None:
         monitor.set_sampling_floor(floor)
@@ -857,6 +890,194 @@ class TestDecisionLog(unittest.TestCase):
         self.assertEqual(
             len(sorted(Path(self._tmp.name).glob("trigger_*.json"))), 1
         )
+
+
+# ---------------------------------------------------------------------------
+# Suppression log (ROADMAP 9C3)
+# ---------------------------------------------------------------------------
+
+class TestSuppressionLog(unittest.TestCase):
+    """The engine's record of candidates it deliberately declined to act on.
+
+    The counterpart to the decision log: that file says what was emitted,
+    this one says what was withheld and why.  Today the only reason is the
+    Rule 2 sampling-floor gate.
+    """
+
+    THRESHOLD = 0.2
+    FLOOR = 0.06          # gate = FLOOR x _DEFAULT_MIN_PULSE_FLOOR_MULTIPLE
+    GATE = 0.12
+    PULSE = 0.05          # below the gate, and below the threshold
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.log_path = Path(self._tmp.name) / "out" / "engine_suppressions.csv"
+        self.decision_path = Path(self._tmp.name) / "out" / "engine_decisions.csv"
+        self.monitor = _build_monitor(
+            self._tmp.name, threshold=self.THRESHOLD, floor=self.FLOOR,
+            decision_log=self.decision_path, suppression_log=self.log_path,
+        )
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def rows(self):
+        with self.log_path.open(newline="", encoding="utf-8") as fh:
+            return list(csv.DictReader(fh))
+
+    def suppress(self, det_id="1", duration=None):
+        """Drive one below-floor pulse and evaluate the pair once."""
+        self.monitor.on_detector_on(det_id)
+        time.sleep(self.PULSE if duration is None else duration)
+        self.monitor.on_detector_off(det_id)
+        self.monitor._evaluate_pair("1:2", "1", "2")
+
+    def test_no_path_writes_nothing(self):
+        monitor = _build_monitor(
+            self._tmp.name, threshold=self.THRESHOLD, floor=self.FLOOR
+        )
+        monitor.on_detector_on("1")
+        time.sleep(self.PULSE)
+        monitor.on_detector_off("1")
+        monitor._evaluate_pair("1:2", "1", "2")
+        self.assertFalse(self.log_path.exists())
+
+    def test_parent_directory_is_created(self):
+        self.suppress()
+        self.assertTrue(self.log_path.exists())
+
+    def test_row_records_the_reason(self):
+        self.suppress()
+        rows = self.rows()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["reason"], _SUPPRESS_BELOW_FLOOR)
+        self.assertEqual(rows[0]["rule"], "rule2_orphan_pulse")
+        self.assertEqual(rows[0]["pair_key"], "1:2")
+
+    def test_row_carries_the_exact_pulse_window(self):
+        self.suppress()
+        row = self.rows()[0]
+        start, end = float(row["event_start_ts"]), float(row["event_end_ts"])
+        self.assertLess(start, end)
+        # The window's span is the duration that was measured against the gate.
+        self.assertAlmostEqual(
+            end - start, float(row["pulse_duration_sec"]), places=2
+        )
+        # And the decision was taken after the pulse closed, never before.
+        self.assertGreaterEqual(float(row["event_timestamp"]), end)
+
+    def test_suppressed_pulse_was_actually_below_the_gate(self):
+        self.suppress()
+        row = self.rows()[0]
+        self.assertLess(
+            float(row["pulse_duration_sec"]), float(row["min_pulse_sec"])
+        )
+
+    def test_gate_factors_are_recorded_separately(self):
+        # The counterfactual sweep ("what would 1.5x have kept?") needs the
+        # floor and the multiple, not just their product.
+        self.suppress()
+        row = self.rows()[0]
+        self.assertAlmostEqual(float(row["sampling_floor_sec"]), self.FLOOR)
+        self.assertAlmostEqual(
+            float(row["sampling_floor_sec"])
+            * float(row["min_pulse_floor_multiple"]),
+            float(row["min_pulse_sec"]),
+            places=4,
+        )
+
+    def test_slot_and_orphan_det_identify_the_detector(self):
+        self.suppress(det_id="2")
+        row = self.rows()[0]
+        self.assertEqual(row["slot"], "b")
+        self.assertEqual(row["orphan_det"], "2")
+        self.assertEqual(row["det_a"], "1")
+        self.assertEqual(row["det_b"], "2")
+        self.assertEqual(row["det_a_type"], "radar")
+        self.assertEqual(row["det_b_type"], "loop")
+
+    def test_one_row_per_pulse_not_per_tick(self):
+        # The evaluator re-reads the same last-pulse every 0.1 s tick.  A row
+        # per tick would make the file useless for counting suppressions.
+        self.suppress()
+        for _ in range(4):
+            self.monitor._evaluate_pair("1:2", "1", "2")
+        self.assertEqual(len(self.rows()), 1)
+
+    def test_a_new_pulse_produces_a_new_row(self):
+        self.suppress()
+        self.suppress()
+        self.assertEqual(len(self.rows()), 2)
+
+    def test_registered_pulse_writes_no_row(self):
+        # A pulse above the gate is evidence; it belongs in the decision log
+        # if it fires, and never in this file.
+        self.monitor.on_detector_on("1")
+        time.sleep(self.GATE + 0.03)
+        self.monitor.on_detector_off("1")
+        self.monitor._evaluate_pair("1:2", "1", "2")
+        self.assertFalse(self.log_path.exists())
+
+    def test_suppression_produces_no_trigger_and_no_decision_row(self):
+        # The whole point: withheld from the Hot Folder, but not from the
+        # record.  A suppressed candidate must not reach either.
+        self.suppress()
+        self.assertEqual(
+            sorted(Path(self._tmp.name).glob("trigger_*.json")), []
+        )
+        self.assertFalse(self.decision_path.exists())
+        self.assertEqual(len(self.rows()), 1)
+
+    def test_counter_and_log_agree(self):
+        self.suppress()
+        self.suppress()
+        self.assertEqual(
+            self.monitor._pair_runtime["1:2"].below_floor_suppressed,
+            len(self.rows()),
+        )
+
+    def test_header_matches_the_declared_field_order(self):
+        self.suppress()
+        header = self.log_path.read_text(encoding="utf-8").splitlines()[0]
+        self.assertEqual(header.split(","), list(_SUPPRESSION_LOG_FIELDS))
+
+    def test_header_written_once_across_appends(self):
+        self.suppress()
+        self.suppress()
+        lines = self.log_path.read_text(encoding="utf-8").strip().splitlines()
+        self.assertEqual(len(lines), 3)                     # header + 2 rows
+
+    def test_existing_log_is_appended_not_reheadered(self):
+        self.suppress()
+        first = self.log_path.read_text(encoding="utf-8")
+        # A fresh monitor over the same path — the restart case.
+        monitor = _build_monitor(
+            self._tmp.name, threshold=self.THRESHOLD, floor=self.FLOOR,
+            suppression_log=self.log_path,
+        )
+        monitor.on_detector_on("1")
+        time.sleep(self.PULSE)
+        monitor.on_detector_off("1")
+        monitor._evaluate_pair("1:2", "1", "2")
+        self.assertTrue(
+            self.log_path.read_text(encoding="utf-8").startswith(first)
+        )
+        self.assertEqual(len(self.rows()), 2)
+
+    def test_write_failure_does_not_block_evaluation(self):
+        # Same contract as the decision log: measurement degrades, the engine
+        # keeps running.
+        self.monitor._suppression_log_path = (
+            Path(self._tmp.name) / "not-a-dir.txt" / "suppressions.csv"
+        )
+        Path(self._tmp.name, "not-a-dir.txt").write_text("blocker")
+        with self.assertLogs("discrepancy_engine.test_int", level="ERROR"):
+            self.suppress()
+        # The pulse was still gated, and the engine still evaluates.
+        self.assertEqual(
+            self.monitor._pair_runtime["1:2"].below_floor_suppressed, 1
+        )
+        self.monitor._evaluate_pair("1:2", "1", "2")
 
 
 if __name__ == "__main__":

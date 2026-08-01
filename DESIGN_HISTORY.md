@@ -1419,3 +1419,97 @@ decided. Entries after this point are logged as the decision lands.
   also left alone — they name the video-buffering half of the system, not the
   module, and editing the discrepancy engine for a docstring word is not worth
   the diff. All 234 tests green throughout.
+
+- 2026-08-01 — **Item 9C3: the engine logs what it *declined* to do, with a
+  reason column, because the accuracy report was modelling that population
+  instead of measuring it.** `engine_suppressions.csv` — one row per candidate
+  the engine deliberately withheld, path injected by `system_runner`
+  (`suppression_log_path`, `None` disables), same best-effort contract as the
+  decision log.
+
+  **The motivating defect is a silent one.** `__accuracy_report.py:485`
+  computes `aliasing_floor = 2.0 × poll` and drops every GT isolated pulse
+  shorter than that from scoring — 138 events on the 2026-07-31 run, which is
+  much of what "adjusted" means in adjusted recall. That floor and the engine's
+  actual Rule 2 gate (`min_pulse_floor_multiple × sampling_floor`) land at
+  nearly the same number today (0.66 s vs 0.65 s), which makes it easy to
+  assume they select the same events. They do not: the report measures true
+  durations from the controller's 0.1 s waveform, while the gate measures the
+  engine's own quantized observation, which carries up to ±1 sampling cycle on
+  each edge. A true 0.9 s pulse the report keeps can be gated; a true 0.5 s
+  pulse the report drops can pass. So the excluded population was an
+  *assertion*, unverifiable from the artifacts. Now it is a file.
+
+  **The gate's two factors are stored separately, not just their product.**
+  `sampling_floor_sec` and `min_pulse_floor_multiple` each get a column, so a
+  consumer can recompute the gate at 1.0×/1.5×/3.0× and recover what the run
+  *would* have evaluated — a tuning curve for `min_pulse_floor_multiple` out
+  of a finished run, with no second controller session. Verified end-to-end
+  against det 33's real profile (median 0.70 s, 49 % under 0.65 s): three
+  suppressed pulses, sweep reporting 2/3 kept at 1.0× and 1/3 at 1.5×.
+
+  **Recall attributed to the gate is an upper bound, and the code says so.**
+  The gate sits at candidate *registration*, ahead of Rule 2's partner-overlap
+  test, so a suppressed pulse never reaches that test and may well have failed
+  it. Making the number exact would mean arming below-floor pulses and gating
+  at fire time — a real behavior change, since `orphan_watch_a/b` hold one
+  candidate each and arming junk would evict live candidates. Not done; §Item C
+  says categorize before touching rule code, and this item deliberately stayed
+  on the logging side of that line, as 9C1 did.
+
+  **Three implementation choices worth recording.** (1)
+  `_maybe_register_orphan` **stays a pure static method** and now *returns* the
+  pulse it suppressed rather than writing anything: the 13 existing tests call
+  it unbound, and I/O belongs to the caller that has the instance. Every
+  non-suppression path returns `None`, including the early returns, so the
+  caller cannot mistake "no candidate" for "suppressed" — pinned by a test.
+  (2) The floor and multiple are captured **once in `_evaluate_pair`**, next to
+  the existing "read the floor once so both slots are judged against the same
+  value" comment, so the row records the gate actually applied rather than
+  whatever the 60 s floor updater has moved on to by log time. (3) The
+  header-only-on-a-new-file logic was extracted into a shared
+  `_append_csv_row`, used by both logs — the restart-safety behavior that makes
+  an append-only column list matter is now impossible to fix in one file and
+  not the other.
+
+  **`reason` is a plain string on purpose.** `__accuracy_report.py` also models
+  cooldown suppression, Rule 2 verdicts discarded past
+  `_ORPHAN_DECISION_GRACE_SEC`, and `suppress_high_duty_pairs`; each becomes a
+  new value in this column, not a new file. So does 9C4's cross-pair duplicate
+  rejection, scoped in ROADMAP the same day.
+
+  21 new cases (67 → 88 in `test_discrepancy_rules.py`, 234 → 255 total), all
+  six suites green. The consumer half — `--suppression-log` in
+  `__accuracy_report.py` — is deliberately *not* built yet: it scores an
+  artifact that does not exist until the C2 peak-hour run produces one, and
+  writing a reader against imagined data is how the ground-truth chain grew its
+  last two mismatches.
+
+- 2026-08-01 — **Item 9C4 scoped (not built): cross-pair duplicate triggers.**
+  The owner's 3-way comparisons are expressed as a *ring* of single
+  `paired_detector_id` links (46→17, 17→2, 2→46), which `_build_pairs`
+  normalizes into the 3 edges of a triangle — 5 such triangles plus 2 plain
+  pairs make up `_intersections.json`'s 17. The engine has no notion of the
+  group, so one physical event where B disagrees with both A and C fires on AB
+  *and* BC, often in the same evaluator tick (all pairs are evaluated
+  sequentially within a tick; the deciseconds the owner observed are the cases
+  that straddle two 0.1 s ticks). Each duplicate burns one of only 2 writer
+  slots — the same back-pressure that corrupted the 2026-07-31 recall
+  measurement — so dedup plausibly *raises* measurable recall.
+
+  Design recorded in ROADMAP: connected components in `_build_pairs`, a
+  per-group `last_fire_ts` checked before the tmp-write in `_fire_trigger`, and
+  on a hit skip the trigger file but still call `_log_decision` with a marker.
+  That "log it but don't record it" shape is only expressible because 9C1
+  split the engine's record from the buffer's; before it, the only log was
+  written downstream of the writer semaphore.
+
+  **Sequenced after C2 for a measurement reason, not a risk one.**
+  `__make_gt_export.py` runs pyatspm's `analyze_discrepancies()` per pair, so
+  ground truth contains the identical AB/BC duplication. Suppressing one side
+  without simultaneously teaching `__accuracy_report.py` to credit the
+  suppressed row scores it as a **miss** — corrupting the exact number C2
+  exists to establish, and changing the instrument and the subject in the same
+  run with no baseline for either. Running C2 first also *measures* the
+  duplicate population (same-group rows in the decision log within N seconds),
+  so the dedup window comes from data rather than a guess.

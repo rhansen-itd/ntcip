@@ -270,6 +270,12 @@ class SystemRunner:
             # differ by exactly the triggers back-pressure dropped, which is
             # the only way to tell an engine miss from a busy writer pool.
             decision_log_path=self._output_dir / "engine_decisions.csv",
+            # And the record of what it declined to decide, with a reason.
+            # Feeds the same accuracy analysis: the floor gate's suppressions
+            # are currently modelled from the ground-truth side rather than
+            # measured from the engine's own, and the two do not select the
+            # same events (ROADMAP 9C3).
+            suppression_log_path=self._output_dir / "engine_suppressions.csv",
         )
 
         # The engine must not evaluate detector evidence finer than the rate

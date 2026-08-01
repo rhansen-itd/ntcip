@@ -66,7 +66,9 @@ highest used so far.
 ## 9 — Post-4a accuracy re-baseline (Target: owner + any Claude session)
 
 Design and code in [[SCOPE_sampling_floor.md]]; A and B are **done**, C is
-**partially run** (2026-07-31) and blocked on C1/C2 below:
+**partially run** (2026-07-31). C1 and C3 (both logging, both landed) are
+done; **C2 is the only thing between here and a clean pass**, and it needs a
+controller. C4 is scoped and deliberately sequenced after C2:
 
 - [x] **A — runtime sweep-time self-measurement** (2026-07-30). `BaseMonitor`
   EMA of `_poll()` + sleep, `effective_cycle_sec()`, `get_stats()`,
@@ -85,9 +87,10 @@ Design and code in [[SCOPE_sampling_floor.md]]; A and B are **done**, C is
   --poll 0.33`; the export is committed as
   `gt_anomalies_20260731_1830-2130.csv`.
 
-**C1 has landed; C2 is now the only thing between here and a clean pass, and
-it needs a controller. Neither is a rule change, and §Item C says don't touch
-rule code until they're settled.**
+**C1 and C3 have landed; C2 is now the only thing between here and a clean
+pass, and it needs a controller. None of the three is a rule change — §Item C
+says don't touch rule code until they're settled, and both logging items were
+built to respect that.**
 
 - [x] **C1 — log engine decisions separately from recordings** (2026-08-01).
   `discrepancies_log.csv` is written by `remux_video_buffer._handle_start`
@@ -103,6 +106,23 @@ rule code until they're settled.**
   DESIGN_HISTORY 2026-08-01. **The 59.9 % still stands unrevised** — it was
   measured on an artifact that predates this log, and only a fresh engine run
   produces a decision log to re-score.
+- [x] **C3 — log what the engine suppressed, with a reason** (2026-08-01).
+  `engine_suppressions.csv`, one row per candidate the engine declined to act
+  on, `reason` column (today only `below_sampling_floor`). Motivation:
+  `__accuracy_report.py` *models* this population from the GT side — it drops
+  GT pulses shorter than `2 × poll` — instead of reading what the engine
+  actually suppressed, and the two do not select the same events (the report
+  measures true 0.1 s durations, the gate measures the engine's own quantized
+  observation, ±1 cycle per edge). 138 events were excluded that way on the
+  2026-07-31 run, so the model is load-bearing for the "adjusted" in adjusted
+  recall. Rows carry `sampling_floor_sec` and `min_pulse_floor_multiple`
+  separately, so the `min_pulse_floor_multiple` tuning curve is recoverable
+  from a finished run without another controller session. **Caveat recorded in
+  the code and CLAUDE.md:** the gate sits ahead of Rule 2's partner-overlap
+  test, so recall attributed to it is an upper bound. Making it exact needs
+  the gate moved to fire time, which is a real behavior change (the
+  `orphan_watch_*` slots hold one candidate each; arming junk would evict live
+  candidates) — deliberately not done. See DESIGN_HISTORY 2026-08-01.
 - [ ] **C2 — re-score on a peak-hour run.** The 2026-07-31 sample is off-peak:
   max detector duty **32.8 %**, against the **80–94 %** that motivated this
   scope. The high-duty advisory never fired and the false-trigger storm
@@ -113,7 +133,34 @@ rule code until they're settled.**
   `__accuracy_report.py engine_decisions.csv <gt> --recording-log
   discrepancies_log.csv`: the recall number will be the first one not
   depressed by writer-cap drops, and the DELIVERY section says how big that
-  correction was.
+  correction was. C3 means the run also produces the first
+  `engine_suppressions.csv` — keep it: it sizes the floor gate's real cost,
+  and counting same-group rows in the decision log sizes C4's duplicate
+  population.
+
+- [ ] **C4 — reject cross-pair duplicate triggers within a detector group.**
+  With 3-way comparisons (the 5 triangles in `_intersections.json`, expressed
+  as a ring of single `paired_detector_id` links that `_build_pairs`
+  normalizes into 3 edges), one physical event where B disagrees with both A
+  and C fires on pair AB *and* pair BC, often in the same evaluator tick —
+  two clips of the same moment, each burning one of only 2 writer slots.
+  Design: connected components over `self._pairs` computed in
+  `_build_pairs`; a per-group `last_fire_ts` checked immediately before the
+  tmp-write in `_fire_trigger`; on a hit, skip the trigger file but still call
+  `_log_decision` (marked) — three append-only columns, `dedup_group`,
+  `suppressed_as_duplicate`, `duplicate_of_trigger_id`. Guard on cameras: two
+  pairs resolving to different `camera_id`s are not duplicates. All four
+  `_fire_trigger` call sites are on the evaluator thread, so no new lock.
+  **The fiddly part is Rule 1**, whose `start` sets `rt.active_trigger_id` and
+  whose later `stop` reuses it — suppressing a `start` without also
+  suppressing its `stop` sends the buffer a stop for a trigger it never saw.
+  Rule-2-only is a half session; including Rule 1 is one session with tests.
+  **Sequenced deliberately after C2:** GT is built per pair by pyatspm's
+  `analyze_discrepancies()`, so ground truth contains the same AB/BC
+  duplication — dedup without teaching `__accuracy_report.py` to credit the
+  suppressed row scores it as a *miss*, corrupting the very recall number C2
+  exists to establish. Run C2 first, size the duplicate population from its
+  decision log, then pick the window from data instead of guessing.
 
 **Two rule-level findings recorded, deliberately not acted on:**
 

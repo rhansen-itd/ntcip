@@ -136,8 +136,9 @@ Three consequences, in order of how much they change behavior:
 
 1. **Rule 2 is gated.**  An orphan candidate is registered only if its pulse
    duration ≥ ``min_pulse_floor_multiple × floor`` (config, default 2.0×).
-   Shorter pulses bump a per-pair ``below_floor_suppressed`` counter and are
-   dropped at DEBUG.  Note the arithmetic: at the default 1.6 s floor the
+   Shorter pulses bump a per-pair ``below_floor_suppressed`` counter, are
+   dropped at DEBUG, and are recorded in the **suppression log** (below).
+   Note the arithmetic: at the default 1.6 s floor the
    gate is 3.2 s, which *exceeds* a typical ``lag_threshold_sec`` of 2.0 s —
    so Rule 2 is effectively **off** until the sweep gets faster.  That is the
    intended reading of the measurement, not an accident.  After a green
@@ -184,6 +185,43 @@ describes neither.
 Writing is best-effort and strictly downstream of trigger delivery: a failed
 append logs an ERROR and is otherwise swallowed, because a full or read-only
 disk must never stop a clip from being recorded.
+
+Suppression log (ROADMAP 9C3, 2026-08-01)
+─────────────────────────────────────────
+The decision log records what the engine *did*.  The **suppression log**
+(``engine_suppressions.csv``, path injected the same way, ``None`` disables)
+records what it deliberately **declined to do**, one row per distinct
+suppressed candidate with a ``reason`` column.
+
+Today ``reason`` has exactly one value, ``below_sampling_floor`` — the Rule 2
+gate in consequence 1 above.  The column exists because the accuracy report
+currently *models* this population from the ground-truth side (it drops GT
+pulses shorter than ``2 × poll``) rather than reading what the engine actually
+suppressed, and those two selections are not the same events: the report
+measures true durations from the controller's 0.1 s waveform, while the gate
+measures the engine's own quantized observation, which carries up to ±1
+sampling cycle on each edge.  A row per suppression turns that model into a
+measurement.
+
+Rows carry ``sampling_floor_sec`` and ``min_pulse_floor_multiple`` as separate
+columns rather than only their product, so a consumer can recompute the gate
+at other multiples and recover the counterfactual — "what would this run have
+scored at 1.5× instead of 2.0×" — without another controller session.
+
+**A suppressed row is not a would-have-fired trigger.**  The gate sits at
+candidate *registration*, ahead of Rule 2's partner-overlap test, so a
+suppressed pulse never gets that far and might well have been rejected there
+too.  Any recall attributed to the gate is therefore an **upper bound**.
+Making it exact would mean arming below-floor pulses and gating at fire time,
+which is a real behavior change — the ``orphan_watch_*`` slots hold one
+candidate each, so arming junk would evict live candidates — and is
+deliberately not done here.
+
+``reason`` is a plain string precisely so the other populations the accuracy
+report also models rather than measures (cooldown suppression, a Rule 2 verdict
+discarded past ``_ORPHAN_DECISION_GRACE_SEC``, ``suppress_high_duty_pairs``,
+and the cross-pair duplicate rejection sketched in ROADMAP 9C4) can land in
+this file later as new values, with no schema change and no second artifact.
 
 Thread-safety contract
 ──────────────────────
@@ -300,6 +338,42 @@ _DECISION_LOG_FIELDS = (
     "disagreement_sec",
     "max_duration_sec",
     "cameras",              # ";"-joined camera IDs, as sent in the trigger
+    "description",
+)
+
+# ---------------------------------------------------------------------------
+# Suppression log (ROADMAP 9C3 — see the module docstring)
+# ---------------------------------------------------------------------------
+
+# Reason codes for ``engine_suppressions.csv``.  A plain string column: new
+# populations (cooldown, grace expiry, high-duty, cross-pair duplicate) become
+# new values here, never new files or new columns.
+_SUPPRESS_BELOW_FLOOR = "below_sampling_floor"
+
+# Column order of ``engine_suppressions.csv``.  Append-only for the same reason
+# as _DECISION_LOG_FIELDS: a resumed log keeps its original header.
+# ``event_start_ts`` / ``event_end_ts`` deliberately reuse the decision log's
+# names — both files describe detector events on the same clock, so one parser
+# and one correspondence matcher serve both.
+_SUPPRESSION_LOG_FIELDS = (
+    "event_timestamp",           # exact Unix float — when the engine declined
+    "local_timestamp",           # same instant, intersection-local, for humans
+    "intersection_id",
+    "reason",                    # see the _SUPPRESS_* constants above
+    "rule",                      # the rule that would have evaluated it
+    "pair_key",
+    "det_a",
+    "det_b",
+    "det_a_type",
+    "det_b_type",
+    "orphan_det",                # the detector whose pulse was suppressed
+    "slot",                      # "a" | "b" — which orphan slot it would fill
+    "event_start_ts",            # exact Unix ON edge of the suppressed pulse
+    "event_end_ts",              # exact Unix OFF edge of the suppressed pulse
+    "pulse_duration_sec",
+    "min_pulse_sec",             # the gate in force at the moment of the call
+    "sampling_floor_sec",        # ── the gate's two factors, kept separate so
+    "min_pulse_floor_multiple",  #    a consumer can re-derive it at other × ──
     "description",
 )
 
@@ -637,6 +711,10 @@ class DiscrepancyMonitor:
             separate from the video buffer's record of what it managed to
             record (see the module docstring).  ``None`` disables it.
             Parent directories are created on first write.
+        suppression_log_path: Optional CSV path receiving one row per
+            candidate the engine deliberately declined to act on, tagged
+            with a ``reason`` (see the module docstring).  ``None`` disables
+            it.  Parent directories are created on first write.
 
     Sampling-floor configuration (read from the intersection config; see the
     module docstring for why these exist):
@@ -678,6 +756,7 @@ class DiscrepancyMonitor:
         post_roll_sec: float = 20.0,
         max_duration_sec: float = 300.0,
         decision_log_path: Optional[str | Path] = None,
+        suppression_log_path: Optional[str | Path] = None,
     ) -> None:
         self._intersection_id = intersection_id
         self._trigger_dir = Path(trigger_dir)
@@ -688,6 +767,9 @@ class DiscrepancyMonitor:
         self._max_duration_sec = max_duration_sec
         self._decision_log_path = (
             Path(decision_log_path) if decision_log_path else None
+        )
+        self._suppression_log_path = (
+            Path(suppression_log_path) if suppression_log_path else None
         )
         self._log = logging.getLogger(f"{__name__}.{intersection_id}")
 
@@ -1159,17 +1241,42 @@ class DiscrepancyMonitor:
         # ── 5. Rule 2 — Orphan Pulse ──────────────────────────────────────
         # Sampling-floor gate: a pulse the source could not have resolved is
         # not evidence of anything (ROADMAP 9).  Read the floor once so both
-        # slots are judged against the same value even if it changes mid-tick.
-        min_pulse_sec = self._sampling_floor_sec * self._min_pulse_floor_multiple
+        # slots are judged against the same value even if it changes mid-tick,
+        # and so the suppression log records the gate that was actually applied
+        # rather than whatever the floor updater has moved on to by log time.
+        floor_sec     = self._sampling_floor_sec
+        floor_multiple = self._min_pulse_floor_multiple
+        min_pulse_sec = floor_sec * floor_multiple
 
-        self._maybe_register_orphan(
+        # The registration helper stays pure and static (it is exercised
+        # directly by the unit tests); it reports what it suppressed and this
+        # caller, which has the instance, does the I/O.
+        suppressed_a = self._maybe_register_orphan(
             rt, "a", a_is_on, a_last_pulse_on, a_last_off, threshold,
             min_pulse_sec,
         )
-        self._maybe_register_orphan(
+        suppressed_b = self._maybe_register_orphan(
             rt, "b", b_is_on, b_last_pulse_on, b_last_off, threshold,
             min_pulse_sec,
         )
+        for slot, orphan_id, suppressed in (
+            ("a", det_a_id, suppressed_a),
+            ("b", det_b_id, suppressed_b),
+        ):
+            if suppressed is not None:
+                self._log_suppression(
+                    reason=_SUPPRESS_BELOW_FLOOR,
+                    pair_key=pair_key,
+                    det_a_id=det_a_id,
+                    det_b_id=det_b_id,
+                    slot=slot,
+                    orphan_det_id=orphan_id,
+                    pulse=suppressed,
+                    min_pulse_sec=min_pulse_sec,
+                    floor_sec=floor_sec,
+                    floor_multiple=floor_multiple,
+                    now=now,
+                )
 
         # Evaluate detector-A orphan candidate against detector-B history.
         if rt.orphan_watch_a is not None:
@@ -1253,7 +1360,7 @@ class DiscrepancyMonitor:
         last_off: float,
         threshold: float,
         min_pulse_sec: float = 0.0,
-    ) -> None:
+    ) -> Optional[Tuple[float, float]]:
         """Register a new Rule-2 orphan candidate if one is not already tracked.
 
         A candidate is registered when ALL of the following hold:
@@ -1290,23 +1397,33 @@ class DiscrepancyMonitor:
             min_pulse_sec: Sampling-floor gate in seconds
                 (``floor × min_pulse_floor_multiple``).  ``0.0`` disables the
                 gate — used only by callers that have no floor to apply.
+
+        Returns:
+            ``(pulse_on, pulse_off)`` of the pulse this call suppressed at the
+            sampling-floor gate, or ``None`` in every other case — including a
+            successful registration and every early return.  This method stays
+            static and side-effect-free apart from ``rt``; the caller owns the
+            suppression log, so the reporting seam is a return value rather
+            than a write from here.  Because a suppressed pulse is marked
+            handled, a given pulse is reported at most once, not once per tick.
         """
         if is_on or last_pulse_on == 0.0 or last_off == 0.0:
-            return
+            return None
 
         pulse_duration = last_off - last_pulse_on
         if pulse_duration <= 0 or pulse_duration >= threshold:
-            return
+            return None
 
         attr: str = f"orphan_watch_{which}"
         existing: Optional[Tuple[float, float]] = getattr(rt, attr)
         if existing is not None and existing[0] == last_pulse_on:
-            return  # Already watching this exact pulse.
+            return None  # Already watching this exact pulse.
 
         handled_attr = f"last_handled_pulse_on_{which}"
         if last_pulse_on <= getattr(rt, handled_attr):
-            return  # This pulse was already armed once; don't re-arm it after
-                    # a cooldown while the detector's state is unchanged.
+            return None  # This pulse was already armed once; don't re-arm it
+                         # after a cooldown while the detector state is
+                         # unchanged.
 
         if min_pulse_sec > 0.0 and pulse_duration < min_pulse_sec:
             # Below the sampling floor — not evidence, aliasing.  Marked
@@ -1323,10 +1440,11 @@ class DiscrepancyMonitor:
                     "below_floor_suppressed": rt.below_floor_suppressed,
                 },
             )
-            return
+            return last_pulse_on, last_off
 
         setattr(rt, attr, (last_pulse_on, last_off))
         setattr(rt, handled_attr, last_pulse_on)
+        return None
 
     # ------------------------------------------------------------------
     # Early cooldown reset (called from NTCIP callback thread)
@@ -1619,29 +1737,146 @@ class DiscrepancyMonitor:
             "description":      meta.get("description", ""),
         }
 
+        self._append_csv_row(
+            self._decision_log_path, _DECISION_LOG_FIELDS, row,
+            "Failed to append to the engine decision log",
+            {"trigger_id": payload["trigger_id"]},
+        )
+
+    def _log_suppression(
+        self,
+        reason: str,
+        pair_key: str,
+        det_a_id: str,
+        det_b_id: str,
+        slot: str,
+        orphan_det_id: str,
+        pulse: Tuple[float, float],
+        min_pulse_sec: float,
+        floor_sec: float,
+        floor_multiple: float,
+        now: float,
+    ) -> None:
+        """Append one row to the engine's suppression log.
+
+        The counterpart to :meth:`_log_decision`: that file records what the
+        engine emitted, this one records what it deliberately declined to
+        emit and why (see the module docstring).  Same best-effort contract —
+        a write failure never affects rule evaluation.
+
+        Args:
+            reason: One of the ``_SUPPRESS_*`` reason codes.
+            pair_key: Canonical pair key the candidate belonged to.
+            det_a_id: First detector of the pair, in ``pair_key`` order.
+            det_b_id: Second detector of the pair.
+            slot: ``"a"`` or ``"b"`` — the orphan slot the candidate would
+                have filled.
+            orphan_det_id: The detector that produced the suppressed pulse.
+            pulse: ``(on_ts, off_ts)`` of that pulse, exact Unix floats.
+            min_pulse_sec: The gate that rejected it, as actually applied.
+            floor_sec: Sampling floor the gate was derived from.
+            floor_multiple: Multiplier the gate was derived with.  Kept
+                separate from ``min_pulse_sec`` so a consumer can re-derive
+                the gate at other multiples.
+            now: Evaluator-tick timestamp the decision was taken at.
+        """
+        if self._suppression_log_path is None:
+            return
+
+        pulse_on, pulse_off = pulse
+        duration = pulse_off - pulse_on
+        tz_name: str = self._intersection_cfg.get("timezone", "UTC")
+        local_tz = _resolve_pytz(tz_name, self._log)
+
         try:
-            self._decision_log_path.parent.mkdir(parents=True, exist_ok=True)
+            local_stamp = datetime.fromtimestamp(
+                now, tz=local_tz
+            ).strftime("%Y-%m-%d %H:%M:%S.%f")
+        except (ValueError, OSError, OverflowError):
+            local_stamp = ""
+
+        det_a_cfg = self._intersection_cfg["detectors"].get(det_a_id, {})
+        det_b_cfg = self._intersection_cfg["detectors"].get(det_b_id, {})
+
+        row = {
+            "event_timestamp":          f"{now:.3f}",
+            "local_timestamp":          local_stamp,
+            "intersection_id":          self._intersection_id,
+            "reason":                   reason,
+            "rule":                     "rule2_orphan_pulse",
+            "pair_key":                 pair_key,
+            "det_a":                    det_a_id,
+            "det_b":                    det_b_id,
+            "det_a_type":               det_a_cfg.get("type", "unknown"),
+            "det_b_type":               det_b_cfg.get("type", "unknown"),
+            "orphan_det":               orphan_det_id,
+            "slot":                     slot,
+            "event_start_ts":           f"{pulse_on:.3f}",
+            "event_end_ts":             f"{pulse_off:.3f}",
+            "pulse_duration_sec":       round(duration, 3),
+            "min_pulse_sec":            round(min_pulse_sec, 4),
+            "sampling_floor_sec":       round(floor_sec, 4),
+            "min_pulse_floor_multiple": floor_multiple,
+            "description": (
+                f"orphan candidate on detector '{orphan_det_id}' not "
+                f"registered: pulse {duration:.3f}s < gate {min_pulse_sec:.3f}s"
+            ),
+        }
+
+        self._append_csv_row(
+            self._suppression_log_path, _SUPPRESSION_LOG_FIELDS, row,
+            "Failed to append to the engine suppression log",
+            {"pair_key": pair_key, "reason": reason},
+        )
+
+    def _append_csv_row(
+        self,
+        path: Path,
+        fields: Tuple[str, ...],
+        row: dict,
+        error_message: str,
+        error_context: dict,
+    ) -> None:
+        """Append one row to a CSV, writing the header only for a new file.
+
+        Shared by :meth:`_log_decision` and :meth:`_log_suppression` so the
+        two artifacts cannot drift apart on the restart-safety behavior that
+        matters for both: an existing log is appended to and never
+        re-headered, so a resumed file's rows keep lining up with the header
+        it was created with.
+
+        Best-effort by contract: any write failure is logged at ERROR and
+        swallowed, because a full or read-only disk must degrade measurement,
+        never recording.  The engine is the single writer (every call site is
+        on the evaluator thread), so the append needs no lock.
+
+        Args:
+            path: Destination CSV.  Parent directories are created.
+            fields: Column order — the file's header, and the DictWriter's
+                field list.
+            row: Mapping of column name to value; keys must match ``fields``.
+            error_message: Log message used if the append fails.
+            error_context: Extra structured fields for that error log,
+                merged after the intersection ID and path.
+        """
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
             # Header only for a genuinely new (or truncated) file — the log
             # survives restarts and must not gain a header mid-stream.
-            write_header = (
-                not self._decision_log_path.exists()
-                or self._decision_log_path.stat().st_size == 0
-            )
-            with self._decision_log_path.open(
-                "a", newline="", encoding="utf-8"
-            ) as fh:
-                writer = csv.DictWriter(fh, fieldnames=list(_DECISION_LOG_FIELDS))
+            write_header = not path.exists() or path.stat().st_size == 0
+            with path.open("a", newline="", encoding="utf-8") as fh:
+                writer = csv.DictWriter(fh, fieldnames=list(fields))
                 if write_header:
                     writer.writeheader()
                 writer.writerow(row)
         except OSError as exc:
             self._log.error(
-                "Failed to append to the engine decision log",
+                error_message,
                 extra={
                     "intersection_id": self._intersection_id,
-                    "trigger_id":      payload["trigger_id"],
-                    "path":            str(self._decision_log_path),
+                    "path":            str(path),
                     "error":           str(exc),
+                    **error_context,
                 },
             )
 
