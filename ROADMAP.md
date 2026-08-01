@@ -151,6 +151,37 @@ built to respect that.**
   `suppressed_as_duplicate`, `duplicate_of_trigger_id`. Guard on cameras: two
   pairs resolving to different `camera_id`s are not duplicates. All four
   `_fire_trigger` call sites are on the evaluator thread, so no new lock.
+
+  **Group config: both forms must work (owner requirement, 2026-08-01).**
+  A 3-way group is expressible either explicitly — `paired_detector_id` as a
+  **list**, A: `[B,C]`, B: `[A,C]`, C: `[A,B]` — or implicitly as today's
+  ring of scalars, A→B, B→C, C→A. These unify cleanly and need no separate
+  code path: **pairs** are the union of all normalized links (accept a scalar
+  *or* a list — the only change to the existing loop), and **groups** are
+  connected components over the resulting pair graph. Both forms then fall
+  out of one mechanism, and for n=3 they produce the *identical* 3 pairs.
+  - **That coincidence is specific to n=3.** For 4 detectors a ring gives 4
+    edges and an explicit all-pairs list gives 6. Neither is wrong: the list
+    form is how you say "compare all of these", the ring is how you say "this
+    cycle". So a group is a **dedup scope only** — it must not be read as an
+    instruction to evaluate every internal pair, or a 4-ring config silently
+    grows two comparisons nobody asked for. Pair generation stays
+    link-driven.
+  - **Risk to guard: transitive over-grouping.** One stray link merges two
+    intended groups with no error. Mitigation: WARN when a derived group
+    spans more than one `phase`, and log the derived groups at startup the
+    way `_pairs` already is. Verified against `_intersections.json` — all 7
+    current groups (5 triangles + `29:43` + `26:33`) are phase-coherent, so
+    the check is clean today and would fire only on a genuine mistake.
+  - **The schema change must land in three places or it breaks measurement,
+    silently.** `_build_pairs`, `config_manager.py`'s canonical schema
+    docstring, and **`__make_gt_export.py:_load_pairs`** (`:72`, scalar-only
+    today). That tool reads pairs from the intersection config precisely so
+    ground truth can't drift from the engine run — if the engine learns list
+    form and the export doesn't, the export covers fewer pairs than the
+    engine ran, and every trigger on a missing pair scores as a false
+    positive. This is the "scoring against the wrong pair set" failure
+    CLAUDE.md already warns about, arriving by a new route.
   **The fiddly part is Rule 1**, whose `start` sets `rt.active_trigger_id` and
   whose later `stop` reuses it — suppressing a `start` without also
   suppressing its `stop` sends the buffer a stop for a trigger it never saw.

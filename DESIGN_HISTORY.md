@@ -1504,6 +1504,30 @@ decided. Entries after this point are logged as the decision lands.
   split the engine's record from the buffer's; before it, the only log was
   written downstream of the writer semaphore.
 
+  **Owner requirement added the same day: a group must be configurable both
+  ways** — explicitly, with `paired_detector_id` as a list (A: `[B,C]`,
+  B: `[A,C]`, C: `[A,B]`), and implicitly, as today's ring of scalars summed
+  into a group. The two need no separate code path: pairs are the union of
+  normalized links (the loop just has to accept a list as well as a scalar),
+  groups are connected components over the resulting graph, and for n=3 both
+  forms yield the identical 3 pairs. Three consequences recorded rather than
+  assumed: (1) that equivalence is an artifact of n=3 — a 4-ring gives 4 edges
+  where an explicit all-pairs list gives 6 — so a group is defined as a **dedup
+  scope only**, never as an instruction to evaluate all internal pairs, or a
+  4-ring config silently grows comparisons nobody configured; (2) connected
+  components can over-group transitively, one stray link merging two intended
+  groups with no error, so the derived groups get logged at startup and a group
+  spanning more than one `phase` gets a WARNING — checked against
+  `_intersections.json`, all 7 current groups are phase-coherent, so the guard
+  is quiet today and fires only on a real mistake; (3) the list form has to
+  land in `__make_gt_export.py:_load_pairs` (still scalar-only at `:72`) at the
+  same time as in `_build_pairs`, because that tool reads pairs from the
+  intersection config specifically so ground truth cannot drift from the engine
+  run — teaching one side list form and not the other makes the export cover
+  fewer pairs than the engine ran, scoring every trigger on a missing pair as a
+  false positive. Same failure mode CLAUDE.md already warns about, reached by a
+  new route.
+
   **Sequenced after C2 for a measurement reason, not a risk one.**
   `__make_gt_export.py` runs pyatspm's `analyze_discrepancies()` per pair, so
   ground truth contains the identical AB/BC duplication. Suppressing one side
