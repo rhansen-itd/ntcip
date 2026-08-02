@@ -48,10 +48,20 @@ highest used so far.
 > self-contained). Note **12B** is written as "probably don't"; read it before
 > starting it.
 >
-> **The next engine run should re-measure two things regardless of item:**
+> **Automated duplicate-clip cleanup** landed 2026-08-01 as a same-session
+> follow-on to 9C4 (`video_engine/video_cleanup.py`; see DESIGN_HISTORY) — a
+> clip wholly contained in another from the same camera is deleted and its
+> `discrepancies_log.csv` rows repointed at the survivor. Sized on the
+> committed artifacts: 91 of 348 recorded clips (26.1 %) were contained, 68 of
+> them the population 9C4 now rejects upstream, so **23 (6.6 %) is the residual
+> to re-measure** on the first post-9C4 run.
+>
+> **The next engine run should re-measure three things regardless of item:**
 > the controller clock skew (`--clock-offset`; +4.49 s on 2026-08-01, ~0 s the
-> day before — it is not a constant) and how much of the writer-cap's 33.6 %
-> decision loss 9C4 actually recovered, which only a fresh run can show.
+> day before — it is not a constant), how much of the writer-cap's 33.6 %
+> decision loss 9C4 actually recovered, and how many clips the cleanup sweep
+> removes now that 9C4 is upstream of it. Only a fresh run can show any of the
+> three.
 >
 > Items **8** (remux manager thread-safety + the single-camera assumption) and
 > **4f** (web UI: loopback default + shared-secret control endpoints) landed

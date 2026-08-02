@@ -90,6 +90,8 @@ from typing import Any, Callable, Deque, Dict, Iterator, List, Optional, Tuple
 import pytz
 import av  # PyAV (FFmpeg bindings)
 
+from video_cleanup import ClipCleaner
+
 log = logging.getLogger(__name__)
 
 
@@ -141,6 +143,16 @@ class VideoBufferConfig:
         rtsp_transport: Passed to ``av.open`` as ``rtsp_transport`` (``tcp`` avoids
             UDP packet loss on congested edge links).
         open_timeout_sec: Socket open/read timeout for ``av.open``.
+        cleanup_enabled: Run the periodic duplicate-clip sweep (see
+            ``video_cleanup.py``). On by default — disk is the scarce resource on
+            an edge box, and the sweep only ever deletes a clip whose whole span
+            another clip from the same camera already covers.
+        cleanup_interval_sec: Sweep cadence. The first sweep runs one full
+            interval after start.
+        cleanup_tolerance_sec: Containment slack, so two clips of the same
+            moment that differ by poll latency still compare as duplicates.
+        cleanup_min_age_sec: Clips modified more recently than this are left
+            alone — the mtime-based half of the in-flight-recording guard.
     """
 
     streams: Dict[str, str]
@@ -155,6 +167,10 @@ class VideoBufferConfig:
     container_ext: str = ".ts"
     rtsp_transport: str = "tcp"
     open_timeout_sec: float = 10.0
+    cleanup_enabled: bool = True
+    cleanup_interval_sec: float = 300.0
+    cleanup_tolerance_sec: float = 0.5
+    cleanup_min_age_sec: float = 60.0
 
 
 @dataclass
@@ -554,6 +570,15 @@ class ClipRemuxer:
         self._dropped_leading = 0
         self._log = logging.getLogger(f"{__name__}.remux")
 
+    @property
+    def output_path(self) -> Path:
+        """Destination clip path.
+
+        Read by the manager so the cleanup sweep can protect a file that is
+        still being written (``video_cleanup.py``).
+        """
+        return self._output_path
+
     # -- attachment API (called by PacketStreamBuffer / manager) ----------
 
     def start(self) -> None:
@@ -826,9 +851,38 @@ class VideoBufferManager:
         self._running = False
         self._sb_factory = stream_buffer_factory or self._default_stream_buffer
         self._log = logging.getLogger(f"{__name__}.manager")
+        # Serializes every writer of ``discrepancies_log.csv``: this class
+        # appends rows from the poll thread, the cleanup sweep rewrites the file
+        # in place from its own thread.
+        self._csv_lock = threading.Lock()
 
         Path(config.trigger_dir).mkdir(parents=True, exist_ok=True)
         Path(config.output_dir).mkdir(parents=True, exist_ok=True)
+
+        self._cleaner: Optional[ClipCleaner] = None
+        if config.cleanup_enabled:
+            self._cleaner = ClipCleaner(
+                output_dir=config.output_dir,
+                container_ext=config.container_ext,
+                tolerance_sec=config.cleanup_tolerance_sec,
+                min_age_sec=config.cleanup_min_age_sec,
+                interval_sec=config.cleanup_interval_sec,
+                protected_paths=self._protected_clip_paths,
+                log_lock=self._csv_lock,
+            )
+
+    def _protected_clip_paths(self) -> set:
+        """Return the output paths of clips that are still being written.
+
+        The authoritative in-process half of the cleanup sweep's in-flight
+        guard (``cleanup_min_age_sec`` is the other, and also covers clips left
+        behind by a crashed run). Reads the writer bookkeeping under
+        ``_state_lock`` and does nothing else with it.
+        """
+        with self._state_lock:
+            writers = list(self._active_writers.values()) + list(self._draining)
+        paths = (getattr(w, "output_path", None) for w in writers)
+        return {Path(p) for p in paths if p}
 
     def _default_stream_buffer(self, camera_id: str, url: str) -> PacketStreamBuffer:
         """Build a live :class:`PacketStreamBuffer` from config (default factory)."""
@@ -851,6 +905,9 @@ class VideoBufferManager:
             buf.start()
             self._stream_buffers[cam_id] = buf
 
+        if self._cleaner is not None:
+            self._cleaner.start()
+
         self._log.info(
             "VideoBufferManager started",
             extra={"num_streams": len(self._stream_buffers), "backend": "remux"},
@@ -866,6 +923,11 @@ class VideoBufferManager:
         Timer thread mid-shutdown is still joined instead of being dropped.
         """
         self._running = False
+
+        # Stop the cleanup sweep first: it must not be scanning output_dir while
+        # the writers below are finalizing containers into it.
+        if self._cleaner is not None:
+            self._cleaner.stop()
 
         with self._state_lock:
             timers = [timer for _, timer in self._stop_timers.values()]
@@ -1135,13 +1197,15 @@ class VideoBufferManager:
     # -- CSV discrepancy log (inherited from the retired full backend) ------
 
     def _log_discrepancy_to_csv(self, trigger: dict, video_path: Path) -> None:
-        """Append a row to ``discrepancies_log.csv`` for detector-disagreement triggers."""
+        """Append a row to ``discrepancies_log.csv`` for detector-disagreement triggers.
+
+        The append holds ``_csv_lock`` so it cannot interleave with the cleanup
+        sweep's read-modify-replace of the same file (``video_cleanup.py``).
+        """
         if trigger.get("reason") != "detector_disagreement":
             return
 
         csv_path = Path(self._config.output_dir) / "discrepancies_log.csv"
-        write_header = not csv_path.exists()
-
         meta = trigger.get("metadata", {})
         event_ts = trigger.get("event_timestamp", 0.0)
 
@@ -1165,11 +1229,13 @@ class VideoBufferManager:
             "Description": meta.get("description", ""),
         }
         try:
-            with csv_path.open("a", newline="", encoding="utf-8") as f:
-                writer = csv.DictWriter(f, fieldnames=list(row.keys()))
-                if write_header:
-                    writer.writeheader()
-                writer.writerow(row)
+            with self._csv_lock:
+                write_header = not csv_path.exists()
+                with csv_path.open("a", newline="", encoding="utf-8") as f:
+                    writer = csv.DictWriter(f, fieldnames=list(row.keys()))
+                    if write_header:
+                        writer.writeheader()
+                    writer.writerow(row)
         except OSError as exc:
             self._log.error(
                 "Failed to write discrepancy CSV log", extra={"error": str(exc)}

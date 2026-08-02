@@ -506,6 +506,11 @@ class SystemRunner:
         ``"video_backend"`` is honored as remux and warned about rather than
         rejected, so a stale deployment config keeps recording.
 
+        The optional ``video_cleanup`` block is read here and passed through to
+        the buffer, which owns the sweep (it knows which clips are still being
+        written and owns ``discrepancies_log.csv``). Absent, the defaults in
+        ``VideoBufferConfig`` apply — the sweep is on.
+
         Args:
             stream_map: Mapping of ``camera_id`` -> stream URL.
             pre_roll_sec: Shared pre-roll window length.
@@ -531,6 +536,8 @@ class SystemRunner:
             "Using 'remux' (stream-copy) video backend",
             extra={"intersection_id": self._intersection_id},
         )
+        defaults = VideoBufferConfig(streams={})
+        cleanup_cfg: dict = self._intersection_cfg.get("video_cleanup", {})
         video_cfg = VideoBufferConfig(
             streams=stream_map,
             trigger_dir=str(self._trigger_dir),
@@ -540,6 +547,18 @@ class SystemRunner:
             max_concurrent_writers=max_concurrent_writers,
             min_free_disk_mb=min_free_disk_mb,
             backend="remux",
+            cleanup_enabled=bool(
+                cleanup_cfg.get("enabled", defaults.cleanup_enabled)
+            ),
+            cleanup_interval_sec=float(
+                cleanup_cfg.get("interval_sec", defaults.cleanup_interval_sec)
+            ),
+            cleanup_tolerance_sec=float(
+                cleanup_cfg.get("tolerance_sec", defaults.cleanup_tolerance_sec)
+            ),
+            cleanup_min_age_sec=float(
+                cleanup_cfg.get("min_age_sec", defaults.cleanup_min_age_sec)
+            ),
         )
         return VideoBufferManager(video_cfg)
 

@@ -1822,3 +1822,104 @@ decided. Entries after this point are logged as the decision lands.
   tests were rewritten: they had asserted the "suppressed Rule 1 start doesn't
   arm the state machine" property using a rule2→rule1 setup that is no longer a
   suppression at all.
+
+- 2026-08-01 — **Automated duplicate-clip cleanup: a clip wholly contained in
+  another is deleted and its log rows repointed** (`video_engine/video_cleanup.py`,
+  new; scoped and shipped in one session as a follow-on to 9C4). 9C4 stops the
+  *engine* firing twice for one event **within a detector group**. It cannot
+  stop two clips of the same moment reaching disk when the overlap is not a
+  group duplicate — and by its own deliberate asymmetries it never will: a
+  Rule 1 start is explicitly not folded into a Rule 2 recording, a Rule 2
+  duplicate holds nothing open, and neither mechanism sees two *unrelated*
+  pairs disagreeing about the same approach seconds apart or a hand-dropped
+  trigger over live footage. This is the disk-side half of the same idea.
+
+  **Sized against the committed 2026-08-01 artifacts before writing it, not
+  after.** Reconstructing clip spans from `engine_decisions_20260801.csv`
+  (start `event_timestamp` − 5 s pre-roll → the matching stop, or +
+  `max_duration_sec` for the 152 rule 2 clips that never get one) for the 348
+  triggers that actually recorded: **91 clips (26.1 %) are wholly contained in
+  another, ~41 min of duplicate footage.** Attributing them, 68 are the same
+  population 9C4 now rejects upstream (same derived group, starts < 1.0 s
+  apart), leaving **23 (6.6 % of recorded clips, ~11 min)** that only this
+  sweep can catch. That residual — not the headline 26 % — is the honest
+  justification, and it is the number to re-measure on the first post-9C4 run.
+
+  **A clip's span is recovered from the finished file, not recorded during
+  writing.** Nothing in the recording path persists start/end wall-clock times,
+  and adding that would have meant either a fourth per-clip artifact or a new
+  column in a log written at *start*, before the end is known. Instead:
+  `end_ts` = the file's **mtime** (`ClipRemuxer._finalize` closes the container
+  as its last act), `duration` = the container's own duration via PyAV — exact,
+  because clip length equals the source PTS span by construction, the one thing
+  the remux design guarantees and the CFR path never could — and `start_ts` is
+  the difference. The failure mode this admits is a rewritten mtime, so the
+  span is cross-checked against the **dispatch epoch already encoded in the
+  filename**; a disagreement over 5 s skips the clip rather than judging it.
+  Files whose names don't parse as clips are not candidates at all, which is
+  what makes the three CSV logs and any hand-named export in `output_dir` safe
+  by construction rather than by an exclusion list.
+
+  **`plan_removals` is a single pass over `(start asc, end desc, name)` against
+  a running list of survivors** — deliberately not a fixpoint over all pairs.
+  The pass buys three properties outright: a keeper is never itself deleted
+  (so no rewrite can name a file a later step removes, and chains need no
+  resolution — in a 3-deep nest both inner clips repoint to the *outermost*),
+  mutual containment resolves deterministically, and it is conservative. It
+  will keep a clip that starts 2 s before a much longer one even though the
+  longer clip nearly covers it, because it is not *contained*. A tolerance
+  (default 0.5 s) is applied to both bounds for the one case that needs it —
+  two clips of the same moment differing by poll latency; at 0.0 the same run
+  yields 31 removals instead of 91, at 1.0 only 95, so the curve is flat past
+  0.5 and the slack is buying real duplicates, not eroding the rule.
+
+  **Logs are rewritten before the file is deleted**, and if a rewrite raises,
+  nothing is deleted that sweep. The reverse order leaves a row naming a file
+  that is gone; this order at worst leaves a row naming a clip that exists and
+  still contains the event, and the next sweep retries with the rewrite already
+  idempotent. Which logs get rewritten is one table (`REFERENCE_COLUMNS`) —
+  today `discrepancies_log.csv` / `Video_Filename`, the only artifact in the
+  tree naming a clip file; `engine_decisions.csv` and `engine_suppressions.csv`
+  are written before a clip exists and carry no filename. The rewrite is a
+  read-modify-`os.replace`, the same write-then-rename discipline as the Hot
+  Folder, under a `_csv_lock` now shared with `_log_discrepancy_to_csv` so a
+  concurrent append can't be lost.
+
+  **Deletion is audited, because it is the one irreversible thing this system
+  does.** `video_cleanup_log.csv` joins the other three in `output_dir`, one
+  row per deletion carrying *both* spans, the reclaimed bytes and the rows
+  repointed — enough to re-check the containment decision after the evidence is
+  gone. `_CLEANUP_LOG_FIELDS` is append-only for the same reason as the
+  engine's two logs. Note this makes CLAUDE.md's "three logs" four, but not a
+  fourth *accuracy* log: it records deletions, never decisions, and
+  `__accuracy_report.py` neither reads it nor is affected by the rewrite (rows
+  are repointed, never added or removed, and scoring keys on timestamps).
+
+  **Enabled by default** (`video_cleanup` block, `interval_sec` 300,
+  `tolerance_sec` 0.5, `min_age_sec` 60). Automation nobody has to turn on was
+  the point of the request; the safety is in the conservatism above plus two
+  independent in-flight guards — the manager's live view of active + draining
+  writers (`_protected_clip_paths`, authoritative in-process) and the mtime age
+  check (which also covers clips left behind by a crashed run). The manual CLI
+  (`tools/cleanup_clips.py`) inverts the default and is **dry-run until
+  `--apply`**, following `tools/sync_ui_config.py`'s precedent.
+
+  Ownership sits with the video buffer, which knows what is still being written
+  and owns `discrepancies_log.csv`; the sweep runs on its own daemon thread and
+  is stopped before the writers finalize on shutdown. `video_cleanup.py` imports
+  neither `ntcip_monitor` nor `remux_video_buffer` — the manager imports *it*,
+  one direction — and PyAV is imported lazily inside `probe_duration_sec`, so
+  the module and its tests load on a bare interpreter.
+
+  Tests: new `video_engine/tests/test_video_cleanup.py`, **44 stdlib
+  `unittest` cases** (298 → 342 across seven suites), with the duration probe
+  stubbed so the suite needs neither PyAV nor real video — clips are ordinary
+  files with a clip-shaped name and an `os.utime`'d mtime, which is exactly the
+  span model. Covers the keeper-never-deleted invariant, the chain case, the
+  dispatch cross-check, the rewrite-fails-so-nothing-is-deleted path, and that
+  the sweep takes the shared CSV lock. Separately verified end-to-end against
+  real MPEG-TS written by PyAV (a 180 s clip and a 30 s clip cut from
+  `tests/fixtures/sample.ts`, plus a same-window clip on a second camera):
+  dry run reported the plan, `--apply` deleted only the contained clip,
+  repointed its `discrepancies_log.csv` row, left the other camera alone, and a
+  second run was a no-op.

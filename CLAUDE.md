@@ -260,7 +260,10 @@ load-bearing for anyone measuring accuracy).** All land in `output_dir`:
   so a trigger dropped by the `max_concurrent_writers` cap leaves no row.
   Measured on the 2026-07-31 run, the cap was saturated 11.6 % of wall clock
   yet accounted for 43 % of the apparent misses. **Recall read off this file
-  is a floor, not an estimate.**
+  is a floor, not an estimate.** It is also the one log that is ever
+  *rewritten*: the duplicate-clip sweep (below) repoints `Video_Filename` at a
+  surviving clip. Rows are never added or removed by that, so anything scored
+  from timestamps is unaffected.
 - **`engine_suppressions.csv`** — written by
   `discrepancy_engine._log_suppression`, one row per candidate the engine
   deliberately **declined** to act on, tagged with a `reason` column. Today
@@ -289,6 +292,68 @@ section counting decisions that never became clips. Rows marked
 only from DELIVERY (they have no clip by design, not by back-pressure);
 verified by re-scoring the 2026-08-01 log with duplicates marked — precision
 and recall come out identical.
+
+### Duplicate-clip cleanup — the disk-side half of dedup (2026-08-01, load-bearing)
+
+`video_engine/video_cleanup.py` deletes a clip when **another clip from the
+same camera covers its whole wall-clock span**, and repoints every log
+reference at the survivor. It is the counterpart to 9C4, not a replacement:
+9C4 stops the *engine* firing twice **within a detector group**, and by
+construction cannot touch a Rule 2 orphan clip nested inside a Rule 1 clip
+(it explicitly refuses to fold those), two unrelated pairs disagreeing about
+the same approach, or a hand-dropped trigger over live footage. Sized against
+the committed 2026-08-01 artifacts: **91 of 348 recorded clips (26.1 %) were
+wholly contained in another**; 68 of those are the population 9C4 now rejects
+upstream, leaving **23 (6.6 %, ~11 min of footage) that only this sweep
+catches**.
+
+Four things are load-bearing:
+
+- **A clip's span is recovered, not recorded.** `end_ts` = the file's **mtime**
+  (`ClipRemuxer._finalize` closes the container as its last act), `duration` =
+  the container's own duration via PyAV (exact — clip length equals the source
+  PTS span by construction, there is no FPS to guess), `start_ts` = the
+  difference. That is cross-checked against the **dispatch epoch in the
+  filename** (`{trigger8}_{camera}_{int(time.time())}{ext}`): a clip whose
+  mtime and name disagree by more than 5 s is **skipped, never deleted** (the
+  likely cause is a copy that didn't preserve mtime). A file whose name doesn't
+  parse as a clip is not a candidate at all, so the CSV logs and any hand-named
+  export in `output_dir` are safe by construction.
+- **`plan_removals` is one pass over `(start asc, end desc, name)` against a
+  running list of survivors.** Three properties fall out: a keeper is never
+  itself deleted (so no rewrite can point at a file a later step removes, and
+  no chain resolution is needed), mutual containment resolves deterministically,
+  and it is **conservative** — a clip starting slightly *before* a much longer
+  one is kept, because it isn't contained. Keeping an extra file is a cost;
+  losing unique footage is a defect. The `tolerance_sec` (default 0.5) exists
+  only so two clips of the *same* moment that differ by poll latency still
+  compare as duplicates; at 0.0 the same run yields 31 removals instead of 91.
+- **Logs are rewritten first, the file is deleted second.** The reverse order
+  would leave a row naming a file that is gone; this order, if the delete
+  fails, leaves a row naming a clip that exists and still contains the event.
+  If a rewrite raises, **nothing is deleted that sweep**. Which logs get
+  rewritten is the single table `REFERENCE_COLUMNS` (`discrepancies_log.csv` /
+  `Video_Filename` today) — that is the whole extension point; the engine's two
+  logs are written before any clip exists and carry no filename.
+- **Two independent guards keep an in-flight recording off the list**: the
+  manager's live view of its active + draining writers (`_protected_clip_paths`,
+  authoritative in-process) and `cleanup_min_age_sec` (mtime-based, which also
+  covers clips left by a crashed run). The sweep runs on its own daemon thread
+  and shares the manager's `_csv_lock` with `_log_discrepancy_to_csv`, so a
+  rewrite can't interleave with an append.
+
+Every deletion is audited in **`video_cleanup_log.csv`** (`output_dir`,
+`_CLEANUP_LOG_FIELDS` append-only like the engine's logs) carrying *both*
+spans — deleting footage is the one irreversible thing this system does, and
+the row has to be enough to re-check the decision after the evidence is gone.
+Config is the intersection's optional `video_cleanup` block (`enabled` default
+**true**, `interval_sec` 300, `tolerance_sec` 0.5, `min_age_sec` 60); the
+canonical reference is `config_manager.py`'s docstring. Manual front end:
+`python3 video_engine/tools/cleanup_clips.py --output-dir <dir>` — **dry run
+until `--apply`**. `video_cleanup.py` imports neither `ntcip_monitor` nor
+`remux_video_buffer` (the manager imports *it*), and PyAV is imported lazily
+inside `probe_duration_sec` so the module and its tests load on a bare
+interpreter.
 
 ## Config abstraction
 
@@ -524,13 +589,14 @@ them relaxes the rule that the two packages don't import each other.
 
 ## Tests
 
-Six suites, all **stdlib `unittest`** (pytest is not installed here), one file
+Seven suites, all **stdlib `unittest`** (pytest is not installed here), one file
 per subject, each runnable directly from any working directory via its own
-`sys.path` bootstrap. 298 cases total as of 2026-08-01:
+`sys.path` bootstrap. 342 cases total as of 2026-08-01:
 
 | Suite | Cases | Subject |
 |---|---|---|
 | `video_engine/tests/test_discrepancy_rules.py` | 131 | rule functions, `_evaluate_pair` integration, decision log, suppression log, detector groups + cross-pair duplicate rejection + AND-gated stop, `_resolve_pytz` |
+| `video_engine/tests/test_video_cleanup.py` | 44 | clip-name parsing, containment + tolerance, `plan_removals` invariants, log rewrite, scan/sweep (stubbed duration probe) |
 | `video_engine/tests/test_remux_manager.py` | 22 | manager writer/timer bookkeeping (stubbed remuxer) |
 | `video_engine/tests/test_config_manager.py` | 9 | `ConfigProviderError` |
 | `ntcip_monitor/tests/test_overlay_shapes.py` | 86 | shape reader, status resolution, live source (stubbed PyAV) |
@@ -589,6 +655,8 @@ As of this writing:
   CLIs cover manual recording: **`record_clip.py`** (one-shot clip, or `--serve`
   to keep the buffer running while you drop triggers; replaced `__record.py`) and
   **`drop_trigger.py`** (writes a Hot Folder trigger; replaced `__trigger.py`).
+  **`cleanup_clips.py`** is the third clean CLI: the manual front end to the
+  duplicate-clip sweep, dry-run until `--apply`.
   The rest are `__`-prefixed dev/verification tools: `__capture_rtsp.py`,
   `__replay_verify.py`, `__probe_adversarial.py`, `__accuracy_report.py`
   (engine-log vs ATSPM-export precision/recall report), `__capture_ntcip.py`
@@ -614,10 +682,10 @@ As of this writing:
   and 2026-07-31 DESIGN_HISTORY entries), plus `simulate_playback.py`.
   `video_engine/tests/` holds the unit tests
   (`test_discrepancy_rules.py`, `test_remux_manager.py`,
-  `test_config_manager.py`; stdlib `unittest`) and
+  `test_config_manager.py`, `test_video_cleanup.py`; stdlib `unittest`) and
   `video_engine/tests/fixtures/` the captured test data
-  (`sample.ts` + its `.packets.jsonl` profile). The four tools that import
-  `video_engine/` modules (`record_clip`, `__replay_verify`,
+  (`sample.ts` + its `.packets.jsonl` profile). The five tools that import
+  `video_engine/` modules (`record_clip`, `cleanup_clips`, `__replay_verify`,
   `__probe_adversarial`, `simulate_playback`) add a `sys.path` bootstrap
   (`.../tools/` → parent) so they run from any working directory; the others
   (`__capture_rtsp`, `drop_trigger`, `__accuracy_report`, `__decode_datz`,

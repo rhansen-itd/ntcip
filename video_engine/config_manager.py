@@ -165,6 +165,33 @@ never add a comparison.
                                  ``engine_decisions.csv``, marked with
                                  ``suppressed_as_duplicate``.
 
+Duplicate-clip cleanup block (optional; ``video_cleanup``)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The disk-side counterpart to ``dedup_window_sec``.  That field stops the engine
+firing two triggers for one event **within a detector group**; it cannot stop
+two clips of the same moment reaching disk when the overlap is not a group
+duplicate — a Rule 2 orphan clip landing inside a long Rule 1 clip, or two
+unrelated pairs disagreeing about the same approach seconds apart.  The video
+buffer sweeps ``output_dir`` on a timer and deletes a clip **only** when
+another clip from the same camera covers its whole span, repointing every
+``discrepancies_log.csv`` row at the survivor first.  See
+``video_cleanup.py``'s module docstring; every deletion is audited in
+``video_cleanup_log.csv``.
+
+``enabled``          bool  — Run the sweep.  Default ``true``; disk is the
+                             scarce resource on a J1900 edge box.
+``interval_sec``     float — Sweep cadence.  Default ``300``.  The first sweep
+                             runs one full interval after start.
+``tolerance_sec``    float — Containment slack, so two clips of the same moment
+                             that differ by poll latency still compare as
+                             duplicates.  Default ``0.5``; it is **not** a
+                             licence to delete a clip that genuinely starts
+                             earlier or ends later than its container.
+``min_age_sec``      float — Leave clips modified more recently than this
+                             alone.  Default ``60`` — the mtime-based half of
+                             the in-flight-recording guard (the manager's live
+                             view of its writers is the other half).
+
 cameras mapping (camera_id → CameraConfig)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ``url``                 str   — RTSP or HTTP stream URL.
