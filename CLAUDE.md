@@ -128,7 +128,27 @@ the 2026-08-01 run). Four properties are load-bearing: the window anchors on
 window forever); cameras are part of the key; a `stop` is never suppressed and
 never anchors; and a suppressed Rule 1 `start` **must not** set
 `active_trigger_id` — it engages the pair cooldown instead, because a later
-`stop` reusing that ID would reference a recording the buffer never started. A
+`stop` reusing that ID would reference a recording the buffer never started.
+
+**Dropping the duplicate `start` is safe; dropping its `stop` is not — the
+stop is an AND** (2026-08-01, the same item). A clip stands for every
+disagreement folded into it, so if the owner pair resolves at t+4 while the
+folded pair keeps disagreeing to t+30, stopping on the owner alone ends the
+footage before the event it was suppressed for is over. A suppressed duplicate
+registers on the owner's `held_pair_keys`; the owner's resolution state machine
+treats the disagreement as resolved only when its own detectors agree **and**
+every held pair's do, and a re-divergence on any of them restarts the post-roll
+countdown. A held pair runs **no rules at all** while held (guard 0 in
+`_evaluate_pair`, ahead of the cooldown guard because the callback path can
+clear a cooldown early), and is released into a **fresh cooldown** when the
+stop goes out so it doesn't re-fire on the tail of the footage just recorded.
+Two asymmetries fall out and both are deliberate: **a Rule 1 start is never
+folded into a Rule 2 recording** (a Rule 2 clip's length is fixed at fire time
+and never gets a stop, so it can't be held open — measured cost, 2 of 137
+duplicates on the 2026-08-01 run), and **a Rule 2 duplicate never holds**
+anything open (its pulse is complete before it is even evaluated). Net: of the
+137 same-group starts in that run's window the shipped code suppresses **135
+(25.8 %)** — replaying the log should give 135, not 137. A
 derived group spanning more than one `phase` logs a WARNING (transitive
 over-grouping from one stray link); the derived groups are logged at startup
 next to `_pairs`. **The schema lives in three places that must agree** —
@@ -172,9 +192,10 @@ disable Rules 1+2 for such pairs. Because the duty computation reads the same
 changes.
 
 The rule functions are pinned by `video_engine/tests/test_discrepancy_rules.py`
-(120 stdlib-`unittest` cases, incl. the stale-refire guard, the floor gate, the
+(131 stdlib-`unittest` cases, incl. the stale-refire guard, the floor gate, the
 decision log, the suppression log, group derivation in both config forms,
-cross-pair duplicate rejection, and `_resolve_pytz`) — run it after any
+cross-pair duplicate rejection and its AND-gated stop, and `_resolve_pytz`) —
+run it after any
 engine change:
 `python3 video_engine/tests/test_discrepancy_rules.py`.
 Accuracy vs. an ATSPM ground-truth export is measured with
@@ -505,11 +526,11 @@ them relaxes the rule that the two packages don't import each other.
 
 Six suites, all **stdlib `unittest`** (pytest is not installed here), one file
 per subject, each runnable directly from any working directory via its own
-`sys.path` bootstrap. 287 cases total as of 2026-08-01:
+`sys.path` bootstrap. 298 cases total as of 2026-08-01:
 
 | Suite | Cases | Subject |
 |---|---|---|
-| `video_engine/tests/test_discrepancy_rules.py` | 120 | rule functions, `_evaluate_pair` integration, decision log, suppression log, detector groups + cross-pair duplicate rejection, `_resolve_pytz` |
+| `video_engine/tests/test_discrepancy_rules.py` | 131 | rule functions, `_evaluate_pair` integration, decision log, suppression log, detector groups + cross-pair duplicate rejection + AND-gated stop, `_resolve_pytz` |
 | `video_engine/tests/test_remux_manager.py` | 22 | manager writer/timer bookkeeping (stubbed remuxer) |
 | `video_engine/tests/test_config_manager.py` | 9 | `ConfigProviderError` |
 | `ntcip_monitor/tests/test_overlay_shapes.py` | 86 | shape reader, status resolution, live source (stubbed PyAV) |

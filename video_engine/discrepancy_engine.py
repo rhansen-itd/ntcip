@@ -276,6 +276,43 @@ event as a *miss*.  Four properties are load-bearing:
    which also stops the pair re-firing on the same physical event one threshold
    later.
 
+**The stop is an AND across every disagreement the clip stands for.**  Dropping
+the duplicate *start* is safe — the sibling is already recording that instant —
+but the *stop* is not symmetric: if the owner pair resolves at t+4 while the
+folded pair keeps disagreeing until t+30, stopping on the owner alone ends the
+footage before the event it was suppressed for is over.  So a suppressed
+duplicate registers itself on the owner's ``held_pair_keys``, and the owner's
+resolution state machine treats the disagreement as resolved only when its own
+detectors agree **and** every held pair's do.  A re-divergence on any of them
+restarts the post-roll countdown, exactly as one on the owner does.  Three
+consequences:
+
+* A held pair runs **no rules at all** while it is held (guard 0 in
+  ``_evaluate_pair``) — the group is already recording that event, and its
+  cooldown could otherwise be cleared early by the callback path.
+* When the ``stop`` finally goes out, the held pairs are **released into a
+  fresh cooldown** rather than straight back into service, so none of them
+  fires again on the tail of the footage just recorded.
+* Clips get longer, by design.  The buffer's ``max_duration_sec`` safety cap
+  (300 s for Rule 1) still bounds them.
+
+One exposure is widened rather than created: a detector stuck ON already holds
+its own Rule 1 recording open indefinitely (the engine sends no ``stop`` until
+the pair agrees again), and the AND now extends that to the held pairs as well.
+The *footage* is still bounded — the buffer auto-stops at ``max_duration_sec``
+— so what stalls is pair-level state, not disk.
+
+**A Rule 1 start is never folded into a Rule 2 recording.**  A Rule 2 clip's
+length is fixed at fire time and no ``stop`` is ever sent for it, so it cannot
+be held open; folding an open-ended Rule 1 event into one would truncate it to
+a length chosen for a brief pulse.  Such a start fires its own recording, which
+it can close itself.  This is rare in practice — on the 2026-08-01 run 133 of
+137 duplicates were same-rule (82 rule1→rule1, 51 rule2→rule2) and only 2 were
+rule2→rule1.  Rule 2 duplicates need no holding either way: an orphan pulse is
+complete before it is even evaluated.  Net effect on that run: of the 137
+same-group starts inside the window, this code suppresses **135 (25.8 %)** and
+lets the 2 rule2→rule1 cases through — replay it and expect 135, not 137.
+
 All four ``_fire_trigger`` call sites are on the evaluator thread, so the
 group bookkeeping needs no lock.
 
@@ -373,6 +410,28 @@ _HIGH_DUTY_WARN_INTERVAL_SEC = 600.0
 # ---------------------------------------------------------------------------
 # Cross-pair duplicate rejection (ROADMAP 9C4 — see the module docstring)
 # ---------------------------------------------------------------------------
+
+@dataclass
+class _GroupFire:
+    """The last ``start`` a detector group actually emitted, for one camera set.
+
+    Attributes:
+        fire_ts: ``event_timestamp`` the trigger carried.
+        trigger_id: Hex ID of that trigger.
+        pair_key: The pair that fired it — the *owner* of the recording, which
+            a later duplicate needs so it can attach itself to the owner's
+            resolution state machine.
+        rule: Rule that fired it.  A Rule 2 clip has a fixed length and no stop
+            trigger, so it cannot be held open for a later Rule 1 duplicate;
+            the rule is recorded here to make that decision (see
+            :meth:`DiscrepancyMonitor._duplicate_within_group`).
+    """
+
+    fire_ts: float
+    trigger_id: str
+    pair_key: str
+    rule: str
+
 
 # Seconds after a group's last emitted "start" during which another pair in the
 # same group is treated as a duplicate of it.  1.0 s is measured, not guessed:
@@ -598,6 +657,16 @@ class _PairRuntimeState:
             ``pair_min_duty`` exceeded ``high_duty_warn_fraction``.
         last_high_duty_warn_ts: ``time.time()`` of the last high-duty WARNING
             emitted for this pair (rate limit).
+        held_pair_keys: Pairs in the same detector group whose ``start`` was
+            folded into **this pair's** in-progress Rule 1 recording as a
+            cross-pair duplicate (ROADMAP 9C4).  Only meaningful while
+            ``active_trigger_id`` is set: the resolution state machine will
+            not send its ``stop`` until every one of them has *also* stopped
+            disagreeing, so the clip covers all the disagreements it stands
+            for and not just the one that happened to fire first.
+        held_by_pair_key: The pair holding **this pair** inside its recording,
+            or ``None``.  While set, the evaluator runs no rules for this pair
+            — the group is already recording this event.
     """
 
     pair_key: str
@@ -609,6 +678,10 @@ class _PairRuntimeState:
     # Rule 1 active-resolution tracking (new in Session 5)
     active_trigger_id: Optional[str] = None
     resolution_start_time: Optional[float] = None
+    # Cross-pair duplicate participation (ROADMAP 9C4).  Both are transient
+    # Rule 1 tracking state and are therefore discarded by a config reload.
+    held_pair_keys: List[str] = field(default_factory=list)
+    held_by_pair_key: Optional[str] = None
     # Monotonic ON-edge timestamp of the most recent orphan pulse already
     # registered for each slot.  Prevents a single stale pulse from being
     # re-armed (and re-fired) after each cooldown expiry when the detector has
@@ -903,10 +976,9 @@ class DiscrepancyMonitor:
         # ── Cross-pair duplicate rejection (ROADMAP 9C4) ──────────────────
         self._dedup_window_sec = _DEFAULT_DEDUP_WINDOW_SEC
         self._apply_dedup_config()
-        # (group_id, cameras_key) -> (fire_ts, trigger_id) of the last START
-        # actually written to the Hot Folder.  Written and read only on the
-        # evaluator thread, so no lock.
-        self._group_last_fire: Dict[Tuple[str, str], Tuple[float, str]] = {}
+        # (group_id, cameras_key) -> the last START actually written to the Hot
+        # Folder.  Written and read only on the evaluator thread, so no lock.
+        self._group_last_fire: Dict[Tuple[str, str], _GroupFire] = {}
 
         self._detector_states: Dict[str, _DetectorState] = {}
         self._pairs: Dict[str, Tuple[str, str]] = {}
@@ -1156,10 +1228,13 @@ class DiscrepancyMonitor:
 
         Execution order:
 
+        0. **Held guard** — return immediately while this pair's trigger is
+           folded into a sibling pair's open recording (ROADMAP 9C4).
         1. **Cooldown guard** — return immediately while in cooldown.
         2. **Rule 1 resolution state machine** — if ``rt.active_trigger_id``
            is set, manage the resolution countdown and send a ``"stop"``
-           trigger when post-roll elapses.  Always ``return`` after this block.
+           trigger when post-roll elapses — waiting for *every* held pair to
+           resolve too, not just this one.  Always ``return`` after this block.
         3. **State snapshot** — read both detectors under brief locks.
         3b. **High-duty advisory** — recompute the pair's rolling ON-duty at
            most every ``_DUTY_EVAL_INTERVAL_SEC``; warn (rate-limited) when it
@@ -1178,6 +1253,26 @@ class DiscrepancyMonitor:
         """
         rt  = self._pair_runtime[pair_key]
         now = time.time()
+
+        # ── 0. Held-by-another-pair guard ─────────────────────────────────
+        # This pair's trigger was folded into a sibling pair's recording as a
+        # cross-pair duplicate, and that recording is still open — it is
+        # already capturing this disagreement, and that recording's stop is
+        # waiting on this pair (ROADMAP 9C4).  Run no rules until it closes.
+        # Ahead of the cooldown guard on purpose: the early-cooldown-reset
+        # path can clear a cooldown from the callback thread, and a held pair
+        # must stay quiet regardless.
+        if rt.held_by_pair_key is not None:
+            owner_rt = self._pair_runtime.get(rt.held_by_pair_key)
+            if owner_rt is not None and owner_rt.active_trigger_id is not None:
+                # Clear the timer as we go, for the same reason the high-duty
+                # suppression does: a stale start would measure a disagreement
+                # from before the hold and fire the moment the hold lifts.
+                rt.disagreement_start = None
+                return
+            # The owner's recording ended without releasing us (it was
+            # abandoned, or the config reloaded underneath it).  Resume.
+            rt.held_by_pair_key = None
 
         # ── 1. Cooldown guard ─────────────────────────────────────────────
         if rt.cooldown_active:
@@ -1204,6 +1299,7 @@ class DiscrepancyMonitor:
                 # Detectors vanished during a reload; abandon the recording.
                 rt.active_trigger_id     = None
                 rt.resolution_start_time = None
+                self._release_held_pairs(rt, now)
                 return
 
             with state_a.lock:
@@ -1211,8 +1307,12 @@ class DiscrepancyMonitor:
             with state_b.lock:
                 b_is_on = state_b.is_on
 
-            # Resolution = both detectors agree (both ON or both OFF).
-            both_agree = (a_is_on == b_is_on)
+            # Resolution = both detectors agree (both ON or both OFF) — and so
+            # does every pair whose own trigger was folded into this recording
+            # as a cross-pair duplicate.  The clip stands for all of them, so
+            # the pair that happened to fire first does not get to decide alone
+            # when the footage ends (ROADMAP 9C4).
+            both_agree = (a_is_on == b_is_on) and self._held_pairs_agree(rt)
 
             if both_agree:
                 # Start the post-roll countdown on the first tick of agreement.
@@ -1762,13 +1862,14 @@ class DiscrepancyMonitor:
         # decision log's row is identical to a delivered one bar the three
         # marker columns) and before the tmp-write (so nothing reaches the
         # Hot Folder).
-        group_id     = self._pair_group.get(pair_key, pair_key)
-        cameras_key  = ";".join(cameras)
-        duplicate_of = self._duplicate_within_group(
-            action, group_id, cameras_key, event_ts
+        group_id    = self._pair_group.get(pair_key, pair_key)
+        cameras_key = ";".join(cameras)
+        duplicate   = self._duplicate_within_group(
+            action, rule, group_id, cameras_key, event_ts
         )
 
-        if duplicate_of is not None:
+        if duplicate is not None:
+            held = self._join_owner_recording(pair_key, rt, rule, duplicate)
             self._log.info(
                 "Duplicate trigger suppressed",
                 extra={
@@ -1776,21 +1877,27 @@ class DiscrepancyMonitor:
                     "trigger_id":              trigger_id,
                     "pair_key":                pair_key,
                     "dedup_group":             group_id,
-                    "duplicate_of_trigger_id": duplicate_of,
+                    "duplicate_of_trigger_id": duplicate.trigger_id,
+                    "owner_pair_key":          duplicate.pair_key,
                     "rule":                    rule,
                     "cameras":                 cameras,
                     "dedup_window_sec":        self._dedup_window_sec,
+                    # True when the owner's stop now waits on this pair too.
+                    "held_open_by_owner":      held,
                 },
             )
             self._log_decision(
                 payload, pair_key, event_window, local_tz,
-                dedup_group=group_id, duplicate_of=duplicate_of,
+                dedup_group=group_id, duplicate_of=duplicate.trigger_id,
             )
             # No trigger file exists, so the Rule 1 resolution state machine
-            # must NOT be armed — a later "stop" would reference a recording
-            # the buffer never started.  Cooldown instead, exactly as a Rule 2
-            # start does: the group *is* recording this moment on another
-            # pair, and the pair must not re-fire on the same physical event.
+            # must NOT be armed *here* — a later "stop" would reference a
+            # recording the buffer never started.  Cooldown instead, exactly as
+            # a Rule 2 start does: the group *is* recording this moment on
+            # another pair, and the pair must not re-fire on the same physical
+            # event.  When the owner holds an open Rule 1 recording, the line
+            # above additionally makes that recording wait for this pair's
+            # disagreement to resolve before it stops.
             rt.cooldown_active    = True
             rt.triggered_at       = time.time()
             rt.disagreement_start = None
@@ -1845,8 +1952,9 @@ class DiscrepancyMonitor:
         # forward indefinitely; a "stop" never lands here either, or closing
         # one recording would suppress the next genuine event.
         if action == "start":
-            self._group_last_fire[(group_id, cameras_key)] = (
-                event_ts, trigger_id,
+            self._group_last_fire[(group_id, cameras_key)] = _GroupFire(
+                fire_ts=event_ts, trigger_id=trigger_id,
+                pair_key=pair_key, rule=rule,
             )
 
         # ── Post-write state management ───────────────────────────────────
@@ -1858,6 +1966,10 @@ class DiscrepancyMonitor:
             rt.cooldown_active       = True
             rt.triggered_at          = time.time()
             rt.disagreement_start    = None
+            # The recording covered the held pairs' disagreements too; give
+            # them their own cooldown rather than returning them to service on
+            # the tail of the event that was just recorded.
+            self._release_held_pairs(rt, rt.triggered_at)
 
         elif rule == "rule1_continuous_disagreement":
             # START for Rule 1: arm the resolution state machine.
@@ -1877,11 +1989,12 @@ class DiscrepancyMonitor:
     def _duplicate_within_group(
         self,
         action: str,
+        rule: str,
         group_id: str,
         cameras_key: str,
         event_ts: float,
-    ) -> Optional[str]:
-        """Return the trigger ID this one duplicates, or ``None`` to proceed.
+    ) -> Optional[_GroupFire]:
+        """Return the group fire this trigger duplicates, or ``None`` to proceed.
 
         A ``start`` is a duplicate when another pair in the same derived
         detector group emitted a ``start`` for the same cameras less than
@@ -1892,12 +2005,22 @@ class DiscrepancyMonitor:
         matching recording, and suppressing the stop would strand it until the
         ``max_duration_sec`` safety cap.
 
+        **A Rule 1 start is never folded into a Rule 2 recording.**  A Rule 2
+        clip is a fixed-length artifact — its duration is computed at fire time
+        and no ``stop`` is ever sent — so there is no way to hold it open until
+        the Rule 1 disagreement resolves, and folding would truncate an
+        open-ended event into a clip sized for a brief pulse.  It fires its own
+        recording instead, which it can close itself.  Measured cost on the
+        2026-08-01 run: 2 of 137 duplicates (the other 133 are same-rule, 82
+        rule1→rule1 and 51 rule2→rule2).
+
         The comparison is on ``abs()`` so a backwards clock step degrades to
         *more* suppression rather than none — the failure that matters is a
         duplicate clip burning a writer slot, not a missed one.
 
         Args:
             action: ``"start"`` or ``"stop"``.
+            rule: Rule firing this candidate trigger.
             group_id: Derived group the firing pair belongs to.
             cameras_key: ``";"``-joined camera IDs from the trigger payload.
                 Part of the key because two pairs in one group that resolve to
@@ -1905,8 +2028,8 @@ class DiscrepancyMonitor:
             event_ts: Timestamp the candidate trigger carries.
 
         Returns:
-            The hex trigger ID of the recent trigger this one duplicates, or
-            ``None`` if it should be written.
+            The :class:`_GroupFire` this trigger duplicates, or ``None`` if it
+            should be written.
         """
         if action != "start" or self._dedup_window_sec <= 0.0:
             return None
@@ -1915,10 +2038,125 @@ class DiscrepancyMonitor:
         if previous is None:
             return None
 
-        previous_ts, previous_id = previous
-        if abs(event_ts - previous_ts) <= self._dedup_window_sec:
-            return previous_id
-        return None
+        if abs(event_ts - previous.fire_ts) > self._dedup_window_sec:
+            return None
+
+        if (rule == "rule1_continuous_disagreement"
+                and previous.rule != "rule1_continuous_disagreement"):
+            return None
+
+        return previous
+
+    def _join_owner_recording(
+        self,
+        pair_key: str,
+        rt: _PairRuntimeState,
+        rule: str,
+        duplicate: _GroupFire,
+    ) -> bool:
+        """Attach a suppressed duplicate to the owner's in-progress recording.
+
+        The clip that gets written stands for *every* disagreement folded into
+        it, so it must not stop while any of them is still open — otherwise the
+        pair that happened to fire first also decides, arbitrarily, when the
+        footage ends.  Registering here is what makes the owner's stop an AND
+        across all participants (see :meth:`_held_pairs_agree`).
+
+        Both sides have to be open-ended for a hold to mean anything:
+
+        * The **owner** must be running Rule 1 — the only rule with an explicit
+          ``stop`` to withhold.  A Rule 2 owner's clip length is fixed at fire
+          time, which is also why ``_duplicate_within_group`` refuses to fold a
+          Rule 1 start into one.
+        * The **duplicate** must be Rule 1 too.  A Rule 2 orphan pulse is
+          complete before it is even evaluated, so there is nothing left to
+          wait for; holding on one would extend the clip for a disagreement
+          that is already over.
+
+        Args:
+            pair_key: The suppressed pair.
+            rt: That pair's runtime state.
+            rule: Rule that produced the suppressed trigger.
+            duplicate: The group fire it was suppressed against.
+
+        Returns:
+            ``True`` if the owner's recording will now wait for this pair.
+        """
+        if rule != "rule1_continuous_disagreement":
+            return False
+
+        owner_rt = self._pair_runtime.get(duplicate.pair_key)
+        if owner_rt is None or owner_rt.active_trigger_id != duplicate.trigger_id:
+            # The owner is a Rule 2 fire (no open recording) or its recording
+            # has already closed — nothing to hold open.
+            return False
+
+        if pair_key not in owner_rt.held_pair_keys:
+            owner_rt.held_pair_keys.append(pair_key)
+        rt.held_by_pair_key = duplicate.pair_key
+        return True
+
+    def _held_pairs_agree(self, rt: _PairRuntimeState) -> bool:
+        """Report whether every pair folded into this recording has resolved.
+
+        Prunes held pairs whose detectors disappeared in a config reload: a
+        pair that no longer exists cannot resolve, and leaving it in the list
+        would hold the recording open until the buffer's ``max_duration_sec``
+        safety cap.
+
+        Args:
+            rt: Runtime state of the pair that owns the recording.
+
+        Returns:
+            ``True`` when no held pair is still disagreeing (vacuously true
+            when none are held).
+        """
+        if not rt.held_pair_keys:
+            return True
+
+        still_held: List[str] = []
+        agree = True
+
+        for held_key in rt.held_pair_keys:
+            pair = self._pairs.get(held_key)
+            if pair is None:
+                continue
+            state_a = self._detector_states.get(pair[0])
+            state_b = self._detector_states.get(pair[1])
+            if state_a is None or state_b is None:
+                continue
+            still_held.append(held_key)
+            with state_a.lock:
+                a_is_on = state_a.is_on
+            with state_b.lock:
+                b_is_on = state_b.is_on
+            if a_is_on != b_is_on:
+                agree = False
+
+        rt.held_pair_keys = still_held
+        return agree
+
+    def _release_held_pairs(self, rt: _PairRuntimeState, now: float) -> None:
+        """Release the pairs a finished recording was holding.
+
+        Each released pair is put into a *fresh* cooldown rather than being
+        returned to service immediately: the recording that just ended covered
+        its disagreement, so firing again on the tail of the same event would
+        recreate the duplicate this mechanism exists to remove.
+
+        Args:
+            rt: Runtime state of the pair that owned the recording.
+            now: Timestamp to start the released pairs' cooldown from.
+        """
+        for held_key in rt.held_pair_keys:
+            held_rt = self._pair_runtime.get(held_key)
+            if held_rt is None:
+                continue
+            held_rt.held_by_pair_key = None
+            held_rt.cooldown_active  = True
+            held_rt.triggered_at     = now
+            held_rt.disagreement_start = None
+        rt.held_pair_keys = []
 
     def _log_decision(
         self,

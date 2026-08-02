@@ -1753,3 +1753,72 @@ decided. Entries after this point are logged as the decision lands.
   surfaced (Rule 2's asymmetric floor gate, Rule 1's absent hysteresis) are
   *not* part of it: they are rule changes, were explicitly gated behind the
   measurement work, and carry forward as ROADMAP Item 12.
+
+- 2026-08-01 — **9C4 follow-up: the duplicate's `stop` is an AND, not a drop.**
+  Raised by the owner immediately after 9C4 landed, and correct: dropping a
+  duplicate *start* is safe because the sibling pair is already recording that
+  instant, but the *stop* is not symmetric. If pair `A:B` owns the recording and
+  resolves at t+4 while the folded pair `B:C` keeps disagreeing until t+30, the
+  clip ends before the event it was suppressed for is over — the pair that
+  happened to fire first would decide, arbitrarily, when the footage ends. The
+  original 9C4 implementation had exactly that hole: `held` pairs went into
+  cooldown and the owner's resolution state machine tested only its own two
+  detectors.
+
+  **Fix:** a suppressed duplicate registers on the owner's `held_pair_keys`
+  (and records its owner in `held_by_pair_key`), and the owner's resolution
+  test becomes `own detectors agree AND every held pair agrees`. A
+  re-divergence on *any* participant restarts the post-roll countdown, exactly
+  as one on the owner already did. Three supporting behaviors, each for a
+  concrete failure:
+
+  * A held pair runs **no rules at all** while held — a new guard 0 in
+    `_evaluate_pair`, placed *ahead* of the cooldown guard because
+    `_maybe_reset_cooldown_early` can clear a cooldown from the callback thread
+    and a held pair must stay quiet regardless. It also clears
+    `disagreement_start` as it goes, for the same reason the high-duty
+    suppression path does: a stale timer would fire the instant the hold lifts.
+  * On `stop`, held pairs are **released into a fresh cooldown**, not straight
+    back into service — otherwise each one re-fires on the tail of the footage
+    that was just recorded, recreating the duplicate this mechanism removes.
+  * `_held_pairs_agree` prunes held pairs whose detectors vanished in a reload:
+    a pair that cannot resolve would otherwise hold the clip to the
+    `max_duration_sec` cap.
+
+  **Two asymmetries fell out of the fix, and the run data decided both.**
+  Cross-tabulating the 137 duplicates by (owner rule → duplicate rule) gives
+  82 rule1→rule1, 51 rule2→rule2, 2 rule1→rule2 and 2 rule2→rule1:
+
+  1. **A Rule 1 start is never folded into a Rule 2 recording.** A Rule 2
+     clip's length is fixed at fire time and no `stop` is ever sent for it, so
+     it cannot be held open; folding an open-ended Rule 1 event into one would
+     truncate it to a length chosen for a brief pulse. It fires its own
+     recording, which it can close itself. Measured cost: **2 of 137**. The
+     alternative — transferring ownership via the Hot Folder's `extend` action
+     — was rejected as a new mode (a pair's `active_trigger_id` referring to
+     another pair's trigger, plus a guessed new duration) for 0.4 % of cases.
+  2. **A Rule 2 duplicate never holds anything open.** An orphan pulse is
+     complete before Rule 2 even evaluates it, so there is nothing to wait for;
+     holding on one would extend a clip for a disagreement already over.
+
+  **Restated sizing:** the duplicate *population* in a 1.0 s group window is
+  still 137 of 523 starts (26.2 %) — that is what 9C2 measured and what picked
+  the window — but the shipped code suppresses **135 (25.8 %)**, letting the 2
+  rule2→rule1 cases through. Anyone replaying the 2026-08-01 log against this
+  implementation should expect 135; the figures are not in conflict.
+
+  **What this deliberately does not fix:** a detector stuck ON already holds
+  its own Rule 1 recording open indefinitely, and the AND extends that stall to
+  the held pairs. The exposure is widened, not created, and the *footage* stays
+  bounded because the buffer auto-stops at `max_duration_sec` — what stalls is
+  pair-level state, not disk. A time-bounded forced stop would change Rule 1's
+  existing behavior and is out of scope here.
+
+  Tests: 11 more cases (120 → 131) in a new `TestHeldPairResolution` class that
+  drives real detector callbacks through a triangle — including the property in
+  time (the stop's timestamp is after the *held* pair resolved, not the
+  owner's), the re-divergence reset, the no-rules-while-held guard proven with
+  the cooldown forcibly cleared, and both vanishing-detector paths. Two 9C4
+  tests were rewritten: they had asserted the "suppressed Rule 1 start doesn't
+  arm the state machine" property using a rule2→rule1 setup that is no longer a
+  suppression at all.

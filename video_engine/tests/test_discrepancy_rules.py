@@ -1375,26 +1375,49 @@ class TestCrossPairDuplicates(unittest.TestCase):
 
     # ── Rule 1: the start/stop pairing (the fiddly part) ─────────────────
 
+    def fire_rule1(self, monitor, pair_key, det_a, det_b, ts):
+        self.fire(monitor, pair_key, det_a, det_b, ts,
+                  rule="rule1_continuous_disagreement",
+                  event_window=(ts - 1.0, None))
+
     def test_suppressed_rule1_start_does_not_arm_the_state_machine(self):
         # Arming it would later send the buffer a "stop" for a recording it
         # never started.
-        self.fire(self.monitor, "17:2", "2", "17", 1000.0)
-        self.fire(self.monitor, "17:46", "17", "46", 1000.1,
-                  rule="rule1_continuous_disagreement",
-                  event_window=(999.0, None))
+        self.fire_rule1(self.monitor, "17:2", "2", "17", 1000.0)
+        self.fire_rule1(self.monitor, "17:46", "17", "46", 1000.1)
         rt = self.monitor._pair_runtime["17:46"]
         self.assertIsNone(rt.active_trigger_id)
 
     def test_suppressed_start_engages_cooldown_instead(self):
         # The group is already recording this moment; the pair must not
         # re-fire on the same physical event one threshold later.
-        self.fire(self.monitor, "17:2", "2", "17", 1000.0)
-        self.fire(self.monitor, "17:46", "17", "46", 1000.1,
-                  rule="rule1_continuous_disagreement",
-                  event_window=(999.0, None))
+        self.fire_rule1(self.monitor, "17:2", "2", "17", 1000.0)
+        self.fire_rule1(self.monitor, "17:46", "17", "46", 1000.1)
         rt = self.monitor._pair_runtime["17:46"]
         self.assertTrue(rt.cooldown_active)
         self.assertIsNone(rt.disagreement_start)
+
+    def test_rule1_is_never_folded_into_a_rule2_recording(self):
+        # A rule 2 clip's length is fixed at fire time and never gets a stop,
+        # so it cannot be held open until the rule 1 disagreement resolves.
+        # Two clips beat one truncated one.
+        self.fire(self.monitor, "17:2", "2", "17", 1000.0)   # rule 2 owner
+        self.fire_rule1(self.monitor, "17:46", "17", "46", 1000.1)
+        self.assertEqual(len(self.triggers()), 2)
+        self.assertEqual(
+            [r["suppressed_as_duplicate"] for r in self.rows()], ["0", "0"]
+        )
+        # And it owns its own recording, so it can close it.
+        self.assertIsNotNone(
+            self.monitor._pair_runtime["17:46"].active_trigger_id
+        )
+
+    def test_rule2_is_still_folded_into_a_rule1_recording(self):
+        # The reverse direction is safe: an orphan pulse is complete before it
+        # is even evaluated, so it needs no holding open.
+        self.fire_rule1(self.monitor, "17:2", "2", "17", 1000.0)
+        self.fire(self.monitor, "17:46", "17", "46", 1000.1)
+        self.assertEqual(len(self.triggers()), 1)
 
     def test_an_emitted_rule1_start_still_arms_the_state_machine(self):
         self.fire(self.monitor, "17:46", "17", "46", 1000.0,
@@ -1473,6 +1496,171 @@ class TestCrossPairDuplicates(unittest.TestCase):
             sorted(r["suppressed_as_duplicate"] for r in rows), ["0", "1"]
         )
         self.assertEqual(len(self.triggers()), 1)
+
+
+# ---------------------------------------------------------------------------
+# The stop is an AND across every disagreement the clip stands for (9C4)
+# ---------------------------------------------------------------------------
+
+class TestHeldPairResolution(unittest.TestCase):
+    """Detector 17 disagrees with both 2 and 46; one clip covers both.
+
+    The pair that fires first owns the recording, but it does not get to
+    decide alone when the footage ends — the stop waits for every pair whose
+    own trigger was folded into it.
+    """
+
+    THRESHOLD = 0.2
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.log_path = Path(self._tmp.name) / "engine_decisions.csv"
+        self.monitor = DiscrepancyMonitor(
+            intersection_id="test_int",
+            config_provider=_StubProvider({
+                "timezone": "UTC",
+                "detectors": {
+                    k: _det(v, threshold=self.THRESHOLD)
+                    for k, v in (("2", "17"), ("17", "46"), ("46", "2"))
+                },
+            }),
+            trigger_dir=self._tmp.name,
+            cooldown_sec=60.0,
+            post_roll_sec=0.0,
+            decision_log_path=self.log_path,
+        )
+        self.monitor.set_sampling_floor(0.01)
+        # Pair order is insertion order: 17:2 fires first and owns the clip.
+        self.owner, self.held = "17:2", "17:46"
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def evaluate_all(self):
+        for pair_key, (a, b) in self.monitor._pairs.items():
+            self.monitor._evaluate_pair(pair_key, a, b)
+
+    def triggers(self):
+        return [
+            json.loads(p.read_text(encoding="utf-8"))
+            for p in sorted(Path(self._tmp.name).glob("trigger_*.json"))
+        ]
+
+    def start_recording(self):
+        """Drive 17 ON against both partners until the owner's start fires."""
+        self.monitor.on_detector_on("17")
+        self.evaluate_all()                       # arm both timers
+        time.sleep(self.THRESHOLD + 0.05)
+        self.evaluate_all()                       # owner fires, sibling folds
+        return self.monitor._pair_runtime[self.owner]
+
+    def test_setup_produces_one_owner_and_one_held_pair(self):
+        rt = self.start_recording()
+        self.assertEqual(len(self.triggers()), 1)
+        self.assertEqual(rt.held_pair_keys, [self.held])
+        self.assertEqual(
+            self.monitor._pair_runtime[self.held].held_by_pair_key, self.owner
+        )
+
+    def test_stop_waits_while_a_held_pair_still_disagrees(self):
+        rt = self.start_recording()
+        # The owner's own detectors agree again (2 comes ON), but 46 does not.
+        self.monitor.on_detector_on("2")
+        for _ in range(3):
+            self.evaluate_all()
+        self.assertIsNone(rt.resolution_start_time)
+        self.assertIsNotNone(rt.active_trigger_id)
+        self.assertEqual([t["action"] for t in self.triggers()], ["start"])
+
+    def test_stop_fires_once_every_participant_agrees(self):
+        rt = self.start_recording()
+        self.monitor.on_detector_on("2")
+        self.evaluate_all()
+        self.monitor.on_detector_on("46")         # the last disagreement ends
+        self.evaluate_all()                       # starts the post-roll (0 s)
+        self.evaluate_all()                       # sends the stop
+        actions = [t["action"] for t in self.triggers()]
+        self.assertEqual(actions, ["start", "stop"])
+        self.assertIsNone(rt.active_trigger_id)
+        # One clip, opened and closed by the same trigger ID.
+        self.assertEqual(
+            self.triggers()[0]["trigger_id"], self.triggers()[1]["trigger_id"]
+        )
+
+    def test_a_held_pair_rediverging_resets_the_post_roll(self):
+        self.monitor._post_roll_sec = 5.0
+        rt = self.start_recording()
+        self.monitor.on_detector_on("2")
+        self.monitor.on_detector_on("46")
+        self.evaluate_all()                       # countdown starts
+        self.assertIsNotNone(rt.resolution_start_time)
+        self.monitor.on_detector_off("46")        # held pair diverges again
+        self.evaluate_all()
+        self.assertIsNone(rt.resolution_start_time)
+
+    def test_a_held_pair_runs_no_rules_while_held(self):
+        self.start_recording()
+        held_rt = self.monitor._pair_runtime[self.held]
+        # Prove guard 0 does the work, not the cooldown: the callback path can
+        # clear a cooldown early, and the pair must still stay quiet.
+        held_rt.cooldown_active = False
+        for _ in range(3):
+            time.sleep(self.THRESHOLD + 0.05)
+            self.evaluate_all()
+        self.assertEqual(len(self.triggers()), 1)
+        self.assertIsNone(held_rt.disagreement_start)
+
+    def test_release_puts_held_pairs_into_a_fresh_cooldown(self):
+        rt = self.start_recording()
+        self.monitor.on_detector_on("2")
+        self.monitor.on_detector_on("46")
+        self.evaluate_all()
+        self.evaluate_all()                       # stop goes out
+        held_rt = self.monitor._pair_runtime[self.held]
+        self.assertEqual(rt.held_pair_keys, [])
+        self.assertIsNone(held_rt.held_by_pair_key)
+        # Released into cooldown, not straight back into service — otherwise
+        # it re-fires on the tail of the footage just recorded.
+        self.assertTrue(held_rt.cooldown_active)
+        self.assertGreater(held_rt.triggered_at, 0.0)
+
+    def test_an_abandoned_recording_releases_its_held_pairs(self):
+        self.start_recording()
+        # Detectors vanish under an active recording (the reload case).
+        del self.monitor._detector_states["2"]
+        self.evaluate_all()
+        held_rt = self.monitor._pair_runtime[self.held]
+        self.assertIsNone(held_rt.held_by_pair_key)
+        self.assertEqual(
+            self.monitor._pair_runtime[self.owner].held_pair_keys, []
+        )
+
+    def test_a_held_pair_whose_detectors_vanish_stops_holding(self):
+        rt = self.start_recording()
+        # 46 disappears; the held pair can never resolve, and leaving it in
+        # the list would hold the clip open to the max_duration_sec cap.
+        del self.monitor._detector_states["46"]
+        self.monitor.on_detector_on("2")
+        self.evaluate_all()
+        self.evaluate_all()
+        self.assertEqual(rt.held_pair_keys, [])
+        self.assertEqual([t["action"] for t in self.triggers()],
+                         ["start", "stop"])
+
+    def test_the_clip_covers_the_later_disagreement(self):
+        # The property the whole mechanism exists for, stated in time: the
+        # stop timestamp is after the moment the *held* pair resolved, not the
+        # owner's.
+        rt = self.start_recording()
+        self.monitor.on_detector_on("2")
+        self.evaluate_all()
+        time.sleep(0.15)
+        self.monitor.on_detector_on("46")
+        held_resolved_at = time.time()
+        self.evaluate_all()
+        self.evaluate_all()
+        stop = [t for t in self.triggers() if t["action"] == "stop"][0]
+        self.assertGreaterEqual(stop["event_timestamp"], held_resolved_at)
 
 
 if __name__ == "__main__":
