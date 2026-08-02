@@ -219,9 +219,67 @@ deliberately not done here.
 
 ``reason`` is a plain string precisely so the other populations the accuracy
 report also models rather than measures (cooldown suppression, a Rule 2 verdict
-discarded past ``_ORPHAN_DECISION_GRACE_SEC``, ``suppress_high_duty_pairs``,
-and the cross-pair duplicate rejection sketched in ROADMAP 9C4) can land in
-this file later as new values, with no schema change and no second artifact.
+discarded past ``_ORPHAN_DECISION_GRACE_SEC``, and ``suppress_high_duty_pairs``)
+can land in this file later as new values, with no schema change and no second
+artifact.  Note the cross-pair duplicate rejection below deliberately does
+**not** live here: it happens after a trigger is fully formed and keeps its
+trigger ID, so it is a *decision* the engine made about a real detection, and a
+consumer scoring accuracy must still credit it.  It is marked in the decision
+log instead.
+
+Cross-pair duplicate rejection (ROADMAP 9C4, 2026-08-01)
+────────────────────────────────────────────────────────
+Detectors are linked pairwise, but the links form larger structures: five of
+intersection 201's groups are *triangles* (A→B, B→C, C→A), where one physical
+event in which B disagrees with both A and C fires on pair ``A:B`` **and** pair
+``B:C``, often on the same evaluator tick.  That is two clips of the same
+moment, each burning one of only ``max_concurrent_writers`` (default 2) writer
+slots.  On the 2026-08-01 run, 137 of 523 start decisions (26.2 %) were such
+duplicates, while the writer cap dropped 174 decisions (33.6 %).
+
+**Groups are derived, not configured.**  ``_build_structures`` computes the
+connected components of the pair graph; a group is every detector reachable
+from another through ``paired_detector_id`` links.  Both authoring styles
+therefore work with no separate code path:
+
+* explicit — ``paired_detector_id`` as a **list**: A ``[B, C]``, B ``[A, C]``,
+  C ``[A, B]`` ("compare all of these");
+* implicit — today's **ring** of scalars: A→B, B→C, C→A ("this cycle").
+
+Pairs are the union of all normalized links, so for n = 3 the two forms yield
+the *identical* 3 pairs.  **That coincidence is specific to n = 3** — a 4-ring
+gives 4 edges where an explicit all-pairs list gives 6.  Neither is wrong, so a
+group is a **dedup scope only**: it is never read as an instruction to evaluate
+every internal pair, or a 4-ring config would silently grow comparisons nobody
+asked for.  Pair generation stays link-driven.
+
+The rejection itself: immediately before the tmp-write in :meth:`_fire_trigger`,
+a ``start`` whose group fired another ``start`` less than ``dedup_window_sec``
+(config, default 1.0) ago is not written to the Hot Folder.  It is still
+appended to the decision log, marked with ``suppressed_as_duplicate`` and
+``duplicate_of_trigger_id``, because it is engine output that ground truth also
+contains twice — dropping the row silently would score the sibling pair's GT
+event as a *miss*.  Four properties are load-bearing:
+
+1. **The window is anchored on emitted starts only.**  A suppressed row never
+   updates the group's last-fire stamp, so a storm cannot roll the window
+   forward indefinitely and suppress unboundedly.
+2. **Cameras are part of the key.**  Two pairs in one group that resolve to
+   different ``camera_id``s cover different footage and are not duplicates.
+3. **``stop`` is never suppressed and never anchors.**  A ``stop`` closes a
+   ``start`` the buffer has already seen; suppressing it would strand a
+   recording, and letting it anchor would suppress the *next* genuine event.
+4. **A suppressed Rule 1 ``start`` must not arm the resolution state machine.**
+   Setting ``active_trigger_id`` for a trigger the buffer never received would
+   later send it a ``stop`` for a recording that does not exist.  A suppressed
+   start instead engages the pair cooldown (exactly what a Rule 2 start does),
+   which also stops the pair re-firing on the same physical event one threshold
+   later.
+
+All four ``_fire_trigger`` call sites are on the evaluator thread, so the
+group bookkeeping needs no lock.
+
+Setting ``dedup_window_sec`` to ``0`` disables the whole mechanism.
 
 Thread-safety contract
 ──────────────────────
@@ -313,6 +371,19 @@ _DUTY_EVAL_INTERVAL_SEC = 5.0
 _HIGH_DUTY_WARN_INTERVAL_SEC = 600.0
 
 # ---------------------------------------------------------------------------
+# Cross-pair duplicate rejection (ROADMAP 9C4 — see the module docstring)
+# ---------------------------------------------------------------------------
+
+# Seconds after a group's last emitted "start" during which another pair in the
+# same group is treated as a duplicate of it.  1.0 s is measured, not guessed:
+# on the 2026-08-01 run 103 of 523 starts landed on the same group at the
+# *identical* 0.1 s tick and a 1.0 s window caught 137 (26.2 %), while 2.0 s
+# caught 162 and 5.0 s only 181 — the curve is flat after ~1 s, so 1.0 s buys
+# the same-tick storm plus one evaluator cycle of slack without reaching into
+# genuinely separate events.  0 disables the mechanism.
+_DEFAULT_DEDUP_WINDOW_SEC = 1.0
+
+# ---------------------------------------------------------------------------
 # Decision log (ROADMAP 9C1 — see the module docstring)
 # ---------------------------------------------------------------------------
 
@@ -339,6 +410,10 @@ _DECISION_LOG_FIELDS = (
     "max_duration_sec",
     "cameras",              # ";"-joined camera IDs, as sent in the trigger
     "description",
+    # ── ROADMAP 9C4, appended 2026-08-01 ──
+    "dedup_group",              # ":"-joined detector IDs of the derived group
+    "suppressed_as_duplicate",  # "1" if it never reached the Hot Folder
+    "duplicate_of_trigger_id",  # the trigger it duplicated, or ""
 )
 
 # ---------------------------------------------------------------------------
@@ -376,6 +451,32 @@ _SUPPRESSION_LOG_FIELDS = (
     "min_pulse_floor_multiple",  #    a consumer can re-derive it at other × ──
     "description",
 )
+
+# ---------------------------------------------------------------------------
+# Detector ID ordering helper
+# ---------------------------------------------------------------------------
+
+def _sort_detector_ids(det_ids: Sequence[str]) -> List[str]:
+    """Order detector IDs numerically when they all look like numbers.
+
+    Used only to build the *group* ID in the decision log and the startup
+    banner, where ``"2:17:46"`` is legible and the plain lexicographic
+    ``"17:2:46"`` is not.  Pair keys keep their existing lexicographic
+    ``sorted()`` — this helper deliberately does not change them, because
+    ``pair_key`` is already committed to in two log formats.
+
+    Args:
+        det_ids: Detector ID strings, in any order.
+
+    Returns:
+        A new sorted list: numerically if every ID is all-digits, otherwise
+        lexicographically.
+    """
+    values = [str(d) for d in det_ids]
+    if values and all(v.isdigit() for v in values):
+        return sorted(values, key=int)
+    return sorted(values)
+
 
 # ---------------------------------------------------------------------------
 # Timezone resolution helper
@@ -729,6 +830,14 @@ class DiscrepancyMonitor:
         When ``True``, Rules 1+2 are disabled entirely for pairs over that
         duty threshold.  Default ``False`` — advisory only.
 
+    Duplicate-rejection configuration (read from the intersection config; see
+    the module docstring):
+
+    ``dedup_window_sec``
+        Seconds after a detector group's last emitted ``"start"`` during which
+        another pair in the same group is rejected as a duplicate of it.
+        Default ``1.0``; ``0`` disables the mechanism.
+
     The floor itself is **not** read from config here; it is injected by
     ``system_runner`` via :meth:`set_sampling_floor` (at startup from the
     config's ``sampling_floor_sec``, then from the detector monitor's measured
@@ -791,9 +900,19 @@ class DiscrepancyMonitor:
         self._sampling_floor_sec = _DEFAULT_SAMPLING_FLOOR_SEC
         self._apply_floor_config()
 
+        # ── Cross-pair duplicate rejection (ROADMAP 9C4) ──────────────────
+        self._dedup_window_sec = _DEFAULT_DEDUP_WINDOW_SEC
+        self._apply_dedup_config()
+        # (group_id, cameras_key) -> (fire_ts, trigger_id) of the last START
+        # actually written to the Hot Folder.  Written and read only on the
+        # evaluator thread, so no lock.
+        self._group_last_fire: Dict[Tuple[str, str], Tuple[float, str]] = {}
+
         self._detector_states: Dict[str, _DetectorState] = {}
         self._pairs: Dict[str, Tuple[str, str]] = {}
         self._pair_runtime: Dict[str, _PairRuntimeState] = {}
+        self._groups: Dict[str, List[str]] = {}
+        self._pair_group: Dict[str, str] = {}
         self._build_structures()
 
         self._running = False
@@ -821,6 +940,10 @@ class DiscrepancyMonitor:
             extra={
                 "intersection_id": self._intersection_id,
                 "pairs": list(self._pairs.keys()),
+                # Derived, not configured — log them so a transitively
+                # over-grouped config is visible without reading the code.
+                "groups": list(self._groups.keys()),
+                "dedup_window_sec": self._dedup_window_sec,
                 "algorithm": "co-located-disagreement",
             },
         )
@@ -854,6 +977,7 @@ class DiscrepancyMonitor:
             ) from exc
         self._intersection_cfg = new_cfg
         self._apply_floor_config()
+        self._apply_dedup_config()
         self._build_structures(preserve_existing=True)
         self._log.info(
             "Configuration reloaded",
@@ -881,6 +1005,25 @@ class DiscrepancyMonitor:
         self._suppress_high_duty_pairs = bool(
             self._intersection_cfg.get("suppress_high_duty_pairs", False)
         )
+
+    def _apply_dedup_config(self) -> None:
+        """Re-read the cross-pair duplicate window from the intersection config.
+
+        Called from ``__init__`` and :meth:`reload`.  A malformed or negative
+        value falls back to the default rather than disabling the mechanism —
+        a typo must not silently restore the duplicate storm.  ``0`` disables
+        it, but only when written as an explicit zero.
+        """
+        raw = self._intersection_cfg.get(
+            "dedup_window_sec", _DEFAULT_DEDUP_WINDOW_SEC
+        )
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            value = _DEFAULT_DEDUP_WINDOW_SEC
+        if value < 0.0:
+            value = _DEFAULT_DEDUP_WINDOW_SEC
+        self._dedup_window_sec = value
 
     def set_sampling_floor(self, sec: float) -> None:
         """Set the effective sampling resolution of the upstream detector source.
@@ -1553,6 +1696,13 @@ class DiscrepancyMonitor:
                 the disagreement but not its end).  Not part of the trigger
                 payload — the video buffer has no use for it, and the Hot
                 Folder schema is deliberately hard to grow.
+
+        A fourth outcome sits ahead of the table above: a ``start`` rejected as
+        a **cross-pair duplicate** (ROADMAP 9C4) writes no trigger file at all.
+        It is still recorded in the decision log, marked, and the pair engages
+        cooldown — including for Rule 1, which must *not* arm
+        ``active_trigger_id`` for a trigger the buffer never received.  See the
+        module docstring.
         """
         rt = self._pair_runtime[pair_key]
 
@@ -1607,6 +1757,45 @@ class DiscrepancyMonitor:
             },
         }
 
+        # ── Cross-pair duplicate rejection (ROADMAP 9C4) ──────────────────
+        # Deliberately here: after the payload is fully formed (so the
+        # decision log's row is identical to a delivered one bar the three
+        # marker columns) and before the tmp-write (so nothing reaches the
+        # Hot Folder).
+        group_id     = self._pair_group.get(pair_key, pair_key)
+        cameras_key  = ";".join(cameras)
+        duplicate_of = self._duplicate_within_group(
+            action, group_id, cameras_key, event_ts
+        )
+
+        if duplicate_of is not None:
+            self._log.info(
+                "Duplicate trigger suppressed",
+                extra={
+                    "intersection_id":         self._intersection_id,
+                    "trigger_id":              trigger_id,
+                    "pair_key":                pair_key,
+                    "dedup_group":             group_id,
+                    "duplicate_of_trigger_id": duplicate_of,
+                    "rule":                    rule,
+                    "cameras":                 cameras,
+                    "dedup_window_sec":        self._dedup_window_sec,
+                },
+            )
+            self._log_decision(
+                payload, pair_key, event_window, local_tz,
+                dedup_group=group_id, duplicate_of=duplicate_of,
+            )
+            # No trigger file exists, so the Rule 1 resolution state machine
+            # must NOT be armed — a later "stop" would reference a recording
+            # the buffer never started.  Cooldown instead, exactly as a Rule 2
+            # start does: the group *is* recording this moment on another
+            # pair, and the pair must not re-fire on the same physical event.
+            rt.cooldown_active    = True
+            rt.triggered_at       = time.time()
+            rt.disagreement_start = None
+            return
+
         try:
             tmp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
             os.rename(tmp_path, json_path)
@@ -1646,7 +1835,19 @@ class DiscrepancyMonitor:
         # is deliberately after the rename and before any state management:
         # what the log claims the engine emitted is exactly what reached the
         # Hot Folder, whether or not the buffer later finds a writer slot.
-        self._log_decision(payload, pair_key, event_window, local_tz)
+        self._log_decision(
+            payload, pair_key, event_window, local_tz,
+            dedup_group=group_id, duplicate_of=None,
+        )
+
+        # Anchor the group's duplicate window on *emitted* starts only.  A
+        # suppressed row never lands here, so a storm cannot roll the window
+        # forward indefinitely; a "stop" never lands here either, or closing
+        # one recording would suppress the next genuine event.
+        if action == "start":
+            self._group_last_fire[(group_id, cameras_key)] = (
+                event_ts, trigger_id,
+            )
 
         # ── Post-write state management ───────────────────────────────────
 
@@ -1673,19 +1874,72 @@ class DiscrepancyMonitor:
             rt.triggered_at       = time.time()
             rt.disagreement_start = None
 
+    def _duplicate_within_group(
+        self,
+        action: str,
+        group_id: str,
+        cameras_key: str,
+        event_ts: float,
+    ) -> Optional[str]:
+        """Return the trigger ID this one duplicates, or ``None`` to proceed.
+
+        A ``start`` is a duplicate when another pair in the same derived
+        detector group emitted a ``start`` for the same cameras less than
+        ``dedup_window_sec`` ago — the triangle case where one physical event
+        makes B disagree with both A and C (see the module docstring).
+
+        ``stop`` actions are never duplicates: the buffer already holds the
+        matching recording, and suppressing the stop would strand it until the
+        ``max_duration_sec`` safety cap.
+
+        The comparison is on ``abs()`` so a backwards clock step degrades to
+        *more* suppression rather than none — the failure that matters is a
+        duplicate clip burning a writer slot, not a missed one.
+
+        Args:
+            action: ``"start"`` or ``"stop"``.
+            group_id: Derived group the firing pair belongs to.
+            cameras_key: ``";"``-joined camera IDs from the trigger payload.
+                Part of the key because two pairs in one group that resolve to
+                different cameras cover different footage.
+            event_ts: Timestamp the candidate trigger carries.
+
+        Returns:
+            The hex trigger ID of the recent trigger this one duplicates, or
+            ``None`` if it should be written.
+        """
+        if action != "start" or self._dedup_window_sec <= 0.0:
+            return None
+
+        previous = self._group_last_fire.get((group_id, cameras_key))
+        if previous is None:
+            return None
+
+        previous_ts, previous_id = previous
+        if abs(event_ts - previous_ts) <= self._dedup_window_sec:
+            return previous_id
+        return None
+
     def _log_decision(
         self,
         payload: dict,
         pair_key: str,
         event_window: Optional[Tuple[Optional[float], Optional[float]]],
         local_tz: "pytz.BaseTzInfo",
+        dedup_group: str = "",
+        duplicate_of: Optional[str] = None,
     ) -> None:
         """Append one row to the engine's decision log.
 
         Called from :meth:`_fire_trigger` for every trigger that reached the
-        Hot Folder.  Unlike the video buffer's ``discrepancies_log.csv``, no
-        downstream condition can suppress a row here — that difference is the
-        whole point of the file (see the module docstring).
+        Hot Folder, **and** for every one the engine rejected as a cross-pair
+        duplicate before writing it.  Unlike the video buffer's
+        ``discrepancies_log.csv``, no downstream condition can suppress a row
+        here — that difference is the whole point of the file (see the module
+        docstring).  A duplicate is marked rather than dropped because ground
+        truth contains the same event on both pairs of the group, so a
+        consumer that never saw the row would score the sibling pair's event
+        as a miss.
 
         Best-effort by contract: any write failure is logged and swallowed, so
         a full or read-only disk degrades measurement, never recording.  The
@@ -1702,6 +1956,10 @@ class DiscrepancyMonitor:
             local_tz: Timezone already resolved by the caller, reused so the
                 row's human-readable stamp cannot disagree with the trigger
                 filename's.
+            dedup_group: Derived detector group the pair belongs to, recorded
+                on every row so a consumer can collapse a group's rows itself.
+            duplicate_of: When set, the trigger ID this row duplicated — the
+                row describes a decision that never reached the Hot Folder.
         """
         if self._decision_log_path is None:
             return
@@ -1735,6 +1993,9 @@ class DiscrepancyMonitor:
             "max_duration_sec": payload["max_duration_sec"],
             "cameras":          ";".join(payload.get("cameras", [])),
             "description":      meta.get("description", ""),
+            "dedup_group":      dedup_group,
+            "suppressed_as_duplicate": "1" if duplicate_of else "0",
+            "duplicate_of_trigger_id": duplicate_of or "",
         }
 
         self._append_csv_row(
@@ -1885,7 +2146,20 @@ class DiscrepancyMonitor:
     # ------------------------------------------------------------------
 
     def _build_structures(self, preserve_existing: bool = False) -> None:
-        """Populate ``_detector_states``, ``_pairs``, and ``_pair_runtime``.
+        """Populate ``_detector_states``, ``_pairs``, ``_pair_runtime``, and
+        the derived detector ``_groups`` / ``_pair_group`` map.
+
+        ``paired_detector_id`` is accepted as a **scalar or a list**: pairs are
+        the union of all normalized links, so a 3-way group written explicitly
+        (A ``[B, C]``, B ``[A, C]``, C ``[A, B]``) and the same group written
+        as a ring of scalars (A→B, B→C, C→A) produce the identical 3 pairs.
+
+        Groups are the connected components of the resulting pair graph and are
+        a **dedup scope only** — never an instruction to evaluate every pair
+        inside them (see the module docstring).  A group spanning more than one
+        ``phase`` is almost certainly a stray link merging two intended groups,
+        so it is logged as a WARNING; the groups themselves are logged like
+        ``_pairs`` already are.
 
         Args:
             preserve_existing: If ``True``, retains existing
@@ -1908,32 +2182,53 @@ class DiscrepancyMonitor:
 
         new_pairs: Dict[str, Tuple[str, str]] = {}
         seen: set = set()
+        known_ids = {str(k) for k in detectors_cfg}
 
         for det_id, det_cfg in detectors_cfg.items():
-            det_id_str  = str(det_id)
-            partner_id  = det_cfg.get("paired_detector_id")
+            det_id_str = str(det_id)
+            partner_id = det_cfg.get("paired_detector_id")
             if partner_id is None:
                 continue
-            partner_str = str(partner_id)
+            # Scalar or list — one loop covers both authoring styles.
+            partner_ids = (
+                partner_id if isinstance(partner_id, (list, tuple))
+                else [partner_id]
+            )
 
-            if partner_str not in {str(k) for k in detectors_cfg}:
-                self._log.warning(
-                    "Detector references unknown paired_detector_id",
-                    extra={
-                        "intersection_id":    self._intersection_id,
-                        "detector_id":        det_id_str,
-                        "paired_detector_id": partner_str,
-                    },
-                )
-                continue
+            for raw_partner in partner_ids:
+                if raw_partner is None:
+                    continue
+                partner_str = str(raw_partner)
 
-            pair_key = ":".join(sorted([det_id_str, partner_str]))
-            if pair_key in seen:
-                continue
-            seen.add(pair_key)
-            new_pairs[pair_key] = (det_id_str, partner_str)
+                if partner_str not in known_ids:
+                    self._log.warning(
+                        "Detector references unknown paired_detector_id",
+                        extra={
+                            "intersection_id":    self._intersection_id,
+                            "detector_id":        det_id_str,
+                            "paired_detector_id": partner_str,
+                        },
+                    )
+                    continue
+
+                if partner_str == det_id_str:
+                    self._log.warning(
+                        "Detector is paired with itself; link ignored",
+                        extra={
+                            "intersection_id": self._intersection_id,
+                            "detector_id":     det_id_str,
+                        },
+                    )
+                    continue
+
+                pair_key = ":".join(sorted([det_id_str, partner_str]))
+                if pair_key in seen:
+                    continue
+                seen.add(pair_key)
+                new_pairs[pair_key] = (det_id_str, partner_str)
 
         self._pairs = new_pairs
+        self._build_groups(new_pairs, detectors_cfg)
 
         new_runtime: Dict[str, _PairRuntimeState] = {}
         for pair_key in new_pairs:
@@ -1955,8 +2250,91 @@ class DiscrepancyMonitor:
                 "intersection_id": self._intersection_id,
                 "detectors":       list(self._detector_states.keys()),
                 "pairs":           list(self._pairs.keys()),
+                "groups":          list(self._groups.keys()),
             },
         )
+
+    def _build_groups(
+        self,
+        pairs: Dict[str, Tuple[str, str]],
+        detectors_cfg: dict,
+    ) -> None:
+        """Derive detector groups as connected components of the pair graph.
+
+        Sets ``_groups`` (group ID → member detector IDs) and ``_pair_group``
+        (pair key → group ID), and drops any duplicate-window bookkeeping for
+        groups that no longer exist so a reload cannot leave a stale anchor
+        behind.
+
+        A group is a **dedup scope only**; it never adds a comparison.  Groups
+        that span more than one ``phase`` are reported as a WARNING: detectors
+        watching the same physical zone share a phase, so a multi-phase group
+        means one stray ``paired_detector_id`` has transitively merged two
+        intended groups — a mistake that is otherwise completely silent.
+
+        Args:
+            pairs: The pair map just built, ``pair_key -> (det_a, det_b)``.
+            detectors_cfg: The intersection's ``detectors`` mapping, read for
+                each member's ``phase``.
+        """
+        adjacency: Dict[str, set] = {}
+        for det_a_id, det_b_id in pairs.values():
+            adjacency.setdefault(det_a_id, set()).add(det_b_id)
+            adjacency.setdefault(det_b_id, set()).add(det_a_id)
+
+        group_of: Dict[str, str] = {}          # detector ID -> group ID
+        new_groups: Dict[str, List[str]] = {}
+
+        for root in adjacency:
+            if root in group_of:
+                continue
+            members: List[str] = []
+            visited = {root}
+            stack = [root]
+            while stack:
+                node = stack.pop()
+                members.append(node)
+                for neighbour in adjacency[node]:
+                    if neighbour not in visited:
+                        visited.add(neighbour)
+                        stack.append(neighbour)
+            ordered  = _sort_detector_ids(members)
+            group_id = ":".join(ordered)
+            new_groups[group_id] = ordered
+            for member in members:
+                group_of[member] = group_id
+
+        self._groups = new_groups
+        self._pair_group = {
+            pair_key: group_of[det_a_id]
+            for pair_key, (det_a_id, _det_b_id) in pairs.items()
+        }
+
+        # A reload can dissolve a group; its anchor must not outlive it.
+        self._group_last_fire = {
+            key: value for key, value in self._group_last_fire.items()
+            if key[0] in new_groups
+        }
+
+        for group_id, members in new_groups.items():
+            phases = {
+                str(detectors_cfg.get(m, {}).get("phase"))
+                for m in members
+            }
+            if len(phases) > 1:
+                self._log.warning(
+                    "Derived detector group spans more than one phase — "
+                    "check for a stray paired_detector_id link",
+                    extra={
+                        "intersection_id": self._intersection_id,
+                        "dedup_group":     group_id,
+                        "phases":          sorted(phases),
+                        "detector_phases": {
+                            m: detectors_cfg.get(m, {}).get("phase")
+                            for m in members
+                        },
+                    },
+                )
 
     def _cameras_for_pair(self, det_a_id: str, det_b_id: str) -> List[str]:
         """Return the deduplicated ordered camera IDs for a detector pair.

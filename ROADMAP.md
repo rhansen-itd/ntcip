@@ -31,22 +31,27 @@ highest used so far.
 
 > **Status at a glance (2026-08-01).**
 >
-> **Nothing is waiting on hardware.** **9C2** ran 2026-08-01 (3.3 h, 523
-> triggers) and **Item 9C passed all four criteria** — precision 96.5 %,
-> rule 2 precision 96.3 %, adjusted recall 86.2 %, zero phantoms. The
-> high-duty regime was genuinely reached (14 of 17 pairs peak above the 0.80
-> advisory threshold, max 0.966, vs 32.8 % on 2026-07-31), and precision went
-> *up* under it. The earlier 2026-07-31 round trip had already closed **4a
-> steps 3–4** (cycle 1.53 s → ~0.33 s, edge capture 26 % → 94 %).
+> **Nothing is waiting on hardware.** **Item 9 is closed in full** — A, B, C
+> and C1–C4 all landed between 2026-07-30 and 2026-08-01 (see DESIGN_HISTORY).
+> The high-duty re-baseline passed all four §Item C criteria (precision
+> 96.5 %, rule 2 precision 96.3 %, adjusted recall 86.2 %, zero phantoms) with
+> the regime genuinely reached, and **9C4** then removed the cross-pair
+> duplicate storm (137 of 523 starts, 26.2 %) that was burning writer slots on
+> second copies of the same moment.
 >
-> **Ready to start now, no hardware:** **9C4** (now sized from the run's
-> decision log: 137 duplicate starts, 26.2 %), the two 9C rule-level findings
-> (the 26:33 partner-side gate is the highest-value one), **2**, **3**, **10**,
-> and **4e / 4h** (unblocked by 4d).
+> **Ready to start now, no hardware:** **12** (the two rule-level findings the
+> re-baseline surfaced — the 26:33 partner-side gate is the highest-value
+> change available), **2**, **3**, **10**, and **4e / 4h** (unblocked by 4d).
 >
-> **Suggested order:** **9C4** — it is fully specified, its window is now
-> picked from data, and it recovers most of the writer-cap contention that
-> dropped 33.6 % of decisions — then **2** or **3** (both self-contained).
+> **Suggested order:** **12A** (partner-side gate: ~96.5 % → ~97.8 % precision
+> on paper, sized from committed artifacts) — then **2** or **3** (both
+> self-contained). Note **12B** is written as "probably don't"; read it before
+> starting it.
+>
+> **The next engine run should re-measure two things regardless of item:**
+> the controller clock skew (`--clock-offset`; +4.49 s on 2026-08-01, ~0 s the
+> day before — it is not a constant) and how much of the writer-cap's 33.6 %
+> decision loss 9C4 actually recovered, which only a fresh run can show.
 >
 > Items **8** (remux manager thread-safety + the single-camera assumption) and
 > **4f** (web UI: loopback default + shared-secret control endpoints) landed
@@ -57,7 +62,9 @@ highest used so far.
 > decision log) landed 2026-08-01, so the next run's recall is measurable for
 > the first time; **4b** (unused-import sweep) and **5 + 6** (all three CFR
 > video buffers deleted — `remux_video_buffer.py` is now the only backend)
-> closed the same day.
+> closed the same day, as did **9C3** (suppression log) and **9C4**
+> (cross-pair duplicate rejection, which also taught `paired_detector_id` to
+> accept a list).
 >
 > Model routing follows the Fable-era principle: the *thinking* for the
 > remaining items is pre-done in the item text, so the Target line says who
@@ -66,224 +73,50 @@ highest used so far.
 
 ---
 
-## 9 — Post-4a accuracy re-baseline (Target: owner + any Claude session)
+## 12 — Two rule-level accuracy findings from the 9C re-baseline (Target: Opus)
 
-Design and code in [[SCOPE_sampling_floor.md]]; A, B, C1, C2 and C3 are
-**done**. **C passed cleanly on the 2026-08-01 high-duty run** — all four
-§Item C criteria met (precision 96.5 %, rule 2 precision 96.3 %, adjusted
-recall 86.2 %, zero phantoms, no zero-correspondence pair). **C4 is the only
-open sub-item**, and it is now sized from real data rather than scoped on a
-guess:
+Both were surfaced by Item 9's measurement work and **re-measured on the
+2026-08-01 high-duty run**; Item 9 itself is closed (see DESIGN_HISTORY,
+2026-07-30 → 2026-08-01). §Item C's "don't touch rule code until the
+measurement is settled" gate is open — these are the rule changes it was
+holding back. They are independent of each other; the first is the
+high-value one.
 
-- [x] **A — runtime sweep-time self-measurement** (2026-07-30). `BaseMonitor`
-  EMA of `_poll()` + sleep, `effective_cycle_sec()`, `get_stats()`,
-  rate-limited slow-sweep INFO. See DESIGN_HISTORY 2026-07-30.
-- [x] **B — sampling-floor gating** (2026-07-30). `system_runner` injects the
-  floor via `DiscrepancyMonitor.set_sampling_floor()` (startup from
-  `sampling_floor_sec`, then every 60 s from the measured cycle); Rule 2
-  refuses pulses below `min_pulse_floor_multiple × floor`; per-pair high-duty
-  advisory WARNING with opt-in `suppress_high_duty_pairs`.
-- [x] **C — post-4a re-baseline protocol. PASSED 2026-08-01 (4 of 4).** Rule 2
-  precision **96.3 %** (≥ 80 % ✓), **zero** stale-refire phantoms (✓), **no**
-  zero-correspondence pair (✓), adjusted recall **86.2 %** (≥ 70 % ✓); overall
-  precision **96.5 %**. Superseded the 2026-07-31 off-peak run (3 of 4: 93.9 %
-  / 59.9 %), whose recall was read off the recording log and was a floor.
-  Full measurement, the miss/FP categorization and the caveats are in
-  DESIGN_HISTORY (2026-07-31 and 2026-08-01). Reproduce with
-  `__decode_datz.py` → `__make_gt_export.py` → `__accuracy_report.py --poll
-  0.33 --clock-offset 4.49`; both runs' exports are committed
-  (`gt_anomalies_20260731_1830-2130.csv`,
-  `gt_anomalies_20260801_1300-1645.csv`).
+- [ ] **A — Rule 2's floor gate is asymmetric, and it is the single largest
+  FP source.** The gate bounds the *orphan's* duration but says nothing about
+  whether the *partner* is resolvable. Pair 26:33 produced **6 of the 9 rule 2
+  FPs** on the 2026-08-01 run (and 7 of all 18), as 1.32–1.94 s orphan pulses
+  on det 26 — the same pair as 2026-07-31, opposite detector. It is also the
+  only pair whose precision is poor (7 matched / 14 triggers) while having
+  **zero** true misses. A partner-side gate is the indicated fix: fixing 26:33
+  alone would take overall precision from 96.5 % to ~97.8 %.
 
-**C1, C2 and C3 have all landed, and none of them was a rule change — §Item C
-said don't touch rule code until they're settled, and all three were built to
-respect that. That gate is now open: C4 and the two rule-level findings below
-are unblocked.**
+- [ ] **B — Rule 1 has no hysteresis, but the obvious evidence for adding it
+  is not diagnostic, and the fix currently looks net-negative.** All 9 rule 1
+  FPs measured 5.033–5.081 s against the 5.0 s threshold — but **all 281 rule 1
+  triggers measure ≤ 5.1 s**, because the engine fires the instant the
+  disagreement crosses the threshold, so `disagreement_sec` is the duration *at
+  fire time*, not the event's true length. "The FPs cluster at threshold"
+  describes every rule 1 trigger and separates nothing. Judge it against
+  ground-truth durations instead: the 15 true-missed `extended_disagreement`
+  events run 5.1–8.0 s (median 5.4, **9 of 15 ≤ 5.5 s**), so firing at
+  `threshold + one cycle` (5.33 s) would push a meaningful share of genuine
+  events below the bar to remove 9 FPs out of 518 triggers. **Don't implement
+  this without re-deriving it from GT durations first** — the answer may well
+  be "no".
 
-- [x] **C1 — log engine decisions separately from recordings** (2026-08-01).
-  `discrepancies_log.csv` is written by `remux_video_buffer._handle_start`
-  *after* `_writer_semaphore.acquire()` succeeds, so a trigger the
-  `max_concurrent_writers=2` cap drops leaves no row. The cap was saturated
-  11.6 % of the run's wall clock but accounts for **43 % of the 108 "misses"**
-  (vs 13 % of non-missed GT events — a 3.3× enrichment that controls for
-  traffic clustering), which is why recall was not fairly measurable from that
-  artifact. The engine now appends `engine_decisions.csv` itself
-  (`_log_decision`, path injected by `system_runner`), with exact Unix event
-  windows; `__accuracy_report.py` auto-detects either format and takes
-  `--recording-log` to count decisions that never became clips. See
-  DESIGN_HISTORY 2026-08-01. **The 59.9 % still stands unrevised** — it was
-  measured on an artifact that predates this log, and only a fresh engine run
-  produces a decision log to re-score.
-- [x] **C3 — log what the engine suppressed, with a reason** (2026-08-01).
-  `engine_suppressions.csv`, one row per candidate the engine declined to act
-  on, `reason` column (today only `below_sampling_floor`). Motivation:
-  `__accuracy_report.py` *models* this population from the GT side — it drops
-  GT pulses shorter than `2 × poll` — instead of reading what the engine
-  actually suppressed, and the two do not select the same events (the report
-  measures true 0.1 s durations, the gate measures the engine's own quantized
-  observation, ±1 cycle per edge). 138 events were excluded that way on the
-  2026-07-31 run, so the model is load-bearing for the "adjusted" in adjusted
-  recall. Rows carry `sampling_floor_sec` and `min_pulse_floor_multiple`
-  separately, so the `min_pulse_floor_multiple` tuning curve is recoverable
-  from a finished run without another controller session. **Caveat recorded in
-  the code and CLAUDE.md:** the gate sits ahead of Rule 2's partner-overlap
-  test, so recall attributed to it is an upper bound. Making it exact needs
-  the gate moved to fire time, which is a real behavior change (the
-  `orphan_watch_*` slots hold one candidate each; arming junk would evict live
-  candidates) — deliberately not done. See DESIGN_HISTORY 2026-08-01.
-- [x] **C2 — re-score on a high-duty run — done 2026-08-01, all four criteria
-  pass.** 3.3 h run (13:27–16:47), 523 triggers, scored against a matching
-  15-file datZ pull. **Overall precision 96.5 %** (500/518), **rule 2
-  precision 96.3 %** (232/241), **rule 1 precision 96.8 %** (268/277),
-  **adjusted recall 86.2 %**, **zero** stale-refire phantoms, **no**
-  zero-correspondence pair (worst is 26:33 at 7/14). The high-duty regime was
-  genuinely reached this time: **14 of 17 pairs peak above the 0.80 advisory
-  threshold, max 0.966** (vs 32.8 % on 2026-07-31), so the false-trigger storm
-  condition is exercised — and precision went *up*, not down, under it.
-  Reproduce with `--poll 0.33 --clock-offset 4.49`; artifacts are committed
-  (`engine_decisions_20260801.csv`, `engine_suppressions_20260801.csv`,
-  `discrepancies_log_20260801.csv`, `banks_events_20260801_1300-1645.csv`,
-  `gt_anomalies_20260801_1300-1645.csv`).
+Both are measured against a fresh engine run with
+`__decode_datz.py` → `__make_gt_export.py` → `__accuracy_report.py`, and
+**the controller clock skew must be re-measured every run** (`--clock-offset`;
++4.49 s on 2026-08-01, ~0 s on 2026-07-31). The 2026-08-01 artifacts are
+committed if a before/after comparison is wanted.
 
-  **The one thing that nearly sank the measurement: controller clock skew.**
-  The controller's log ran **+4.49 s ahead** of the monitoring machine (it was
-  ~0 s on 2026-07-31). Uncorrected that exceeds the 3.0 s match tolerance and
-  reports overall precision **11.6 %** — indistinguishable at a glance from a
-  catastrophic regression. `__accuracy_report.py` gained a `--clock-offset`
-  flag and a docstring section on the signature (every candidate FP showing
-  the *same* `nearest GT Δ`); see CLAUDE.md. **Measure the skew every run** —
-  it is not a constant of the deployment, and the owner should consider
-  syncing the controller clock before the next pull.
-
-  Caveat on the acceptance signal: the run's engine **log** was not in the
-  artifact bundle, so `grep "sampling-reliability regime"` could not be run
-  literally. The duty figures above are computed from the controller's own
-  0.1 s high-res record (authoritative for the physical condition) rather than
-  from the engine's observation of it. Ship the log with the next bundle.
-
-  **"Peak hour (16:00–18:00)" was the original wording and it is wrong for
-  this site (corrected 2026-08-01).** The criterion is detector ON-duty, and
-  duty is *queueing*, not throughput: these are all stopbar detectors, so they
-  read high duty when vehicles are **standing** on them. Free-flowing volume
-  can be enormous at near-zero duty. Intersection 201 is on a recreational
-  route (SH-55), where the loaded direction depends on the day of the week
-  more than the hour — heavy outbound Friday, balanced/multi-directional
-  Saturday, heavy return Sunday. **The objective acceptance signal is the
-  engine's own advisory**, not a clock: `grep "sampling-reliability regime"`
-  over the run's log. If it never fires, the condition still is not exercised,
-  whatever the hour was. (Advisory threshold: a pair's *minimum* detector duty
-  over a rolling 120 s window exceeds `high_duty_warn_fraction`, default 0.8;
-  rate-limited to one WARNING per pair per 600 s.) That run now also produces the first real
-  `engine_decisions.csv`, so score it with
-  `__accuracy_report.py engine_decisions.csv <gt> --recording-log
-  discrepancies_log.csv`: the recall number will be the first one not
-  depressed by writer-cap drops, and the DELIVERY section says how big that
-  correction was. C3 means the run also produces the first
-  `engine_suppressions.csv` — keep it: it sizes the floor gate's real cost,
-  and counting same-group rows in the decision log sizes C4's duplicate
-  population.
-
-- [ ] **C4 — reject cross-pair duplicate triggers within a detector group.**
-  With 3-way comparisons (the 5 triangles in `_intersections.json`, expressed
-  as a ring of single `paired_detector_id` links that `_build_pairs`
-  normalizes into 3 edges), one physical event where B disagrees with both A
-  and C fires on pair AB *and* pair BC, often in the same evaluator tick —
-  two clips of the same moment, each burning one of only 2 writer slots.
-  Design: connected components over `self._pairs` computed in
-  `_build_pairs`; a per-group `last_fire_ts` checked immediately before the
-  tmp-write in `_fire_trigger`; on a hit, skip the trigger file but still call
-  `_log_decision` (marked) — three append-only columns, `dedup_group`,
-  `suppressed_as_duplicate`, `duplicate_of_trigger_id`. Guard on cameras: two
-  pairs resolving to different `camera_id`s are not duplicates. All four
-  `_fire_trigger` call sites are on the evaluator thread, so no new lock.
-
-  **Group config: both forms must work (owner requirement, 2026-08-01).**
-  A 3-way group is expressible either explicitly — `paired_detector_id` as a
-  **list**, A: `[B,C]`, B: `[A,C]`, C: `[A,B]` — or implicitly as today's
-  ring of scalars, A→B, B→C, C→A. These unify cleanly and need no separate
-  code path: **pairs** are the union of all normalized links (accept a scalar
-  *or* a list — the only change to the existing loop), and **groups** are
-  connected components over the resulting pair graph. Both forms then fall
-  out of one mechanism, and for n=3 they produce the *identical* 3 pairs.
-  - **That coincidence is specific to n=3.** For 4 detectors a ring gives 4
-    edges and an explicit all-pairs list gives 6. Neither is wrong: the list
-    form is how you say "compare all of these", the ring is how you say "this
-    cycle". So a group is a **dedup scope only** — it must not be read as an
-    instruction to evaluate every internal pair, or a 4-ring config silently
-    grows two comparisons nobody asked for. Pair generation stays
-    link-driven.
-  - **Risk to guard: transitive over-grouping.** One stray link merges two
-    intended groups with no error. Mitigation: WARN when a derived group
-    spans more than one `phase`, and log the derived groups at startup the
-    way `_pairs` already is. Verified against `_intersections.json` — all 7
-    current groups (5 triangles + `29:43` + `26:33`) are phase-coherent, so
-    the check is clean today and would fire only on a genuine mistake.
-  - **The schema change must land in three places or it breaks measurement,
-    silently.** `_build_pairs`, `config_manager.py`'s canonical schema
-    docstring, and **`__make_gt_export.py:_load_pairs`** (`:72`, scalar-only
-    today). That tool reads pairs from the intersection config precisely so
-    ground truth can't drift from the engine run — if the engine learns list
-    form and the export doesn't, the export covers fewer pairs than the
-    engine ran, and every trigger on a missing pair scores as a false
-    positive. This is the "scoring against the wrong pair set" failure
-    CLAUDE.md already warns about, arriving by a new route.
-  **The fiddly part is Rule 1**, whose `start` sets `rt.active_trigger_id` and
-  whose later `stop` reuses it — suppressing a `start` without also
-  suppressing its `stop` sends the buffer a stop for a trigger it never saw.
-  Rule-2-only is a half session; including Rule 1 is one session with tests.
-  **Sequenced deliberately after C2:** GT is built per pair by pyatspm's
-  `analyze_discrepancies()`, so ground truth contains the same AB/BC
-  duplication — dedup without teaching `__accuracy_report.py` to credit the
-  suppressed row scores it as a *miss*, corrupting the very recall number C2
-  exists to establish. Run C2 first, size the duplicate population from its
-  decision log, then pick the window from data instead of guessing.
-
-  **Sized from the 2026-08-01 decision log (C2 is done, so this is no longer a
-  guess).** Connected components over `_intersections.json`[201] derive
-  **exactly the 7 groups the design predicted** — the 5 triangles
-  `[2,17,46] [3,30,41] [4,22,39] [7,24,38] [8,31,42]` plus `[26,33]` and
-  `[29,43]` — and all 7 are phase-coherent, so the over-grouping WARN is clean
-  on today's config. Of **523 `start` decisions, 103 land on the same group at
-  the identical 0.1 s tick**, and a 1.0 s window catches **137 (26.2 %)**
-  (rule 1: 84, rule 2: 53); 2.0 s catches 162 and 5.0 s catches 181, so the
-  curve is flat after ~1 s. **1.0 s is the window to implement** — it captures
-  the same-tick storm plus one evaluator cycle of slack without reaching into
-  genuinely separate events. Payoff is concrete: the writer cap dropped **174
-  decisions (33.6 %)** on this run, so suppressing ~137 duplicate starts frees
-  most of the contention that caused it.
-
-**Two rule-level findings, both re-measured on the 2026-08-01 high-duty run:**
-
-- **Rule 2's floor gate is asymmetric — confirmed, and now the single largest
-  FP source.** It gates the *orphan's* duration but says nothing about whether
-  the *partner* is resolvable. Pair 26:33 produced **6 of the 9 rule 2 FPs**
-  again (and 7 of all 18), this time as 1.32–1.94 s orphan pulses on det 26 —
-  the same pair as 2026-07-31, opposite detector. It is also the only pair
-  whose precision is poor (7 matched / 14 triggers) while having **zero** true
-  misses. A partner-side gate is still the indicated fix, and it is now the
-  highest-value rule change available: fixing 26:33 alone would take overall
-  precision from 96.5 % to ~97.8 %.
-- **Rule 1's threshold has no hysteresis — but the 2026-07-31 evidence for it
-  was not diagnostic, and the fix now looks net-negative.** All 9 rule 1 FPs
-  again measured 5.033–5.081 s against the 5.0 s threshold. However **all 281
-  rule 1 triggers measure ≤ 5.1 s**, because the engine fires the instant the
-  disagreement crosses the threshold — `disagreement_sec` is the duration *at
-  fire time*, not the event's true length, so "the FPs cluster at threshold"
-  describes every rule 1 trigger and separates nothing. The proposal has to be
-  judged against ground-truth duration instead: the 15 true-missed
-  `extended_disagreement` events run 5.1–8.0 s (median 5.4, **9 of 15 ≤
-  5.5 s**), so firing at `threshold + one cycle` (5.33 s) would push a
-  meaningful share of genuine events below the bar to remove 9 FPs out of 518
-  triggers. **Don't do this without re-deriving it from GT durations.**
-
-Suggested prompt (no hardware needed — C2 is done, C4 is what's left):
-> In the ntcip project, do Item 9C4 of ROADMAP.md: reject cross-pair duplicate
-> triggers within a detector group, using the 1.0 s window sized from the
-> 2026-08-01 run. Accept `paired_detector_id` as a scalar or a list, derive
-> groups as connected components, and land the schema change in all three
-> places (`_build_pairs`, `config_manager.py`'s docstring,
-> `__make_gt_export.py:_load_pairs`). Include Rule 1's start/stop pairing and
-> tests.
+Suggested prompt:
+> [Opus] In the ntcip project, do Item 12A of ROADMAP.md: add a partner-side
+> resolvability gate to Rule 2 so an orphan pulse is only trusted when the
+> partner's silence is itself resolvable at the current sampling floor. Size it
+> against pair 26:33 in the committed 2026-08-01 artifacts, and re-score with
+> `__accuracy_report.py --poll 0.33 --clock-offset 4.49` before and after.
 
 ---
 

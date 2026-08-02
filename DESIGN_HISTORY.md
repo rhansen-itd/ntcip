@@ -1645,3 +1645,111 @@ decided. Entries after this point are logged as the decision lands.
   `__accuracy_report.py engine_decisions_20260801.csv
   gt_anomalies_20260801_1300-1645.csv --recording-log
   discrepancies_log_20260801.csv --poll 0.33 --clock-offset 4.49`.
+
+- 2026-08-01 — **Item 9C4: cross-pair duplicate triggers are rejected within a
+  derived detector group.** With 3-way comparisons, one physical event in which
+  B disagrees with both A and C fires on pair `A:B` *and* pair `B:C`, usually
+  on the same 0.1 s evaluator tick — two clips of the same moment, each burning
+  one of only `max_concurrent_writers` (default 2) writer slots. Sized from the
+  2026-08-01 decision log rather than guessed (that sequencing was the point of
+  putting C4 after C2): **137 of 523 start decisions, 26.2 %**, while the
+  writer cap dropped 174 decisions (33.6 %).
+
+  **Groups are derived, not configured.** `_build_structures` now computes the
+  connected components of the pair graph (`_build_groups`), so a group is every
+  detector reachable from another through `paired_detector_id` links. The two
+  authoring styles the owner asked for unify with no separate code path:
+  `paired_detector_id` accepts a **scalar or a list**, pairs are the union of
+  all normalized links, and groups are the components over the result. For
+  n = 3 an explicit list (A `[B,C]`, B `[A,C]`, C `[A,B]`) and today's ring of
+  scalars (A→B, B→C, C→A) produce the *identical* 3 pairs. **Why the two forms
+  needed unifying rather than choosing between:** the list says "compare all of
+  these", the ring says "this cycle", and from n = 4 they genuinely differ (4
+  edges vs 6). Both are legitimate, so a group is a **dedup scope only** and
+  never an instruction to evaluate every internal pair — pair generation stays
+  link-driven, or a 4-ring config would silently grow two comparisons nobody
+  asked for. Pinned by two tests that assert exactly that (4-ring → 4 pairs,
+  4-list → 6 pairs).
+
+  **Verified against `_intersections.json`[201]:** the derivation returns
+  exactly the 7 groups predicted — the 5 triangles `[2,17,46] [3,30,41]
+  [4,22,39] [7,24,38] [8,31,42]` plus `[26,33]` and `[29,43]` — all
+  phase-coherent. Replaying the implemented algorithm over the run's decision
+  log reproduces the sizing exactly (137 / 26.2 %, rule 1: 84, rule 2: 53, and
+  162 at 2.0 s / 181 at 5.0 s), which is the check that the shipped anchor
+  semantics match the ones the window was chosen under.
+
+  **Four properties are load-bearing, and each exists for a failure it
+  prevents:**
+
+  1. *The window is anchored on emitted starts only.* A suppressed row never
+     updates the group's last-fire stamp. **Why:** anchoring on suppressions
+     would roll the window forward through a storm and suppress unboundedly.
+  2. *Cameras are part of the dedup key.* **Why:** two pairs in one group that
+     resolve to different `camera_id`s cover different footage and are not
+     duplicates of each other.
+  3. *A `stop` is never suppressed and never anchors.* **Why:** suppressing it
+     strands a recording until the `max_duration_sec` cap; letting it anchor
+     would suppress the next genuine group event.
+  4. *A suppressed Rule 1 `start` must not arm `active_trigger_id`.* This was
+     the fiddly part flagged in the item text: the resolution state machine
+     later sends a `stop` reusing that ID, so arming it for a trigger the
+     buffer never received would send a stop for a recording that does not
+     exist. A suppressed start engages the pair cooldown instead — exactly what
+     a Rule 2 start does — which also stops the pair re-firing on the same
+     physical event one threshold later. Note this is *less* suppressive than
+     the pre-9C4 behavior, not more: a duplicate Rule 1 start used to hold its
+     pair through resolution + post-roll + cooldown, so no recall is lost by
+     the change.
+
+  **The suppressed decision is logged, not dropped**, with three append-only
+  columns (`dedup_group`, `suppressed_as_duplicate`,
+  `duplicate_of_trigger_id`). **Why it went in the decision log rather than
+  `engine_suppressions.csv`**, whose `reason` column was designed to absorb
+  exactly this kind of population: a duplicate is a fully-formed trigger with
+  its own ID that the engine decided about *after* the rules fired, not a
+  candidate it declined to evaluate — and ground truth contains the same event
+  on both pairs, because `analyze_discrepancies()` is per-pair too. A consumer
+  that never saw the row would score the sibling pair's GT event as a **miss**,
+  corrupting the very recall number C2 established. `__accuracy_report.py`
+  therefore scores these rows like any other trigger and excludes them only
+  from the DELIVERY section (a duplicate has no clip by design, not by
+  back-pressure). Confirmed end-to-end: re-scoring the 2026-08-01 log with the
+  duplicates marked returns **identical** precision 96.5 % and adjusted recall
+  86.2 %, with 136 rows moved out of DELIVERY's undelivered count.
+
+  **The schema change landed in all three places** it had to, per the item's
+  warning that missing one breaks measurement silently: `_build_structures`,
+  `config_manager.py`'s canonical schema docstring, and
+  `__make_gt_export.py:_load_pairs`. If the engine had learned list form and
+  the export had not, every trigger on a pair missing from the export would
+  score as a false positive — the "scoring against the wrong pair set" failure
+  arriving by a new route.
+
+  **Over-grouping guard:** one stray link transitively merges two intended
+  groups with no other symptom, so a derived group spanning more than one
+  `phase` logs a WARNING, and the derived groups are logged at startup the way
+  `_pairs` already were. Clean on today's config; it fires only on a genuine
+  mistake.
+
+  Window default `dedup_window_sec: 1.0` (config, `0` disables); a malformed
+  value falls back to the default rather than disabling, so a typo cannot
+  silently restore the duplicate storm. Tests: 32 new cases in
+  `test_discrepancy_rules.py` (88 → 120), covering both config forms, the
+  n = 3 coincidence and the n = 4 divergence, the over-grouping WARN, all four
+  load-bearing properties, and one end-to-end triangle event that produces two
+  decision rows and one clip.
+
+  **Not measured, and deliberately so:** the actual recovery in delivered
+  clips. Marking the historical log is a scoring simulation, not a
+  counterfactual — a suppressed start also engages cooldown, which changes
+  what the engine does next. The real number needs a fresh run.
+
+  **Item 9 is closed in full** with this sub-item: A (runtime sweep-time
+  self-measurement, 2026-07-30), B (sampling-floor gating, 2026-07-30), C (the
+  post-4a re-baseline, passed 4 of 4 on 2026-08-01), C1 (decision log), C2
+  (high-duty re-score), C3 (suppression log) and C4 (this entry) all landed —
+  see their own entries above. The two rule-level findings the re-baseline
+  surfaced (Rule 2's asymmetric floor gate, Rule 1's absent hysteresis) are
+  *not* part of it: they are rule changes, were explicitly gated behind the
+  measurement work, and carry forward as ROADMAP Item 12.

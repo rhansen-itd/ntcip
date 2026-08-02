@@ -106,6 +106,36 @@ trigger-id interaction that prevents double-firing. Don't re-derive this from
 first principles; the docstring already encodes the corner cases that were
 worked out by hand.
 
+**Detector groups and cross-pair duplicate rejection (2026-08-01, ROADMAP 9C4
+— load-bearing).** `paired_detector_id` accepts a **scalar or a list**; pairs
+are the union of all normalized links, and **groups** are the connected
+components of the resulting pair graph (`_build_groups`). A 3-way group can
+therefore be authored explicitly (A `[B,C]`, B `[A,C]`, C `[A,B]`) or as a ring
+of scalars (A→B, B→C, C→A) — for n=3 both give the identical 3 pairs. From n=4
+they diverge (ring 4 edges, list 6) and **both are legitimate**: a group is a
+**dedup scope only**, never an instruction to evaluate every internal pair, or
+a 4-ring silently grows comparisons nobody asked for. Pair generation stays
+link-driven. (Unrelated to NTCIP's 16-channel "detector groups" in
+`system_runner`'s poll planning — same word, different thing.)
+
+Within a group, a `start` fired less than `dedup_window_sec` (config, default
+**1.0**, `0` disables) after the group's last emitted `start` **for the same
+cameras** is not written to the Hot Folder: with triangles, one event where B
+disagrees with both A and C fires on `A:B` and `B:C` on the same tick, two
+clips of one moment burning both writer slots (137 of 523 starts, 26.2 %, on
+the 2026-08-01 run). Four properties are load-bearing: the window anchors on
+**emitted** starts only (a suppressed row never anchors, or a storm rolls the
+window forever); cameras are part of the key; a `stop` is never suppressed and
+never anchors; and a suppressed Rule 1 `start` **must not** set
+`active_trigger_id` — it engages the pair cooldown instead, because a later
+`stop` reusing that ID would reference a recording the buffer never started. A
+derived group spanning more than one `phase` logs a WARNING (transitive
+over-grouping from one stray link); the derived groups are logged at startup
+next to `_pairs`. **The schema lives in three places that must agree** —
+`_build_structures`, `config_manager.py`'s docstring, and
+`__make_gt_export.py:_load_pairs` — since an export covering fewer pairs than
+the run scores every trigger on a missing pair as a false positive.
+
 Two accuracy-critical Rule 2 mechanics (added 2026-07-19, see DESIGN_HISTORY):
 the partner-overlap test runs against `_DetectorState.on_intervals` — a
 bounded deque of completed `(on_ts, off_ts)` ON intervals appended on the
@@ -142,8 +172,9 @@ disable Rules 1+2 for such pairs. Because the duty computation reads the same
 changes.
 
 The rule functions are pinned by `video_engine/tests/test_discrepancy_rules.py`
-(88 stdlib-`unittest` cases, incl. the stale-refire guard, the floor gate, the
-decision log, the suppression log, and `_resolve_pytz`) — run it after any
+(120 stdlib-`unittest` cases, incl. the stale-refire guard, the floor gate, the
+decision log, the suppression log, group derivation in both config forms,
+cross-pair duplicate rejection, and `_resolve_pytz`) — run it after any
 engine change:
 `python3 video_engine/tests/test_discrepancy_rules.py`.
 Accuracy vs. an ATSPM ground-truth export is measured with
@@ -193,7 +224,12 @@ load-bearing for anyone measuring accuracy).** All land in `output_dir`:
   has no end yet, a `stop` has neither), so no consumer has to recover timing
   from a 1-second local stamp plus a regex. `_DECISION_LOG_FIELDS` is
   **append-only** — an existing log is never rewritten, so a new column
-  inserted mid-list desynchronizes a resumed file from its header. The event
+  inserted mid-list desynchronizes a resumed file from its header. Rows also
+  carry `dedup_group` / `suppressed_as_duplicate` / `duplicate_of_trigger_id`
+  (9C4): a trigger rejected as a cross-pair duplicate is **marked here, not
+  dropped and not moved to the suppression log**, because ground truth
+  contains the same event on both pairs of the group — a consumer that never
+  saw the row would score the sibling pair's event as a miss. The event
   window reaches `_fire_trigger` as one optional `event_window` tuple and is
   deliberately **not** added to the trigger payload (the video buffer has no
   use for it, and the Hot Folder schema is intentionally hard to grow).
@@ -219,14 +255,19 @@ load-bearing for anyone measuring accuracy).** All land in `output_dir`:
   candidate registration, ahead of Rule 2's partner-overlap test, so recall
   attributed to it is an upper bound. `reason` is a plain string precisely so
   the other populations `__accuracy_report.py` currently *models* (cooldown,
-  grace expiry, high-duty, and ROADMAP 9C4's cross-pair duplicate) can land
-  here later as new values, with no schema change and no fourth file.
+  grace expiry, high-duty) can land here later as new values, with no schema
+  change and no fourth file. The cross-pair duplicate deliberately did **not**
+  land here — see the decision log above.
 
 `__accuracy_report.py` auto-detects which format it was handed (on the
 presence of an `event_timestamp` column) and says so in its first line; the
 legacy path is preserved so the committed 2026-07-31 artifacts still score
 identically. Pass `--recording-log` alongside a decision log to get a DELIVERY
-section counting decisions that never became clips.
+section counting decisions that never became clips. Rows marked
+`suppressed_as_duplicate` are **scored like any other trigger** and excluded
+only from DELIVERY (they have no clip by design, not by back-pressure);
+verified by re-scoring the 2026-08-01 log with duplicates marked — precision
+and recall come out identical.
 
 ## Config abstraction
 
@@ -464,11 +505,11 @@ them relaxes the rule that the two packages don't import each other.
 
 Six suites, all **stdlib `unittest`** (pytest is not installed here), one file
 per subject, each runnable directly from any working directory via its own
-`sys.path` bootstrap. 255 cases total as of 2026-08-01:
+`sys.path` bootstrap. 287 cases total as of 2026-08-01:
 
 | Suite | Cases | Subject |
 |---|---|---|
-| `video_engine/tests/test_discrepancy_rules.py` | 88 | rule functions, `_evaluate_pair` integration, decision log, suppression log, `_resolve_pytz` |
+| `video_engine/tests/test_discrepancy_rules.py` | 120 | rule functions, `_evaluate_pair` integration, decision log, suppression log, detector groups + cross-pair duplicate rejection, `_resolve_pytz` |
 | `video_engine/tests/test_remux_manager.py` | 22 | manager writer/timer bookkeeping (stubbed remuxer) |
 | `video_engine/tests/test_config_manager.py` | 9 | `ConfigProviderError` |
 | `ntcip_monitor/tests/test_overlay_shapes.py` | 86 | shape reader, status resolution, live source (stubbed PyAV) |

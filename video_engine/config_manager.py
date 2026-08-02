@@ -147,6 +147,24 @@ that rate is ~1.0–1.5 s regardless of ``poll_interval_sec``.
                                  Default ``false`` (advisory only) — a
                                  deployment decision, not an engine default.
 
+Duplicate-rejection field (optional; ROADMAP 9C4)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Detectors linked into groups of three or more (see ``paired_detector_id``)
+fire twice on one physical event: if B disagrees with both A and C, pairs
+``A:B`` and ``B:C`` both trigger, usually on the same evaluator tick.  The
+engine derives **detector groups** as the connected components of the pair
+graph and rejects the second trigger.  Groups are a dedup scope only — they
+never add a comparison.
+
+``dedup_window_sec``     float — Seconds after a group's last emitted
+                                 ``"start"`` during which another pair in the
+                                 same group is rejected as a duplicate of it
+                                 (same cameras only).  Default ``1.0``, sized
+                                 from the 2026-08-01 run; ``0`` disables the
+                                 mechanism.  Rejected triggers still appear in
+                                 ``engine_decisions.csv``, marked with
+                                 ``suppressed_as_duplicate``.
+
 cameras mapping (camera_id → CameraConfig)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ``url``                 str   — RTSP or HTTP stream URL.
@@ -159,8 +177,20 @@ detectors mapping (detector_id → DetectorConfig)
 ``type``                str   — ``"radar"``, ``"loop"``, or ``"video"``.
 ``phase``               int   — NTCIP signal phase this detector belongs to.
 ``description``         str   — Human-readable label (optional).
-``paired_detector_id``  str|null — ID of the complementary detector for lag
-                                   comparison, or ``null`` if unpaired.
+``paired_detector_id``  str|list|null — ID of the complementary detector for
+                                   lag comparison, a **list** of IDs when a
+                                   detector is compared against several, or
+                                   ``null`` if unpaired.  Links are symmetric
+                                   and deduplicated, so a 3-way group can be
+                                   written either explicitly (A: ``["B","C"]``,
+                                   B: ``["A","C"]``, C: ``["A","B"]``) or as a
+                                   ring of scalars (A→B, B→C, C→A) — for three
+                                   detectors both produce the identical three
+                                   pairs.  They diverge from four detectors on:
+                                   a ring gives 4 comparisons, an explicit
+                                   all-pairs list gives 6.  Write the one you
+                                   mean; pair generation is link-driven and
+                                   never invents a comparison.
 ``camera_id``           str   — ID of the camera that covers this detector;
                                  used by the trigger layer to select a stream.
 ``lag_threshold_sec``   float — Seconds of actuation lag that constitutes a

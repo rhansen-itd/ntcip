@@ -26,6 +26,17 @@ Pass ``--recording-log`` alongside a decision log to quantify that gap
 directly: decisions with no matching recording row are counted and broken
 down by rule.
 
+**Cross-pair duplicates (ROADMAP 9C4) still count as detections here.** A
+decision row marked ``suppressed_as_duplicate`` is a trigger the engine formed
+and then declined to write, because another pair in the same detector group had
+just fired for the same physical event.  Ground truth contains that event on
+*both* pairs — ``analyze_discrepancies()`` is per-pair too — so dropping these
+rows would score the sibling pair's event as a **miss** and understate recall
+by exactly the duplicate population.  They are therefore matched and scored
+like any other trigger, and excluded only from the DELIVERY section, which
+counts clips the buffer *dropped*: a duplicate has no clip by design, not by
+back-pressure.
+
 For every engine trigger it asks "is there a ground-truth event of the
 corresponding type (rule1 ↔ extended_disagreement, rule2 ↔ isolated_pulse) on
 the same detector pair within the start-time tolerance?" (→ precision), and
@@ -113,6 +124,10 @@ class EngineTrigger:
     # refire bug (fixed 2026-07-19) re-firing on unchanged detector state.
     stale_refire: bool = False
     recorded: Optional[bool] = None  # set only when --recording-log is given
+    # ROADMAP 9C4: formed, scored, but never written to the Hot Folder because
+    # a sibling pair in the same detector group had just fired.
+    dedup_suppressed: bool = False
+    dedup_group: str = ""
 
 
 @dataclass
@@ -195,6 +210,12 @@ def _parse_decision_rows(rows: List[dict]) -> List[EngineTrigger]:
             trigger_id=row.get("trigger_id", "").strip(),
             stale_refire=(rule == "rule2_orphan_pulse"
                           and window_key in seen_windows),
+            # Absent in logs written before ROADMAP 9C4 — treated as "not a
+            # duplicate", which is what those runs were.
+            dedup_suppressed=(
+                (row.get("suppressed_as_duplicate") or "0").strip() == "1"
+            ),
+            dedup_group=(row.get("dedup_group") or "").strip(),
         ))
         if rule == "rule2_orphan_pulse":
             seen_windows.add(window_key)
@@ -287,6 +308,11 @@ def _annotate_recorded(triggers: List[EngineTrigger], recording_csv: str) -> int
     triggers the video buffer dropped (writer-cap saturation, a low-disk
     abort, or no matching camera), which is precisely the population that made
     recall unmeasurable from the recording log alone.
+
+    Cross-pair duplicates are left unannotated (``recorded`` stays ``None``)
+    and excluded from the return: the engine never handed them to the buffer,
+    so counting them as undelivered would credit the dedup mechanism's saved
+    writer slots as buffer failures.
     """
     recorded_ids = set()
     with open(recording_csv, newline="", encoding="utf-8") as f:
@@ -297,7 +323,7 @@ def _annotate_recorded(triggers: List[EngineTrigger], recording_csv: str) -> int
 
     unrecorded = 0
     for t in triggers:
-        if not t.trigger_id:
+        if not t.trigger_id or t.dedup_suppressed:
             continue
         t.recorded = t.trigger_id in recorded_ids
         if not t.recorded:
@@ -482,6 +508,13 @@ def main() -> int:
               "recall below is a FLOOR, not an estimate).")
     print(f"Parsed {len(all_triggers)} engine triggers, "
           f"{len(gt_events)} ground-truth events.")
+    dedup_all = [t for t in all_triggers if t.dedup_suppressed]
+    if dedup_all:
+        share = len(dedup_all) / len(all_triggers)
+        print(f"  ({len(dedup_all)} = {share:.1%} were rejected as cross-pair "
+              f"duplicates and never written to the Hot Folder;\n"
+              f"   they are scored below like any other trigger — ground "
+              f"truth contains the same event on both pairs)")
     if not all_triggers or not gt_events:
         print("Nothing to compare.")
         return 1
@@ -610,6 +643,12 @@ def main() -> int:
         tp_dropped = sum(1 for t in dropped if t.matched_gt is not None)
         print(f"  …of which ground-truth-matched: {tp_dropped}  "
               f"(real events with no reviewable clip)")
+        deduped = [t for t in triggers if t.dedup_suppressed]
+        if deduped:
+            print(f"  cross-pair duplicates (excluded): {len(deduped)}  "
+                  f"(never handed to the buffer — a sibling pair in the same "
+                  f"group\n                                    was already "
+                  f"recording the same moment)")
         print("  These rows are the exact population missing from the "
               "recording log;\n  recall measured from that file alone "
               "understates the engine by this much.")

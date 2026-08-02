@@ -7,8 +7,9 @@ stale-refire guard and the 2026-07-30 sampling-floor gate), plus a set of
 integration tests that drive ``DiscrepancyMonitor._evaluate_pair`` directly
 (no evaluator thread) against a stub ``ConfigProvider`` and a temp Hot Folder,
 the 2026-08-01 decision log (``engine_decisions.csv``), the 2026-08-01
-suppression log (``engine_suppressions.csv``), and ``_resolve_pytz``
-(ROADMAP 4d).
+suppression log (``engine_suppressions.csv``), ``_resolve_pytz``
+(ROADMAP 4d), and the derived detector groups plus cross-pair duplicate
+rejection (ROADMAP 9C4).
 
 Run from anywhere:
 
@@ -37,6 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config_manager import ConfigProvider  # noqa: E402
 from discrepancy_engine import (  # noqa: E402
     DiscrepancyMonitor,
+    _DECISION_LOG_FIELDS,
     _DEFAULT_SAMPLING_FLOOR_SEC,
     _DUTY_WINDOW_SEC,
     _ORPHAN_DECISION_GRACE_SEC,
@@ -1078,6 +1080,399 @@ class TestSuppressionLog(unittest.TestCase):
             self.monitor._pair_runtime["1:2"].below_floor_suppressed, 1
         )
         self.monitor._evaluate_pair("1:2", "1", "2")
+
+
+# ---------------------------------------------------------------------------
+# Detector groups — connected components over the pair graph (ROADMAP 9C4)
+# ---------------------------------------------------------------------------
+
+def _det(partner, phase=2, camera="cam1", threshold=0.2, det_type="radar"):
+    """One detector config entry; ``partner`` may be a scalar or a list."""
+    return {
+        "paired_detector_id": partner,
+        "phase":              phase,
+        "camera_id":          camera,
+        "lag_threshold_sec":  threshold,
+        "type":               det_type,
+    }
+
+
+def _build_grouped_monitor(trigger_dir, detectors, **extra_cfg):
+    """Build a monitor over an arbitrary detector map (no pair assumptions)."""
+    cfg = {"timezone": "UTC", "detectors": detectors}
+    cfg.update(extra_cfg)
+    monitor = DiscrepancyMonitor(
+        intersection_id="test_int",
+        config_provider=_StubProvider(cfg),
+        trigger_dir=trigger_dir,
+        cooldown_sec=60.0,
+    )
+    monitor.set_sampling_floor(0.01)
+    return monitor
+
+
+# The five triangles in _intersections.json are authored as rings of scalars;
+# the same group may also be authored as explicit lists.  Both must unify.
+_RING_TRIANGLE = {
+    "2":  _det("17"),
+    "17": _det("46"),
+    "46": _det("2"),
+}
+_LIST_TRIANGLE = {
+    "2":  _det(["17", "46"]),
+    "17": _det(["2", "46"]),
+    "46": _det(["2", "17"]),
+}
+
+
+class TestDetectorGroups(unittest.TestCase):
+    """Group derivation: both config forms, and the over-grouping guard."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def build(self, detectors, **extra_cfg):
+        return _build_grouped_monitor(self._tmp.name, detectors, **extra_cfg)
+
+    def test_ring_of_scalars_derives_one_triangle(self):
+        m = self.build(_RING_TRIANGLE)
+        self.assertEqual(sorted(m._pairs), ["17:2", "17:46", "2:46"])
+        self.assertEqual(m._groups, {"2:17:46": ["2", "17", "46"]})
+
+    def test_list_form_derives_the_identical_pairs_and_group(self):
+        ring = self.build(_RING_TRIANGLE)
+        lists = self.build(_LIST_TRIANGLE)
+        # The coincidence that makes one mechanism serve both forms — and it
+        # is specific to n=3 (see test_four_ring_does_not_become_all_pairs).
+        self.assertEqual(sorted(lists._pairs), sorted(ring._pairs))
+        self.assertEqual(lists._groups, ring._groups)
+
+    def test_every_pair_maps_to_its_group(self):
+        m = self.build(_RING_TRIANGLE)
+        self.assertEqual(
+            set(m._pair_group.values()), {"2:17:46"}
+        )
+        self.assertEqual(set(m._pair_group), set(m._pairs))
+
+    def test_group_id_orders_numeric_ids_numerically(self):
+        # "17:2:46" would be the lexicographic answer and is unreadable.
+        m = self.build(_RING_TRIANGLE)
+        self.assertIn("2:17:46", m._groups)
+
+    def test_independent_pairs_stay_separate_groups(self):
+        m = self.build({
+            "1": _det("2", phase=2), "2": _det("1", phase=2),
+            "3": _det("4", phase=4), "4": _det("3", phase=4),
+        })
+        self.assertEqual(sorted(m._groups), ["1:2", "3:4"])
+
+    def test_four_ring_gives_four_pairs_not_six(self):
+        # A group is a dedup scope, never an instruction to evaluate every
+        # internal pair — a 4-ring must not silently grow two comparisons.
+        m = self.build({
+            "1": _det("2"), "2": _det("3"), "3": _det("4"), "4": _det("1"),
+        })
+        self.assertEqual(len(m._pairs), 4)
+        self.assertEqual(m._groups, {"1:2:3:4": ["1", "2", "3", "4"]})
+
+    def test_four_detector_list_form_gives_six_pairs(self):
+        # The other half of the same point: the list form is how you say
+        # "compare all of these", and it does.
+        m = self.build({
+            "1": _det(["2", "3", "4"]), "2": _det(["1", "3", "4"]),
+            "3": _det(["1", "2", "4"]), "4": _det(["1", "2", "3"]),
+        })
+        self.assertEqual(len(m._pairs), 6)
+        self.assertEqual(sorted(m._groups), ["1:2:3:4"])
+
+    def test_unknown_id_inside_a_list_drops_only_that_link(self):
+        with self.assertLogs("discrepancy_engine.test_int", level="WARNING"):
+            m = self.build({
+                "1": _det(["2", "99"]), "2": _det("1"),
+            })
+        self.assertEqual(sorted(m._pairs), ["1:2"])
+
+    def test_self_link_is_ignored(self):
+        with self.assertLogs("discrepancy_engine.test_int", level="WARNING"):
+            m = self.build({"1": _det(["1", "2"]), "2": _det("1")})
+        self.assertEqual(sorted(m._pairs), ["1:2"])
+
+    def test_phase_coherent_group_warns_nothing(self):
+        logger = logging.getLogger("discrepancy_engine.test_int")
+        with self.assertLogs(logger, level="DEBUG") as captured:
+            self.build(_RING_TRIANGLE)
+        self.assertFalse([
+            r for r in captured.records if r.levelno >= logging.WARNING
+        ])
+
+    def test_transitive_over_grouping_warns(self):
+        # One stray link merges two intended groups with no other symptom.
+        with self.assertLogs(
+            "discrepancy_engine.test_int", level="WARNING"
+        ) as captured:
+            m = self.build({
+                "1": _det("2", phase=2), "2": _det("3", phase=2),
+                "3": _det("4", phase=4), "4": _det("3", phase=4),
+            })
+        self.assertEqual(len(m._groups), 1)
+        self.assertTrue(any(
+            "more than one phase" in r.getMessage()
+            for r in captured.records
+        ))
+
+    def test_reload_dissolving_a_group_drops_its_anchor(self):
+        m = self.build(_RING_TRIANGLE)
+        m._group_last_fire[("2:17:46", "cam1")] = (100.0, "abcdef")
+        m.reload(_StubProvider({
+            "timezone": "UTC",
+            "detectors": {"1": _det("2"), "2": _det("1")},
+        }))
+        self.assertEqual(m._group_last_fire, {})
+
+    def test_reload_keeps_a_surviving_groups_anchor(self):
+        m = self.build(_RING_TRIANGLE)
+        m._group_last_fire[("2:17:46", "cam1")] = (100.0, "abcdef")
+        m.reload(_StubProvider({"timezone": "UTC",
+                                "detectors": dict(_LIST_TRIANGLE)}))
+        self.assertIn(("2:17:46", "cam1"), m._group_last_fire)
+
+
+# ---------------------------------------------------------------------------
+# Cross-pair duplicate rejection (ROADMAP 9C4)
+# ---------------------------------------------------------------------------
+
+class TestCrossPairDuplicates(unittest.TestCase):
+    """One physical event fires on two pairs of a triangle; only one records."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.log_path = Path(self._tmp.name) / "engine_decisions.csv"
+        self.monitor = self.build(_RING_TRIANGLE)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def build(self, detectors, **extra_cfg):
+        cfg = {"timezone": "UTC", "detectors": detectors}
+        cfg.update(extra_cfg)
+        monitor = DiscrepancyMonitor(
+            intersection_id="test_int",
+            config_provider=_StubProvider(cfg),
+            trigger_dir=self._tmp.name,
+            cooldown_sec=60.0,
+            post_roll_sec=0.0,
+            decision_log_path=self.log_path,
+        )
+        monitor.set_sampling_floor(0.01)
+        return monitor
+
+    def rows(self):
+        with self.log_path.open(newline="", encoding="utf-8") as fh:
+            return list(csv.DictReader(fh))
+
+    def triggers(self):
+        return sorted(Path(self._tmp.name).glob("trigger_*.json"))
+
+    def fire(self, monitor, pair_key, det_a, det_b, ts,
+             rule="rule2_orphan_pulse", action="start", **kwargs):
+        """Fire one trigger at an exact timestamp, bypassing the rules."""
+        monitor._fire_trigger(
+            pair_key=pair_key, det_a_id=det_a, det_b_id=det_b,
+            rule=rule, description="test", disagreement_sec=1.0,
+            event_ts=ts, action=action, **kwargs
+        )
+
+    # ── The core behavior ────────────────────────────────────────────────
+
+    def test_sibling_pair_within_the_window_writes_no_trigger_file(self):
+        self.fire(self.monitor, "17:2", "2", "17", 1000.0)
+        self.fire(self.monitor, "17:46", "17", "46", 1000.1)
+        self.assertEqual(len(self.triggers()), 1)
+
+    def test_the_suppressed_decision_is_still_logged_and_marked(self):
+        self.fire(self.monitor, "17:2", "2", "17", 1000.0)
+        self.fire(self.monitor, "17:46", "17", "46", 1000.1)
+        rows = self.rows()
+        # Both decisions are recorded — ground truth contains the event on
+        # both pairs, so dropping the row would score a miss.
+        self.assertEqual(len(rows), 2)
+        first, second = rows
+        self.assertEqual(first["suppressed_as_duplicate"], "0")
+        self.assertEqual(first["duplicate_of_trigger_id"], "")
+        self.assertEqual(second["suppressed_as_duplicate"], "1")
+        self.assertEqual(
+            second["duplicate_of_trigger_id"], first["trigger_id"]
+        )
+
+    def test_every_row_carries_its_derived_group(self):
+        self.fire(self.monitor, "17:2", "2", "17", 1000.0)
+        self.fire(self.monitor, "17:46", "17", "46", 1000.1)
+        self.assertEqual({r["dedup_group"] for r in self.rows()}, {"2:17:46"})
+
+    def test_beyond_the_window_both_fire(self):
+        self.fire(self.monitor, "17:2", "2", "17", 1000.0)
+        self.fire(self.monitor, "17:46", "17", "46", 1001.5)
+        self.assertEqual(len(self.triggers()), 2)
+        self.assertEqual(
+            [r["suppressed_as_duplicate"] for r in self.rows()], ["0", "0"]
+        )
+
+    def test_boundary_exactly_at_the_window_is_a_duplicate(self):
+        self.fire(self.monitor, "17:2", "2", "17", 1000.0)
+        self.fire(self.monitor, "17:46", "17", "46", 1001.0)
+        self.assertEqual(len(self.triggers()), 1)
+
+    def test_separate_groups_never_deduplicate_each_other(self):
+        monitor = self.build({
+            "1": _det("2", phase=2), "2": _det("1", phase=2),
+            "3": _det("4", phase=4), "4": _det("3", phase=4),
+        })
+        self.fire(monitor, "1:2", "1", "2", 1000.0)
+        self.fire(monitor, "3:4", "3", "4", 1000.1)
+        self.assertEqual(len(self.triggers()), 2)
+
+    def test_different_cameras_in_one_group_are_not_duplicates(self):
+        monitor = self.build({
+            "2":  _det("17", camera="camA"),
+            "17": _det("46", camera="camA"),
+            "46": _det("2",  camera="camB"),
+        })
+        # 17:2 → camA only; 17:46 → camA+camB: different footage, both fire.
+        self.fire(monitor, "17:2", "2", "17", 1000.0)
+        self.fire(monitor, "17:46", "17", "46", 1000.1)
+        self.assertEqual(len(self.triggers()), 2)
+
+    def test_suppression_does_not_anchor_the_window(self):
+        # Otherwise a storm rolls the window forward and suppresses forever.
+        self.fire(self.monitor, "17:2", "2", "17", 1000.0)
+        self.fire(self.monitor, "17:46", "17", "46", 1000.8)   # suppressed
+        self.fire(self.monitor, "2:46", "2", "46", 1001.5)     # 1.5s from 1000
+        self.assertEqual(len(self.triggers()), 2)
+        self.assertEqual(
+            [r["suppressed_as_duplicate"] for r in self.rows()],
+            ["0", "1", "0"],
+        )
+
+    def test_zero_window_disables_the_mechanism(self):
+        monitor = self.build(_RING_TRIANGLE, dedup_window_sec=0)
+        self.fire(monitor, "17:2", "2", "17", 1000.0)
+        self.fire(monitor, "17:46", "17", "46", 1000.0)
+        self.assertEqual(len(self.triggers()), 2)
+
+    def test_configured_window_is_honoured(self):
+        monitor = self.build(_RING_TRIANGLE, dedup_window_sec=5.0)
+        self.fire(monitor, "17:2", "2", "17", 1000.0)
+        self.fire(monitor, "17:46", "17", "46", 1003.0)
+        self.assertEqual(len(self.triggers()), 1)
+
+    def test_malformed_window_falls_back_to_the_default(self):
+        # A typo must not silently restore the duplicate storm.
+        monitor = self.build(_RING_TRIANGLE, dedup_window_sec="soon")
+        self.assertEqual(monitor._dedup_window_sec, 1.0)
+
+    # ── Rule 1: the start/stop pairing (the fiddly part) ─────────────────
+
+    def test_suppressed_rule1_start_does_not_arm_the_state_machine(self):
+        # Arming it would later send the buffer a "stop" for a recording it
+        # never started.
+        self.fire(self.monitor, "17:2", "2", "17", 1000.0)
+        self.fire(self.monitor, "17:46", "17", "46", 1000.1,
+                  rule="rule1_continuous_disagreement",
+                  event_window=(999.0, None))
+        rt = self.monitor._pair_runtime["17:46"]
+        self.assertIsNone(rt.active_trigger_id)
+
+    def test_suppressed_start_engages_cooldown_instead(self):
+        # The group is already recording this moment; the pair must not
+        # re-fire on the same physical event one threshold later.
+        self.fire(self.monitor, "17:2", "2", "17", 1000.0)
+        self.fire(self.monitor, "17:46", "17", "46", 1000.1,
+                  rule="rule1_continuous_disagreement",
+                  event_window=(999.0, None))
+        rt = self.monitor._pair_runtime["17:46"]
+        self.assertTrue(rt.cooldown_active)
+        self.assertIsNone(rt.disagreement_start)
+
+    def test_an_emitted_rule1_start_still_arms_the_state_machine(self):
+        self.fire(self.monitor, "17:46", "17", "46", 1000.0,
+                  rule="rule1_continuous_disagreement",
+                  event_window=(999.0, None))
+        rt = self.monitor._pair_runtime["17:46"]
+        self.assertIsNotNone(rt.active_trigger_id)
+        self.assertFalse(rt.cooldown_active)
+
+    def test_a_stop_is_never_suppressed(self):
+        # Its start is already recording; suppressing the stop would strand
+        # the clip until max_duration_sec.
+        self.fire(self.monitor, "17:46", "17", "46", 1000.0,
+                  rule="rule1_continuous_disagreement",
+                  event_window=(999.0, None))
+        active_id = self.monitor._pair_runtime["17:46"].active_trigger_id
+        self.fire(self.monitor, "17:2", "2", "17", 1000.2)   # sibling start
+        self.fire(self.monitor, "17:46", "17", "46", 1000.3,
+                  rule="rule1_continuous_disagreement", action="stop",
+                  trigger_id_override=active_id)
+        actions = [r["action"] for r in self.rows()]
+        self.assertEqual(actions, ["start", "start", "stop"])
+        self.assertEqual(
+            [r["suppressed_as_duplicate"] for r in self.rows()],
+            ["0", "1", "0"],
+        )
+        self.assertEqual(len(self.triggers()), 2)           # start + stop
+
+    def test_a_stop_does_not_anchor_the_window(self):
+        # Anchoring on it would suppress the *next* genuine group event.
+        self.fire(self.monitor, "17:46", "17", "46", 1000.0,
+                  rule="rule1_continuous_disagreement",
+                  event_window=(999.0, None))
+        active_id = self.monitor._pair_runtime["17:46"].active_trigger_id
+        self.fire(self.monitor, "17:46", "17", "46", 1002.0,
+                  rule="rule1_continuous_disagreement", action="stop",
+                  trigger_id_override=active_id)
+        self.fire(self.monitor, "17:2", "2", "17", 1002.1)
+        self.assertEqual(
+            [r["suppressed_as_duplicate"] for r in self.rows()],
+            ["0", "0", "0"],
+        )
+
+    def test_suppressed_row_carries_the_same_columns_as_an_emitted_one(self):
+        self.fire(self.monitor, "17:2", "2", "17", 1000.0)
+        self.fire(self.monitor, "17:46", "17", "46", 1000.1,
+                  event_window=(999.5, 999.9))
+        emitted, suppressed = self.rows()
+        self.assertEqual(set(emitted), set(suppressed))
+        self.assertEqual(suppressed["pair_key"], "17:46")
+        self.assertEqual(suppressed["event_start_ts"], "999.500")
+        self.assertEqual(suppressed["event_end_ts"], "999.900")
+        self.assertNotEqual(suppressed["trigger_id"], emitted["trigger_id"])
+
+    def test_header_matches_the_declared_field_order(self):
+        self.fire(self.monitor, "17:2", "2", "17", 1000.0)
+        header = self.log_path.read_text(encoding="utf-8").splitlines()[0]
+        self.assertEqual(header.split(","), list(_DECISION_LOG_FIELDS))
+
+    # ── End-to-end through the rules, not _fire_trigger ──────────────────
+
+    def test_triangle_event_end_to_end_records_once(self):
+        # Detector 17 disagrees with both 2 and 46: two pairs, one physical
+        # event, one clip.
+        monitor = self.build(_RING_TRIANGLE)
+        monitor.on_detector_on("17")
+        for pair_key, (a, b) in monitor._pairs.items():
+            monitor._evaluate_pair(pair_key, a, b)       # arm the timers
+        time.sleep(0.25)                                  # threshold is 0.2
+        for pair_key, (a, b) in monitor._pairs.items():
+            monitor._evaluate_pair(pair_key, a, b)
+        # Pairs 17:2 and 17:46 both crossed the threshold; 2:46 agrees.
+        rows = self.rows()
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(
+            sorted(r["suppressed_as_duplicate"] for r in rows), ["0", "1"]
+        )
+        self.assertEqual(len(self.triggers()), 1)
 
 
 if __name__ == "__main__":

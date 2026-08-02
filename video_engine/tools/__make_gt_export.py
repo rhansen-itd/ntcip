@@ -26,9 +26,14 @@ Two arguments must match the engine run being scored or the comparison is
 meaningless:
 
 * **the config** — pairs are read from its ``detectors`` map
-  (``paired_detector_id``), deduplicated, so the GT covers exactly the pairs
-  the engine was watching.  Check the engine log's pair set against it: the
-  three intersection JSONs in this repo do **not** agree on pairs.
+  (``paired_detector_id``, scalar **or list**, symmetric and deduplicated
+  exactly as ``discrepancy_engine._build_structures`` does it), so the GT
+  covers exactly the pairs the engine was watching.  Check the engine log's
+  pair set against it: the three intersection JSONs in this repo do **not**
+  agree on pairs.  If this reader and the engine ever disagree about the
+  schema, every trigger on a pair the export missed scores as a false
+  positive — the "scoring against the wrong pair set" failure, arriving by a
+  new route.
 * **``--lag-threshold``** — must equal the detectors' ``lag_threshold_sec``
   (it is both the Rule 1 duration threshold and the Rule 2 half-window).  It
   is read from the config when every paired detector agrees; pass it
@@ -72,14 +77,21 @@ def _load_pairs(config_path: str, intersection: str):
         partner = det.get("paired_detector_id")
         if not partner:
             continue
-        key = tuple(sorted((int(num), int(partner))))
-        if key in seen:
-            continue
-        seen.add(key)
-        pairs.append({"phase": int(det["phase"]),
-                      "det_a": key[0], "det_b": key[1]})
-        if det.get("lag_threshold_sec") is not None:
-            thresholds.add(float(det["lag_threshold_sec"]))
+        # Scalar or list — the engine accepts both (a 3-way group may be
+        # authored as a ring of scalars or as explicit lists), so this reader
+        # must too or the export silently covers fewer pairs than the run.
+        partners = partner if isinstance(partner, (list, tuple)) else [partner]
+        for one in partners:
+            if one is None:
+                continue
+            key = tuple(sorted((int(num), int(one))))
+            if key[0] == key[1] or key in seen:
+                continue
+            seen.add(key)
+            pairs.append({"phase": int(det["phase"]),
+                          "det_a": key[0], "det_b": key[1]})
+            if det.get("lag_threshold_sec") is not None:
+                thresholds.add(float(det["lag_threshold_sec"]))
     pairs.sort(key=lambda p: (p["phase"], p["det_a"]))
     return pairs, thresholds
 
