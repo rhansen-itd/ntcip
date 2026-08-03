@@ -624,8 +624,8 @@ output toggles). Two rules, both implemented:
   token set → header must match (401); no token + loopback bind → allowed;
   no token + non-loopback bind → **403, control disabled** plus a startup
   warning. The two rules interlock on purpose — exposing hardware control to
-  the network takes both a host change and a secret. `/api/status` and
-  `/api/stats` stay open (read-only, polled every 250 ms by the dashboard).
+  the network takes both a host change and a secret. `/api/status`,
+  `/api/stats` and the two SSE routes below stay open (read-only).
 
 Both rules are implemented in one place: `_check_shared_secret()`, which
 `_check_control_access()` and the overlay's `_check_video_access()` both call.
@@ -633,7 +633,51 @@ Both rules are implemented in one place: `_check_shared_secret()`, which
 Deliberately not a session/user/JWT system — a reverse proxy owns real auth if
 the deployment story changes. There's still no in-repo route test (a
 Flask-test-client case is ROADMAP 4e), though `flask` and `pysnmp` were
-installed here during 11b and the routes were verified from a scratch harness.
+installed here during 11b and the routes were verified from a scratch harness
+(again in 15b, against a real Flask test client).
+
+### Pushed state updates (2026-08-03, ROADMAP 15 — load-bearing)
+
+Neither page polls any more. `/api/events` (raw state, dashboard) and
+`/api/overlay/events` (resolved shape statuses, overlay) are Server-Sent
+Events streams that push a change when the SNMP sweep detects it, removing the
+0–250 ms poll phase from perceived latency; what is left is the ~0.33 s
+sampling cycle. The plumbing is `ntcip_monitor/ui/events.py` —
+**stdlib-only and Flask-free**, like `ui/overlay/*`, with the `EVENT_*` names
+as string literals because `core/__init__.py` re-exports `snmp_client` and
+would drag pysnmp into a bare-interpreter suite.
+
+Six things are load-bearing:
+
+- **The dev server runs `threaded=True`** (15a). It is single-threaded by
+  default, so one MJPEG viewer or one SSE client — neither response ever
+  finishes — would occupy the only worker and stall every other request.
+  `remux`'s and the overlay source's docstrings had *assumed* this since 11c;
+  it wasn't true until now. Don't remove it.
+- **A monitor callback only enqueues.** `StateBroadcaster._dispatch` reads the
+  enum's name and does one `put_nowait`; every payload (`_build_status()`,
+  `resolve_all`) is built on the HTTP worker thread serving the stream. This is
+  the "callbacks return in microseconds" rule from the NTCIP section — a
+  browser's view of the world must never be a term in the sampling rate.
+- **Overflow drops and resynchronises; it never back-pressures.** Each client
+  owns a 256-entry queue. When it fills, pushes are dropped, the backlog is
+  discarded, and a full snapshot is sent — the queued items are the *oldest*
+  changes, so replaying them after a gap is worse than one snapshot.
+- **Subscriptions attach once and are never detached** — deliberately unlike
+  `overlay/source.py`'s ref-counted decoder, because an idle RTSP session is a
+  real resource and an idle callback is a lock plus an empty list. Don't add
+  ref-counting: its failure mode is a silently deaf stream.
+- **The overlay gets its own route because resolution stays server-side.** The
+  page consumes a positional `statuses` array from `overlay/status.py`; it does
+  **not** map detectors to shapes in JS, and porting that table into the
+  browser to consume raw deltas would duplicate the one piece of overlay logic
+  the unit tests pin. The stream re-resolves per edge and sends the whole array;
+  a change that resolves identically (a detector no shape maps) sends nothing.
+- **Both pages keep the 250 ms poll as a fallback**, started on `onerror` and
+  retired on `onopen`. `EventSource` reconnects itself and every connection
+  opens with a full snapshot, so the fallback only covers the gap. A delta is
+  shaped as the subset of a status payload it replaces, so `updateDisplay()`
+  applies snapshot and delta through one path.
 
 ## Live video overlay (2026-07-31, ROADMAP 11a–11c — load-bearing)
 
@@ -675,8 +719,9 @@ because `camera_url` is empty until ROADMAP 11d authors it.
   `"255,0,0"` is *blue*. `shapes.bgr_to_rgb()` reverses the triple exactly
   once, inside `shapes_payload()` on the way to `/api/overlay/shapes`; the
   loaded shapes keep the authored order. Don't reverse again in the page.
-- **Two routes are open, two are gated.** `/api/overlay/shapes` (static,
-  fetched once) and `/api/overlay/state` (polled at 250 ms) are open like
+- **Three routes are open, two are gated.** `/api/overlay/shapes` (static,
+  fetched once), `/api/overlay/state` (the fallback poll) and
+  `/api/overlay/events` (the SSE stream, ROADMAP 15) are open like
   `/api/status`. `/api/overlay/background` and `/api/overlay/stream` carry the
   **same interlock as `/api/control/*`** — a deliberate departure from 4f,
   because proxied camera video is a live view of a public roadway and
@@ -692,9 +737,11 @@ because `camera_url` is empty until ROADMAP 11d authors it.
   change, so swapping the calibration still needs no restart; the live source
   reconnects with 1 s→30 s backoff and keeps re-sending the last good frame
   every 2 s so a viewer's `<img>` doesn't break mid-outage.
-- The page **labels its own resolution** — SNMP sampling is ~1–1.5 s effective
-  (see the NTCIP rules above), far coarser than the video. Keep that caveat if
-  you touch the template.
+- The page **labels its own resolution** — SNMP sampling is ~0.33 s effective
+  on intersection 201 post-4a (see the NTCIP rules above; the note said
+  "1–1.5 s" until 2026-08-03), still far coarser than the video. Keep that
+  caveat if you touch the template: since 15b the state is *pushed*, so the
+  sampling cycle is the whole of what remains.
 
 ### Deploy-time tooling and the calibration workflow (ROADMAP 11d)
 
@@ -725,9 +772,9 @@ them relaxes the rule that the two packages don't import each other.
 
 ## Tests
 
-Seven suites, all **stdlib `unittest`** (pytest is not installed here), one file
+Eight suites, all **stdlib `unittest`** (pytest is not installed here), one file
 per subject, each runnable directly from any working directory via its own
-`sys.path` bootstrap. 379 cases total as of 2026-08-03:
+`sys.path` bootstrap. 426 cases total as of 2026-08-03:
 
 | Suite | Cases | Subject |
 |---|---|---|
@@ -738,6 +785,7 @@ per subject, each runnable directly from any working directory via its own
 | `ntcip_monitor/tests/test_overlay_shapes.py` | 86 | shape reader, status resolution, live source (stubbed PyAV) |
 | `ntcip_monitor/tests/test_oid_helpers.py` | 33 | OID math + `parse_signal_state` |
 | `ntcip_monitor/tests/test_snmp_batching.py` | 17 | chunking, batched poll loops, cycle EMA (stubbed pysnmp) |
+| `ntcip_monitor/tests/test_ui_events.py` | 47 | SSE delta coalescing, overflow-and-resync, close/wake, attach-once fan-out (stubbed monitors) |
 
 Suites import the module under test as directly as possible — `test_oid_helpers`
 puts `ntcip_monitor/core/` on `sys.path` and imports the leaf modules rather

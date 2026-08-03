@@ -166,16 +166,19 @@
             </div>
             <div class="note">
                 Shapes come from <code>{{ shapes_csv }}</code>, calibrated with
-                pyatspm. Detector and phase state is sampled by SNMP at an
-                effective cycle of roughly 1&ndash;1.5&nbsp;s, so the overlay
-                shows the monitor's real resolution &mdash; it is
+                pyatspm. State changes are pushed as soon as the SNMP sweep
+                sees them, so what you see is bounded by the sampling cycle
+                itself &mdash; measured at roughly 0.33&nbsp;s on intersection
+                201, coarser on a controller polled at a lower chunk size. The
+                overlay shows the monitor's real resolution: it is
                 <strong>not</strong> frame-synchronised with the video.
             </div>
         </div>
     </div>
 
     <script>
-        // Matches the dashboard's poll rate.
+        // Matches the dashboard's fallback poll rate; used only when the
+        // event stream is unavailable (see startEvents).
         const UPDATE_INTERVAL = 250;
         // How often the still background is re-fetched, so swapping the
         // calibration image on disk shows up without a reload.
@@ -296,6 +299,16 @@
             draw();
         }
 
+        // Both the polled route and the event stream deliver the same
+        // server-resolved `statuses` array, positionally parallel to `shapes`.
+        function applyState(payload) {
+            if (!payload || !payload.statuses) return;
+            statuses = payload.statuses;
+            draw();
+            document.getElementById('last-update').textContent =
+                `Last update: ${new Date().toLocaleTimeString()}`;
+        }
+
         async function fetchState() {
             try {
                 const response = await fetch('/api/overlay/state');
@@ -304,13 +317,46 @@
                     showError(payload.error || 'Could not read overlay state');
                     return;
                 }
-                statuses = payload.statuses;
-                draw();
-                document.getElementById('last-update').textContent =
-                    `Last update: ${new Date().toLocaleTimeString()}`;
+                applyState(payload);
             } catch (error) {
                 console.error('Error fetching overlay state:', error);
             }
+        }
+
+        // Live updates (ROADMAP 15b), same shape as the dashboard's: the
+        // stream pushes on every SNMP-detected edge, the poll is the fallback.
+        let pollTimer = null;
+
+        function startPolling() {
+            if (pollTimer !== null) return;
+            fetchState();
+            pollTimer = setInterval(fetchState, UPDATE_INTERVAL);
+        }
+
+        function stopPolling() {
+            if (pollTimer === null) return;
+            clearInterval(pollTimer);
+            pollTimer = null;
+        }
+
+        function startEvents() {
+            if (!window.EventSource) {
+                startPolling();
+                return;
+            }
+
+            const source = new EventSource('/api/overlay/events');
+            source.onopen = stopPolling;
+            // Also covers the disabled/unavailable cases (404/503): falling
+            // back to the polled route surfaces its error message as before.
+            source.onerror = startPolling;
+            source.onmessage = (event) => {
+                try {
+                    applyState(JSON.parse(event.data));
+                } catch (error) {
+                    console.error('Bad event payload:', error);
+                }
+            };
         }
 
         function videoUrl(path) {
@@ -398,7 +444,7 @@
 
             startBackground();
             fetchState();
-            setInterval(fetchState, UPDATE_INTERVAL);
+            startEvents();
         });
     </script>
 </body>

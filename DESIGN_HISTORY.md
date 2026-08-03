@@ -2270,3 +2270,93 @@ decided. Entries after this point are logged as the decision lands.
   garbage-value fallback and reload. Four existing 9C4 cases had their
   timestamps or expected default widened — the semantics they pin are
   unchanged.
+
+- 2026-08-03 — **ROADMAP 15 implemented: the dashboard and overlay are pushed,
+  not polled, and the dev server is threaded.** Both pages ran a 250 ms
+  `setInterval` against `/api/status` and `/api/overlay/state`, so a detector
+  edge reached the browser up to a full poll period *after* the SNMP sweep
+  already had it — on top of the ~0.33 s sampling cycle, roughly half a second
+  of perceived lag, and the reason live detector observation on the dashboard
+  felt like it stepped. The monitors have emitted a change event at the moment
+  of detection since Phase 0; nothing was listening on the UI side.
+
+  **15a — `threaded=True` on `flask_app.run()`.** One line, but not cosmetic:
+  the dev server is single-threaded by default, so any long-lived response
+  occupies the only worker and blocks every other request behind it. The MJPEG
+  route's docstring had asserted "Flask's dev server runs threaded, so the
+  dashboard's 250 ms polling is unaffected" since 11c — an assumption that was
+  simply false, and one that an SSE connection (which also never finishes)
+  would have made unmistakable. The state served is already thread-safe: the
+  monitors guard their own dicts, `VideoBufferManager` and `RtspMjpegSource`
+  are shared-state by design, and 4f's token check is stateless.
+
+  **15b — two SSE routes, not one.** `/api/events` carries raw state for the
+  dashboard; `/api/overlay/events` carries *resolved* shape statuses for the
+  overlay. The ROADMAP text proposed a single endpoint with the overlay
+  resolving deltas client-side, on the belief that the page already mapped
+  detector IDs to shapes. It does not — `/api/overlay/state` resolves
+  server-side and the page consumes a positional `statuses` array. Taking the
+  one-route path would have meant porting `overlay/status.py`'s resolution
+  table into browser JavaScript, i.e. duplicating the one piece of overlay
+  logic this repo pins with unit tests, to save a route. The overlay stream
+  therefore re-resolves on each edge and sends the whole array (a few dozen
+  strings); a change that resolves identically — a detector no shape maps —
+  sends **nothing at all**, so unmapped channels cost a wakeup and no frame.
+
+  **Where the work happens is the load-bearing part.** A monitor callback must
+  return in microseconds (CLAUDE.md's NTCIP rules), so the callback does
+  exactly one thing: read the enum's name and `put_nowait` it on each
+  subscriber's queue. Every derived payload — `_build_status()`, the overlay's
+  `resolve_all` — is built later on the HTTP worker thread serving the stream.
+  Putting resolution in the callback would have made a browser's view of the
+  world a term in the controller's sampling rate.
+
+  Three smaller decisions, each with an alternative that was rejected:
+
+  * **Bounded queue, drop and resynchronise — never back-pressure.** Each
+    client gets a 256-entry queue; when it fills, pushes are dropped and an
+    overflow flag is raised, and the stream discards the backlog and re-sends a
+    full snapshot. Blocking the producer was never an option (it is a polling
+    thread), and replaying a stale backlog after a drop is worse than one
+    snapshot, since the queued items are the *oldest* changes.
+  * **Subscribe to the monitors once, never detach.** `overlay/source.py`
+    ref-counts its decoder because an idle RTSP session is a real resource; a
+    callback with no subscribers costs a lock and an empty list. Ref-counting
+    here would buy nothing and add an attach/detach race whose failure mode is
+    a silently deaf stream. The broadcaster attaches on its first subscriber
+    and stays attached for the process lifetime.
+  * **Coalesce per wake.** One sweep can flip several detectors, each arriving
+    as its own event; the stream drains everything queued behind the first into
+    a single delta, so a sweep costs one frame and one repaint rather than one
+    per channel. Verified: two edges emitted back-to-back arrive as one frame.
+
+  Both pages keep their old poll loop as a fallback, started on `onerror` and
+  retired on `onopen`; `EventSource` reconnects on its own and every connection
+  opens with a full snapshot, so the fallback only has to cover the gap.
+  `updateDisplay()` gained `|| {}` on each category so it applies a partial
+  delta and a full snapshot through one path — the delta is deliberately shaped
+  as the subset of a status payload it replaces. Both routes are **open**, like
+  the read-only routes they replace: they carry signal state, not camera
+  imagery, so 11b's video interlock does not extend to them.
+
+  New module `ntcip_monitor/ui/events.py`, stdlib-only and Flask-free like
+  `ui/overlay/*` — the event names are string literals rather than imports from
+  `core/event_monitor.py`, because `core/__init__.py` re-exports `snmp_client`
+  and would drag pysnmp into a suite that must run on a bare interpreter (the
+  same reasoning that has `overlay/status.py` comparing state *names* instead
+  of importing the enums). Tests: new
+  `ntcip_monitor/tests/test_ui_events.py`, **47 cases** (426 across eight
+  suites) covering coalescing, overflow-and-resync, close/wake ordering,
+  attach-once under concurrent subscribe, the fan-out, and that a slow client
+  cannot stall a dispatch.
+
+  **Verified against a real Flask test client** (Flask is installed here;
+  an in-repo route test is still 4e's work, and this was a scratch harness):
+  snapshot on connect matching `/api/status` and `/api/overlay/state` exactly,
+  a delta arriving **~1 ms** after the edge fired, coalescing, the keepalive
+  comment, unsubscribe on client disconnect, 404 when the overlay is disabled,
+  no frame for an unmapped detector, and `stop()` ending a live stream. The
+  end-to-end figure on real hardware is **not** measured — what is measured is
+  that the poll phase is gone; what remains is the sampling cycle plus browser
+  render. The overlay page's resolution caveat was updated from the stale
+  "1–1.5 s" to the post-4a ~0.33 s while it was being touched.

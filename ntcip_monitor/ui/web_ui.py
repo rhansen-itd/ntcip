@@ -48,6 +48,25 @@ With ``background: "live"`` (Item 11c) the camera is decoded once and shared:
 every viewer of ``/api/overlay/stream`` and every ``/api/overlay/background``
 hit attaches to the same decoder thread, which is opened on the first viewer
 and torn down shortly after the last one leaves.
+
+Pushed state updates (2026-08-03, ROADMAP 15)
+---------------------------------------------
+Both pages now hold a Server-Sent Events connection instead of polling every
+250 ms: ``/api/events`` (raw state, for the dashboard) and
+``/api/overlay/events`` (resolved shape statuses, for the overlay).  A change
+reaches the browser when the SNMP sweep emits it, removing the 0-250 ms poll
+phase from the perceived latency; what remains is the ~0.33 s sampling cycle.
+Both routes are **open**, matching the read-only payloads they replace — they
+carry signal state, not camera imagery, so the 11b video interlock does not
+apply.  Each page still falls back to its old poll loop if the stream fails,
+so nothing depends on SSE being reachable.
+
+Two properties keep this cheap.  Every payload is built on the HTTP worker
+thread, never in the monitor callback (which must return in microseconds);
+:mod:`ntcip_monitor.ui.events` holds that machinery, Flask-free.  And the dev
+server now runs ``threaded=True`` — without it a single MJPEG viewer or SSE
+client would occupy the only worker and block every other request, which the
+long-lived routes here had already been documented as assuming.
 """
 
 from flask import Flask, Response, render_template, jsonify, request
@@ -56,6 +75,7 @@ import ipaddress
 import logging
 import threading
 import time
+from .events import KEEPALIVE_FRAME, KEEPALIVE_SEC, StateBroadcaster, format_sse
 from .overlay import (
     ShapeConfig,
     create_background_source,
@@ -142,6 +162,12 @@ class WebUI:
         self._background_error = None
         if self.overlay_enabled:
             self._init_overlay()
+
+        # Pushed state updates (ROADMAP 15). Constructed unconditionally but
+        # inert until a browser opens an SSE stream: the broadcaster attaches
+        # to the monitors on its first subscriber.
+        self._broadcaster = StateBroadcaster(app_instance)
+        self._sse_shutdown = threading.Event()
 
         # Create Flask app
         self.flask_app = Flask(__name__)
@@ -324,6 +350,64 @@ class WebUI:
 
         return status
 
+    def _sse_frames(self, snapshot, delta_frame):
+        """Drive one SSE connection: snapshot on connect, then deltas on edges.
+
+        The generator holds its worker thread for the life of the connection.
+        When the browser goes away, Flask closes the generator and the
+        ``finally`` unsubscribes; the keepalive comment is what makes a
+        silently-dropped connection fail a write and reach that path.
+
+        Args:
+            snapshot: Zero-argument callable returning the full-state payload.
+                Sent on connect, and again whenever the client's queue
+                overflowed — the client must never have to reason about a gap.
+            delta_frame: Callable taking the coalesced
+                ``{category: {number: state}}`` delta and returning the
+                payload to send, or ``None`` to send nothing this round.
+
+        Yields:
+            str: SSE frames.
+        """
+        subscriber = self._broadcaster.subscribe()
+        try:
+            yield format_sse(snapshot())
+            while not self._sse_shutdown.is_set() and not subscriber.is_closed():
+                delta = subscriber.wait_delta(KEEPALIVE_SEC)
+                if subscriber.take_overflow():
+                    yield format_sse(snapshot())
+                    continue
+                if delta is None:
+                    yield KEEPALIVE_FRAME
+                    continue
+                payload = delta_frame(delta)
+                if payload is not None:
+                    yield format_sse(payload)
+        finally:
+            self._broadcaster.unsubscribe(subscriber)
+
+    @staticmethod
+    def _sse_response(frames):
+        """Wrap an SSE generator in the response headers the protocol needs.
+
+        Args:
+            frames: Generator yielding SSE frames.
+
+        Returns:
+            Response: A ``text/event-stream`` response.
+        """
+        return Response(
+            frames,
+            mimetype='text/event-stream',
+            headers={
+                'Cache-Control': 'no-store',
+                'Connection': 'keep-alive',
+                # Tell an nginx in front of this not to buffer the stream;
+                # harmless everywhere else.
+                'X-Accel-Buffering': 'no',
+            },
+        )
+
     def _setup_routes(self):
         """Setup Flask routes."""
         
@@ -340,6 +424,27 @@ class WebUI:
         def get_status():
             """Get current controller status."""
             return jsonify(self._build_status())
+
+        @self.flask_app.route('/api/events')
+        def state_events():
+            """Push state changes to the dashboard as they are detected.
+
+            Open, like ``/api/status`` — same signal state, different
+            delivery. A ``snapshot`` frame carries a full ``_build_status()``
+            payload; a ``delta`` frame carries only the changed categories,
+            in the same shape, so the page applies both through one path.
+            """
+            def snapshot():
+                payload = self._build_status()
+                payload['type'] = 'snapshot'
+                return payload
+
+            def delta_frame(delta):
+                payload = dict(delta)
+                payload['type'] = 'delta'
+                return payload
+
+            return self._sse_response(self._sse_frames(snapshot, delta_frame))
 
         @self.flask_app.route('/overlay')
         def overlay_page():
@@ -384,6 +489,48 @@ class WebUI:
                 'statuses': resolve_all(self._shape_config, self._build_status()),
                 'timestamp': time.time(),
             })
+
+        @self.flask_app.route('/api/overlay/events')
+        def overlay_events():
+            """Push resolved shape statuses to the overlay as they change.
+
+            Deliberately a second route rather than a flavour of
+            ``/api/events``: the overlay needs *resolved* statuses, and shape
+            resolution stays server-side in ``overlay/status.py`` where the
+            unit tests reach it — porting that table into browser JavaScript
+            to consume raw deltas would duplicate the one piece of overlay
+            logic this repo pins with tests. Resolution runs here on the HTTP
+            worker, never in a monitor callback.
+
+            The whole ``statuses`` array is sent each time (a few dozen
+            strings, positionally parallel to ``/api/overlay/shapes``), and a
+            change that resolves identically — a detector no shape maps —
+            sends nothing at all.
+            """
+            if not self.overlay_enabled:
+                return jsonify({'error': 'Overlay is disabled'}), 404
+            if self._shape_config is None:
+                return jsonify({
+                    'error': f'Shape config unavailable: {self._shape_error}',
+                }), 503
+
+            last = {}
+
+            def build(kind):
+                statuses = resolve_all(self._shape_config, self._build_status())
+                if kind == 'delta' and statuses == last.get('statuses'):
+                    return None
+                last['statuses'] = statuses
+                return {
+                    'type': kind,
+                    'statuses': statuses,
+                    'timestamp': time.time(),
+                }
+
+            return self._sse_response(self._sse_frames(
+                lambda: build('snapshot'),
+                lambda _delta: build('delta'),
+            ))
 
         @self.flask_app.route('/api/overlay/background')
         def overlay_background():
@@ -551,12 +698,24 @@ class WebUI:
             host=self.host,
             port=self.port,
             debug=False,
-            use_reloader=False
+            use_reloader=False,
+            # One worker thread per request (ROADMAP 15a). The dev server is
+            # single-threaded by default, so a single long-lived response —
+            # the MJPEG stream, or an SSE connection, both of which never
+            # finish — would occupy it and stall every other request. The
+            # state this serves is already thread-safe: the monitors guard
+            # their own dicts, and the overlay's live source is shared by
+            # design.
+            threaded=True,
         )
-    
+
     def stop(self):
         """Stop web UI."""
         self._running = False
+        # Let any open SSE stream finish its loop instead of blocking on a
+        # keepalive wait that will never be interrupted.
+        self._sse_shutdown.set()
+        self._broadcaster.close()
         if self._background_source is not None:
             # The file source has nothing to release; the live source of Item
             # 11c holds an RTSP session and a decoder thread.

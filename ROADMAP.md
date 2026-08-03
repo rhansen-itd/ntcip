@@ -58,12 +58,20 @@ highest used so far.
 > the real monitor, suppression goes to 35.1 % of the 08-02 run's starts and
 > prevents 17 of the 38 same-group clips the disk sweep had to delete.
 >
+> **Item 15 landed 2026-08-03** as well: the dashboard and overlay are pushed
+> over SSE instead of polled at 250 ms, and Flask now runs `threaded=True` (it
+> had been single-threaded the whole time, contradicting what 11c's MJPEG
+> docstring assumed). The 0–250 ms poll phase is gone from perceived latency;
+> the ~0.33 s sampling cycle is what remains.
+>
 > **Suggested order:** **2** or **3** (self-contained). SCOPE Item D
 > (the boundary-zone report diagnostic) is optional and needs owner sign-off.
 > **The next owner run is what measures 12A and 14** — both shipped with
 > replay projections only.
 >
 > **Also ready, no hardware:** **10**, and **4e / 4h** (unblocked by 4d).
+> 4e now has a third stubbing precedent to copy (`test_ui_events.py`'s fake
+> emitter) and one more uncovered surface: the two SSE routes.
 >
 > **The three re-measurements, answered.** *Clock skew* **drifts within a run**
 > and is not a per-run constant: −0.30 s → +2.2 s → +1.2 s across 08-02, ~2.5 s
@@ -285,75 +293,37 @@ Suggested prompt:
 
 ---
 
-## 15 — Dashboard and overlay responsiveness: SSE push + threaded Flask (Target: Opus)
+## 15 — Dashboard and overlay responsiveness: SSE push + threaded Flask — **done 2026-08-03**
 
-Both the dashboard (`/`) and overlay (`/overlay`) poll `/api/status` and
-`/api/overlay/state` via HTTP GET every 250 ms (`setInterval`). The SNMP
-sweep cycle is ~0.33 s, so the UI's true latency is ~0.33 s (SNMP) + 0–250 ms
-(poll phase) + browser render — perceptually ~0.5 s average, making detector
-state changes feel sluggish.  The dashboard is hard to use for live detector
-observation because changes appear to "step" with visible delay.
+Both pages polled every 250 ms, so a detector edge reached the browser up to a
+poll period after the SNMP sweep had it — perceptually ~0.5 s, and why live
+detector observation on the dashboard felt like it stepped. Both now hold a
+Server-Sent Events connection and are pushed at the moment of detection; the
+poll survives only as an `onerror` fallback. Full record in DESIGN_HISTORY
+(2026-08-03); conventions in CLAUDE.md ("Pushed state updates").
 
-Two independent fixes, both landable in one session:
+- [x] 15a: `threaded=True` on `flask_app.run()` — the dev server is
+  single-threaded by default, so one MJPEG or SSE response occupies the only
+  worker. The MJPEG docstring had *asserted* this was already true since 11c.
+- [x] 15b: `/api/events` (raw state) + `/api/overlay/events` (resolved shape
+  statuses), fed by a new stdlib-only `ntcip_monitor/ui/events.py`.
+- [x] 15b: Dashboard JS: `EventSource` with poll fallback.
+- [x] 15b: Overlay JS: `EventSource` with poll fallback.
+- [x] Confirm overlay shape resolution works with delta updates — it does not,
+  and that is why the overlay got its own route. The page consumes a positional
+  `statuses` array; it does **not** map detectors to shapes client-side, so the
+  ROADMAP's single-endpoint plan would have meant porting `overlay/status.py`
+  into JS. The stream re-resolves server-side per edge and sends nothing when
+  the result is unchanged.
+- [x] DESIGN_HISTORY entry.
 
-**15a — `threaded=True` on Flask (one-line fix).**
-`web_ui._run_flask()` calls `flask_app.run()` without `threaded=True`.
-Flask's dev server defaults to single-threaded, so a slow request (MJPEG
-stream, overlay state build) blocks the status poll behind it.  Add
-`threaded=True`.  The existing `_state_lock` / GIL patterns are already
-thread-safe; the overlay's `RtspMjpegSource` is already shared-state by
-design.
-
-**15b — Server-Sent Events for state changes.**
-Replace the 250 ms `setInterval(fetchStatus)` / `setInterval(fetchState)`
-poll loops with an SSE (`EventSource`) connection that pushes delta updates
-the instant the SNMP sweep detects a state change.  This eliminates the
-0–250 ms poll phase entirely.
-
-- **Server side:** new route `/api/events` (open, like `/api/status` — same
-  signal state, different delivery). A Flask SSE generator subscribes to the
-  existing `EventEmitter` callbacks on the detector, phase, and output
-  monitors (`EVENT_DETECTOR_CHANGE`, `EVENT_PHASE_CHANGE`,
-  `EVENT_OUTPUT_CHANGE`) via `.on()`. On each edge it pushes a JSON delta
-  (`{"detectors": {"26": "ACTIVE"}}`) as an SSE `data:` line.  On connect,
-  push a full state snapshot (same as `_build_status()`) so the client starts
-  correct.  Use a `queue.Queue` per connected client; the callback enqueues,
-  the generator dequeues.  Unsubscribe on client disconnect (generator
-  `finally` block calls `.off()`).  The existing `EventEmitter` already calls
-  callbacks outside its lock, so the enqueue is safe.
-- **Client side (dashboard.html + overlay.html):** replace `setInterval` with
-  `new EventSource('/api/events')`.  `onmessage` applies the delta to the
-  existing `updateDisplay()` / shape-status update path.  Fall back to the
-  current poll loop if SSE fails (`onerror` → `setInterval` as today), so the
-  UI still works if the browser doesn't support SSE (all modern browsers do).
-- **Overlay specifics:** the overlay's `fetchState` currently calls
-  `/api/overlay/state`, which resolves shapes.  The SSE delta carries raw
-  phase/detector state; the overlay JS already does shape→status resolution
-  client-side (it maps detector IDs to shape inputs).  Confirm this path
-  works with deltas or push resolved shape status.  The MJPEG stream
-  (`/api/overlay/stream`) is unaffected — it is already a long-lived
-  response.
-- **Security:** `/api/events` follows the same policy as `/api/status` — open
-  (read-only signal state).  It does **not** proxy camera imagery, so it
-  does not need the 4f camera-image interlock.
-
-Expected result: display latency drops from ~0.5 s average to ~0.33 s (the
-SNMP floor) + negligible SSE push time.  Detector state on the dashboard
-changes as fast as the data arrives rather than lagging behind it.
-
-- [ ] 15a: Add `threaded=True` to `flask_app.run()` in `_run_flask()`.
-- [ ] 15b: `/api/events` SSE endpoint with `EventEmitter` subscriptions.
-- [ ] 15b: Dashboard JS: `EventSource` with poll fallback.
-- [ ] 15b: Overlay JS: `EventSource` with poll fallback.
-- [ ] Confirm overlay shape resolution works with delta updates.
-- [ ] DESIGN_HISTORY entry.
-
-Suggested prompt:
-> [Opus] In the ntcip project, do Item 15 of ROADMAP.md: add `threaded=True`
-> to Flask, then replace the 250 ms HTTP polling in both `dashboard.html` and
-> `overlay.html` with a Server-Sent Events endpoint (`/api/events`) that
-> pushes state-change deltas via the existing `EventEmitter` callbacks.
-> Full-state snapshot on connect, delta on edge, poll fallback on error.
+Tests: new `ntcip_monitor/tests/test_ui_events.py`, 47 cases (426 across eight
+suites). Verified end-to-end against a real Flask test client — snapshot on
+connect matching the polled routes exactly, delta ~1 ms after the edge,
+coalescing, keepalive, unsubscribe on disconnect, `stop()` ending a live
+stream. **The end-to-end figure on real hardware is not measured**; what is
+measured is that the poll phase is gone, leaving the ~0.33 s sampling cycle.
+An in-repo *route* test is still 4e's work.
 
 ---
 
@@ -486,9 +456,12 @@ This unblocks **4e** and **4h**.
 The remaining "lacks test coverage" findings all need a mocked `snmp_client`,
 a Flask test client, an in-memory SQLite DB, or similar fixtures — a much
 bigger lift than 4d's pure functions. Worth a real test-strategy session, not
-ad hoc. Note two stubbing precedents now exist to copy rather than reinvent:
-`test_snmp_batching.py` injects a fake `pysnmp.hlapi` into `sys.modules`, and
-`test_overlay_shapes.py` overrides the live source's three PyAV seams.
+ad hoc. Note three stubbing precedents now exist to copy rather than reinvent:
+`test_snmp_batching.py` injects a fake `pysnmp.hlapi` into `sys.modules`,
+`test_overlay_shapes.py` overrides the live source's three PyAV seams, and
+`test_ui_events.py` stands in a fake `EventEmitter` for the monitors.
+`WebUI`'s route list grew two SSE endpoints in 15b, verified only from a
+scratch harness — they belong in this session's scope.
 Subjects: `DetectorMonitor`, `OutputMonitor`,
 `PhaseMonitor`, `ControllerControl`, `NTCIPMonitorApp`, `WebUI`,
 `DiscrepancyEngine.__init__` error handling, `RoutineScheduler`,
@@ -625,11 +598,12 @@ quality comes from `qmin`/`qmax`.
   but the fixture is from 2026-07-15.  If the camera has been re-aimed since,
   shapes will be subtly misplaced — check the file background before trusting
   the overlay.  (Checked once on 2026-07-31: the loops land on the pavement.)
-- **Sampling floor.**  The effective NTCIP detector sampling cycle is
-  ~1.0–1.5 s (CLAUDE.md), and 4a raised `snmp_chunk_size` to 8 without a
-  re-baseline (Item 9C).  The 250 ms UI poll therefore shows detector state
-  changing in steps much coarser than the video.  The page labels this; keep
-  the caveat if you touch the template.
+- **Sampling floor.**  The effective NTCIP detector sampling cycle measured
+  ~0.33 s on intersection 201 after 4a (CLAUDE.md; this note read "1.0–1.5 s"
+  until 2026-08-03, pre-baseline).  Detector state still changes in steps much
+  coarser than the video, and since Item 15 removed the 250 ms poll the
+  sampling cycle is the *whole* of that coarseness.  The page labels this;
+  keep the caveat if you touch the template.
 
 ---
 

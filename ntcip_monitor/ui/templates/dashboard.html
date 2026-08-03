@@ -285,9 +285,10 @@
     </div>
     
     <script>
-        // Update interval (milliseconds)
+        // Fallback poll interval (milliseconds), used only if the SSE stream
+        // is unavailable — see startEvents() below.
         const UPDATE_INTERVAL = 250;
-        
+
         // Initialize phase displays
         function initPhases() {
             const container1_8 = document.getElementById('phases-1-8');
@@ -354,10 +355,13 @@
             }
         }
         
-        // Update display from status data
+        // Update display from status data.
+        //
+        // Accepts both a full snapshot and an SSE delta, which carries only
+        // the categories that changed — hence the `|| {}` on every category.
         function updateDisplay(status) {
             // Update phases
-            for (const [num, state] of Object.entries(status.phases)) {
+            for (const [num, state] of Object.entries(status.phases || {})) {
                 const elem = document.getElementById(`phase-${num}`);
                 if (elem) {
                     elem.className = `phase-circle ${state}`;
@@ -368,7 +372,7 @@
             }
             
             // Update pedestrian signals
-            for (const [num, state] of Object.entries(status.pedestrians)) {
+            for (const [num, state] of Object.entries(status.pedestrians || {})) {
                 const elem = document.getElementById(`pedestrian-${num}`);
                 if (elem) {
                     elem.className = `phase-circle ${state}`;
@@ -377,7 +381,7 @@
             }
 
             // Update overlaps
-            for (const [num, state] of Object.entries(status.overlaps)) {
+            for (const [num, state] of Object.entries(status.overlaps || {})) {
                 const elem = document.getElementById(`overlap-${num}`);
                 if (elem) {
                     elem.className = `phase-circle ${state}`;
@@ -386,7 +390,7 @@
             }
             
             // Update detectors
-            for (const [num, state] of Object.entries(status.detectors)) {
+            for (const [num, state] of Object.entries(status.detectors || {})) {
                 const elem = document.getElementById(`detector-${num}`);
                 if (elem) {
                     elem.className = `detector ${state}`;
@@ -395,7 +399,7 @@
             }
             
             // Update outputs
-            for (const [num, state] of Object.entries(status.outputs)) {
+            for (const [num, state] of Object.entries(status.outputs || {})) {
                 const elem = document.getElementById(`output-${num}`);
                 if (elem) {
                     elem.className = `output ${state}`;
@@ -418,7 +422,44 @@
                 console.error('Error fetching status:', error);
             }
         }
-        
+
+        // Live updates (ROADMAP 15b): the server pushes a change the moment
+        // the SNMP sweep detects it, so the poll below is only a fallback.
+        let pollTimer = null;
+
+        function startPolling() {
+            if (pollTimer !== null) return;
+            fetchStatus();
+            pollTimer = setInterval(fetchStatus, UPDATE_INTERVAL);
+        }
+
+        function stopPolling() {
+            if (pollTimer === null) return;
+            clearInterval(pollTimer);
+            pollTimer = null;
+        }
+
+        function startEvents() {
+            if (!window.EventSource) {
+                startPolling();
+                return;
+            }
+
+            const source = new EventSource('/api/events');
+            // EventSource reconnects on its own, and the server opens every
+            // connection with a full snapshot — so the fallback poll only has
+            // to cover the gap, and onopen retires it again.
+            source.onopen = stopPolling;
+            source.onerror = startPolling;
+            source.onmessage = (event) => {
+                try {
+                    updateDisplay(JSON.parse(event.data));
+                } catch (error) {
+                    console.error('Bad event payload:', error);
+                }
+            };
+        }
+
         // Shared secret for /api/control/*, kept in this browser only.
         const CONTROL_TOKEN_HEADER = '{{ control_token_header|default("X-NTCIP-Control-Token") }}';
         const TOKEN_STORAGE_KEY = 'ntcip_control_token';
@@ -460,9 +501,9 @@
                 tokenField.value = localStorage.getItem(TOKEN_STORAGE_KEY) || '';
             }
 
-            // Start polling
+            // Paint immediately, then let the event stream take over.
             fetchStatus();
-            setInterval(fetchStatus, UPDATE_INTERVAL);
+            startEvents();
         });
     </script>
 </body>
