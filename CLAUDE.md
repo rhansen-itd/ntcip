@@ -118,8 +118,8 @@ a 4-ring silently grows comparisons nobody asked for. Pair generation stays
 link-driven. (Unrelated to NTCIP's 16-channel "detector groups" in
 `system_runner`'s poll planning — same word, different thing.)
 
-Within a group, a `start` fired less than `dedup_window_sec` (config, default
-**1.0**, `0` disables) after the group's last emitted `start` **for the same
+Within a group, a `start` fired less than one **dedup window** after the
+group's last emitted `start` **for the same
 cameras** is not written to the Hot Folder: with triangles, one event where B
 disagrees with both A and C fires on `A:B` and `B:C` on the same tick, two
 clips of one moment burning both writer slots (137 of 523 starts, 26.2 %, on
@@ -146,15 +146,40 @@ Two asymmetries fall out and both are deliberate: **a Rule 1 start is never
 folded into a Rule 2 recording** (a Rule 2 clip's length is fixed at fire time
 and never gets a stop, so it can't be held open — measured cost, 2 of 137
 duplicates on the 2026-08-01 run), and **a Rule 2 duplicate never holds**
-anything open (its pulse is complete before it is even evaluated). Net: of the
-137 same-group starts in that run's window the shipped code suppresses **135
-(25.8 %)** — replaying the log should give 135, not 137. A
+anything open (its pulse is complete before it is even evaluated). A
 derived group spanning more than one `phase` logs a WARNING (transitive
 over-grouping from one stray link); the derived groups are logged at startup
 next to `_pairs`. **The schema lives in three places that must agree** —
 `_build_structures`, `config_manager.py`'s docstring, and
 `__make_gt_export.py:_load_pairs` — since an export covering fewer pairs than
 the run scores every trigger on a missing pair as a false positive.
+
+**The window is per rule, and the Rule 2 half is guarded (2026-08-03, ROADMAP
+14 — load-bearing).** One number can't serve both rules, because the guarantee
+a fold rests on differs: `dedup_window_rule1_sec` (new key, default **10.0** ≈
+`pre_roll + post_roll` here) covers a Rule 1 candidate folding into a Rule 1
+owner, safe at **any** width thanks to the AND-stop above;
+`dedup_window_sec` (**raised 1.0 → 3.0**) covers a Rule 2 candidate, which has
+no lever to hold a clip open and so must pass `_owner_covers_event`. Each key's
+`0` disables **its own path only**. The guard compares in **event
+coordinates** — a clip is `[event_start − pre_roll, that + max_duration_sec]`,
+i.e. what the candidate's own clip would have been — so it asks whether the
+owner's footage reaches at least as far in *both* directions. A Rule 2 owner's
+span is fixed at fire time and rides on `_GroupFire` (`span_start`/`span_end`);
+a Rule 1 owner is judged by **liveness** (`active_trigger_id` still set), and
+one that already stopped is refused (unreachable at the defaults; it exists so
+raising the window in config can't silently lose footage). Both widths are
+measured on clip **containment**, not the fire-time clustering that sized the
+original 1.0 s: median preventable gap 1.62 s, 29 of 38 within 3 s, 35 within
+10 s, three outliers ≥ 38 s left to the disk sweep. Replaying both committed
+decision logs **through the real monitor** (it reproduces the 08-02 run's own
+457 suppression marks 457/457 at the shipped settings, and 135 on 08-01):
+08-02 → **545 of 1553 starts (35.1 %)**, preventing **17 of the 38** contained
+same-group clips; 08-01 → **164 of 523**. The scope predicted 543/170 — the
+08-01 gap is the guard's **start-side** check, which the scope's audit omitted
+and which is load-bearing: even at the old 1.0 s window it refuses 5 folds on
+08-02 and 3 on 08-01 that the shipped runs performed with the pulse partly
+outside the clip.
 
 Two accuracy-critical Rule 2 mechanics (added 2026-07-19, see DESIGN_HISTORY):
 the partner-overlap test runs against `_DetectorState.on_intervals` — a
@@ -409,10 +434,12 @@ rows and aliases deleted clips onto their survivors; classify by the
 trigger-ID prefix in the clip filename instead, which maps 190/190 uniquely):
 **152 (80 %) different-group** — unrelated pairs covering the same approach,
 which only this sweep can catch; **38 (20 %) same-group/different-pair, which
-9C4 should have caught** — `dedup_window_sec` defaults to 1.0 s while the
+9C4 should have caught** — its single `dedup_window_sec` was 1.0 s while the
 median clip is 24.4 s and the sibling pair typically crosses threshold
-1.0–2.3 s later, so same-group starts both record and one ends up nested
-(ROADMAP 14; parameters decided in SCOPE_partner_gate_dedup_window.md); and
+1.0–2.3 s later, so same-group starts both record and one ends up nested. The
+per-rule windows that landed 2026-08-03 (ROADMAP 14, above) prevent **17 of
+those 38** upstream; the rest are Rule 1 folded into a Rule 2 owner (refused by
+design) and three gap outliers ≥ 38 s. And
 **zero same-pair** — the 60 s cooldown spaces same-pair clips further apart
 than a 24.4 s median clip can contain.
 
@@ -700,11 +727,11 @@ them relaxes the rule that the two packages don't import each other.
 
 Seven suites, all **stdlib `unittest`** (pytest is not installed here), one file
 per subject, each runnable directly from any working directory via its own
-`sys.path` bootstrap. 365 cases total as of 2026-08-03:
+`sys.path` bootstrap. 379 cases total as of 2026-08-03:
 
 | Suite | Cases | Subject |
 |---|---|---|
-| `video_engine/tests/test_discrepancy_rules.py` | 154 | rule functions, `_evaluate_pair` integration, decision log, suppression log, sampling-floor + partner sub-floor-activity gates, detector groups + cross-pair duplicate rejection + AND-gated stop, `_resolve_pytz` |
+| `video_engine/tests/test_discrepancy_rules.py` | 168 | rule functions, `_evaluate_pair` integration, decision log, suppression log, sampling-floor + partner sub-floor-activity gates, detector groups + cross-pair duplicate rejection + AND-gated stop + per-rule dedup windows and the Rule 2 coverage guard, `_resolve_pytz` |
 | `video_engine/tests/test_video_cleanup.py` | 44 | clip-name parsing, containment + tolerance, `plan_removals` invariants, log rewrite, scan/sweep (stubbed duration probe) |
 | `video_engine/tests/test_remux_manager.py` | 22 | manager writer/timer bookkeeping (stubbed remuxer) |
 | `video_engine/tests/test_config_manager.py` | 9 | `ConfigProviderError` |

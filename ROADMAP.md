@@ -51,9 +51,17 @@ highest used so far.
 > exactly (08-01 → 98.0 % overall, 08-02 → 95.0 %; those are *projections* from
 > replay, not a new measured run), and 12B is closed as decided-no.
 >
-> **Suggested order:** **14** (the dedup-window gap — SCOPE Item C, the last
-> open piece of that document) → **2** or **3** (self-contained). SCOPE Item D
+> **Item 14 landed 2026-08-03** as well, closing SCOPE Item C and with it the
+> last build item of that document: the dedup window is now per rule
+> (`dedup_window_rule1_sec` 10.0 for Rule 1 → Rule 1, `dedup_window_sec` raised
+> to 3.0 for Rule 2) with a coverage guard on the Rule 2 path. Replayed through
+> the real monitor, suppression goes to 35.1 % of the 08-02 run's starts and
+> prevents 17 of the 38 same-group clips the disk sweep had to delete.
+>
+> **Suggested order:** **2** or **3** (self-contained). SCOPE Item D
 > (the boundary-zone report diagnostic) is optional and needs owner sign-off.
+> **The next owner run is what measures 12A and 14** — both shipped with
+> replay projections only.
 >
 > **Also ready, no hardware:** **10**, and **4e / 4h** (unblocked by 4d).
 >
@@ -132,7 +140,26 @@ theoretical generosity today, and it is reported rather than silent.
 
 ---
 
-## 14 — `dedup_window_sec` (1.0 s) is far shorter than a clip (24 s median) (Target: Opus)
+## 14 — `dedup_window_sec` (1.0 s) is far shorter than a clip (24 s median) — **done 2026-08-03**
+
+**Implemented per SCOPE Item C; the full record is in DESIGN_HISTORY
+(2026-08-03).** The window is now **per rule**: `dedup_window_rule1_sec` (new,
+default 10.0) for a Rule 1 candidate folding into a Rule 1 owner — any width is
+footage-safe because of 9C4's AND-stop — and `dedup_window_sec` (raised 1.0 →
+3.0) for a Rule 2 candidate, which must additionally pass the new
+`_owner_covers_event` coverage guard. Each key's `0` disables its own path only.
+
+Verified by replaying both committed decision logs **through the real
+`DiscrepancyMonitor`** (it reproduces the 08-02 run's own 457 suppression marks
+457/457 at the shipped settings): 08-02 → **545 of 1553 starts (35.1 %)**,
+preventing **17 of the 38** same-group clips the disk sweep had to delete;
+08-01 → **164 of 523**. Two measured departures from the scope's projections
+(543 / 170), both from the guard's **start-side** check, which the scope's audit
+omitted: it is load-bearing, refusing 5 folds on 08-02 and 3 on 08-01 that the
+shipped 1.0 s code performed with the pulse partly outside the clip.
+
+<details>
+<summary>Original item text (kept for context)</summary>
 
 **Re-derivation done 2026-08-03 (Fable) — design and parameters are decided in
 [SCOPE_partner_gate_dedup_window.md](SCOPE_partner_gate_dedup_window.md)
@@ -166,13 +193,16 @@ decisions.
 - [x] Re-check against the 26.2 % duplicate-rate goal: 08-02 replay gives +91
   suppressions (35.0 % of starts), prevents 17 of the 38 contained clips,
   zero uncovered rule-2 windows; 08-01 replay 170 (32.5 %).
-- [ ] Implement per SCOPE Item C (config keys, `_GroupFire.span_end`, guard,
-  8 tests, docstring updates), verify the replay figures, commit.
+- [x] Implement per SCOPE Item C (config keys, `_GroupFire` span, guard,
+  14 tests, docstring updates), verify the replay figures, commit —
+  **done 2026-08-03**.
 
 Suggested prompt:
 > [Opus] In the ntcip project, implement Item C of
 > SCOPE_partner_gate_dedup_window.md (ROADMAP 14): per-rule dedup windows and
 > the rule-2 coverage guard, exactly as scoped.
+
+</details>
 
 ---
 
@@ -252,6 +282,78 @@ Suggested prompt:
 > documentation-only check-off for 12B.
 
 </details>
+
+---
+
+## 15 — Dashboard and overlay responsiveness: SSE push + threaded Flask (Target: Opus)
+
+Both the dashboard (`/`) and overlay (`/overlay`) poll `/api/status` and
+`/api/overlay/state` via HTTP GET every 250 ms (`setInterval`). The SNMP
+sweep cycle is ~0.33 s, so the UI's true latency is ~0.33 s (SNMP) + 0–250 ms
+(poll phase) + browser render — perceptually ~0.5 s average, making detector
+state changes feel sluggish.  The dashboard is hard to use for live detector
+observation because changes appear to "step" with visible delay.
+
+Two independent fixes, both landable in one session:
+
+**15a — `threaded=True` on Flask (one-line fix).**
+`web_ui._run_flask()` calls `flask_app.run()` without `threaded=True`.
+Flask's dev server defaults to single-threaded, so a slow request (MJPEG
+stream, overlay state build) blocks the status poll behind it.  Add
+`threaded=True`.  The existing `_state_lock` / GIL patterns are already
+thread-safe; the overlay's `RtspMjpegSource` is already shared-state by
+design.
+
+**15b — Server-Sent Events for state changes.**
+Replace the 250 ms `setInterval(fetchStatus)` / `setInterval(fetchState)`
+poll loops with an SSE (`EventSource`) connection that pushes delta updates
+the instant the SNMP sweep detects a state change.  This eliminates the
+0–250 ms poll phase entirely.
+
+- **Server side:** new route `/api/events` (open, like `/api/status` — same
+  signal state, different delivery). A Flask SSE generator subscribes to the
+  existing `EventEmitter` callbacks on the detector, phase, and output
+  monitors (`EVENT_DETECTOR_CHANGE`, `EVENT_PHASE_CHANGE`,
+  `EVENT_OUTPUT_CHANGE`) via `.on()`. On each edge it pushes a JSON delta
+  (`{"detectors": {"26": "ACTIVE"}}`) as an SSE `data:` line.  On connect,
+  push a full state snapshot (same as `_build_status()`) so the client starts
+  correct.  Use a `queue.Queue` per connected client; the callback enqueues,
+  the generator dequeues.  Unsubscribe on client disconnect (generator
+  `finally` block calls `.off()`).  The existing `EventEmitter` already calls
+  callbacks outside its lock, so the enqueue is safe.
+- **Client side (dashboard.html + overlay.html):** replace `setInterval` with
+  `new EventSource('/api/events')`.  `onmessage` applies the delta to the
+  existing `updateDisplay()` / shape-status update path.  Fall back to the
+  current poll loop if SSE fails (`onerror` → `setInterval` as today), so the
+  UI still works if the browser doesn't support SSE (all modern browsers do).
+- **Overlay specifics:** the overlay's `fetchState` currently calls
+  `/api/overlay/state`, which resolves shapes.  The SSE delta carries raw
+  phase/detector state; the overlay JS already does shape→status resolution
+  client-side (it maps detector IDs to shape inputs).  Confirm this path
+  works with deltas or push resolved shape status.  The MJPEG stream
+  (`/api/overlay/stream`) is unaffected — it is already a long-lived
+  response.
+- **Security:** `/api/events` follows the same policy as `/api/status` — open
+  (read-only signal state).  It does **not** proxy camera imagery, so it
+  does not need the 4f camera-image interlock.
+
+Expected result: display latency drops from ~0.5 s average to ~0.33 s (the
+SNMP floor) + negligible SSE push time.  Detector state on the dashboard
+changes as fast as the data arrives rather than lagging behind it.
+
+- [ ] 15a: Add `threaded=True` to `flask_app.run()` in `_run_flask()`.
+- [ ] 15b: `/api/events` SSE endpoint with `EventEmitter` subscriptions.
+- [ ] 15b: Dashboard JS: `EventSource` with poll fallback.
+- [ ] 15b: Overlay JS: `EventSource` with poll fallback.
+- [ ] Confirm overlay shape resolution works with delta updates.
+- [ ] DESIGN_HISTORY entry.
+
+Suggested prompt:
+> [Opus] In the ntcip project, do Item 15 of ROADMAP.md: add `threaded=True`
+> to Flask, then replace the 250 ms HTTP polling in both `dashboard.html` and
+> `overlay.html` with a Server-Sent Events endpoint (`/api/events`) that
+> pushes state-change deltas via the existing `EventEmitter` callbacks.
+> Full-state snapshot on connect, delta on edge, poll fallback on error.
 
 ---
 

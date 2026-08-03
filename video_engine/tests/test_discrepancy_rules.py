@@ -1612,7 +1612,7 @@ class TestCrossPairDuplicates(unittest.TestCase):
 
     def test_beyond_the_window_both_fire(self):
         self.fire(self.monitor, "17:2", "2", "17", 1000.0)
-        self.fire(self.monitor, "17:46", "17", "46", 1001.5)
+        self.fire(self.monitor, "17:46", "17", "46", 1004.0)
         self.assertEqual(len(self.triggers()), 2)
         self.assertEqual(
             [r["suppressed_as_duplicate"] for r in self.rows()], ["0", "0"]
@@ -1620,7 +1620,7 @@ class TestCrossPairDuplicates(unittest.TestCase):
 
     def test_boundary_exactly_at_the_window_is_a_duplicate(self):
         self.fire(self.monitor, "17:2", "2", "17", 1000.0)
-        self.fire(self.monitor, "17:46", "17", "46", 1001.0)
+        self.fire(self.monitor, "17:46", "17", "46", 1003.0)
         self.assertEqual(len(self.triggers()), 1)
 
     def test_separate_groups_never_deduplicate_each_other(self):
@@ -1646,8 +1646,8 @@ class TestCrossPairDuplicates(unittest.TestCase):
     def test_suppression_does_not_anchor_the_window(self):
         # Otherwise a storm rolls the window forward and suppresses forever.
         self.fire(self.monitor, "17:2", "2", "17", 1000.0)
-        self.fire(self.monitor, "17:46", "17", "46", 1000.8)   # suppressed
-        self.fire(self.monitor, "2:46", "2", "46", 1001.5)     # 1.5s from 1000
+        self.fire(self.monitor, "17:46", "17", "46", 1002.0)   # suppressed
+        self.fire(self.monitor, "2:46", "2", "46", 1004.0)     # 4.0s from 1000
         self.assertEqual(len(self.triggers()), 2)
         self.assertEqual(
             [r["suppressed_as_duplicate"] for r in self.rows()],
@@ -1661,15 +1661,15 @@ class TestCrossPairDuplicates(unittest.TestCase):
         self.assertEqual(len(self.triggers()), 2)
 
     def test_configured_window_is_honoured(self):
-        monitor = self.build(_RING_TRIANGLE, dedup_window_sec=5.0)
+        monitor = self.build(_RING_TRIANGLE, dedup_window_sec=8.0)
         self.fire(monitor, "17:2", "2", "17", 1000.0)
-        self.fire(monitor, "17:46", "17", "46", 1003.0)
+        self.fire(monitor, "17:46", "17", "46", 1006.0)
         self.assertEqual(len(self.triggers()), 1)
 
     def test_malformed_window_falls_back_to_the_default(self):
         # A typo must not silently restore the duplicate storm.
         monitor = self.build(_RING_TRIANGLE, dedup_window_sec="soon")
-        self.assertEqual(monitor._dedup_window_sec, 1.0)
+        self.assertEqual(monitor._dedup_window_sec, 3.0)
 
     # ── Rule 1: the start/stop pairing (the fiddly part) ─────────────────
 
@@ -1794,6 +1794,195 @@ class TestCrossPairDuplicates(unittest.TestCase):
             sorted(r["suppressed_as_duplicate"] for r in rows), ["0", "1"]
         )
         self.assertEqual(len(self.triggers()), 1)
+
+
+# ---------------------------------------------------------------------------
+# Per-rule dedup windows + the Rule 2 coverage guard (ROADMAP 14)
+# ---------------------------------------------------------------------------
+
+class TestPerRuleDedupWindows(unittest.TestCase):
+    """A Rule 1 fold is held open; a Rule 2 fold must already be on film.
+
+    The windows differ because the guarantee differs, so these cases exercise
+    the two paths independently — and the guard that bounds the Rule 2 one.
+    """
+
+    PRE_ROLL = 5.0
+    POST_ROLL = 5.0
+    THRESHOLD = 5.0
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.log_path = Path(self._tmp.name) / "engine_decisions.csv"
+        self.monitor = self.build()
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def build(self, **extra_cfg):
+        cfg = {
+            "timezone": "UTC",
+            "detectors": {
+                k: _det(v, threshold=self.THRESHOLD)
+                for k, v in (("2", "17"), ("17", "46"), ("46", "2"))
+            },
+        }
+        cfg.update(extra_cfg)
+        monitor = DiscrepancyMonitor(
+            intersection_id="test_int",
+            config_provider=_StubProvider(cfg),
+            trigger_dir=self._tmp.name,
+            cooldown_sec=60.0,
+            pre_roll_sec=self.PRE_ROLL,
+            post_roll_sec=self.POST_ROLL,
+            decision_log_path=self.log_path,
+        )
+        monitor.set_sampling_floor(0.01)
+        return monitor
+
+    def triggers(self):
+        return sorted(Path(self._tmp.name).glob("trigger_*.json"))
+
+    def fire_rule1(self, monitor, pair_key, det_a, det_b, ts):
+        monitor._fire_trigger(
+            pair_key=pair_key, det_a_id=det_a, det_b_id=det_b,
+            rule="rule1_continuous_disagreement", description="test",
+            disagreement_sec=self.THRESHOLD, event_ts=ts, action="start",
+            event_window=(ts - self.THRESHOLD, None),
+        )
+
+    def fire_rule2(self, monitor, pair_key, det_a, det_b, pulse_on, pulse_off):
+        """Fire a Rule 2 orphan exactly as the evaluator would.
+
+        The trigger lands one threshold after the pulse closes, and its clip
+        length is the same arithmetic ``_evaluate_pair`` uses — which is what
+        makes the owner's span, and therefore the guard, meaningful.
+        """
+        monitor._fire_trigger(
+            pair_key=pair_key, det_a_id=det_a, det_b_id=det_b,
+            rule="rule2_orphan_pulse", description="test",
+            disagreement_sec=round(pulse_off - pulse_on, 3),
+            event_ts=pulse_off + self.THRESHOLD, action="start",
+            duration_override=(
+                self.PRE_ROLL + (pulse_off - pulse_on)
+                + self.POST_ROLL + self.THRESHOLD
+            ),
+            event_window=(pulse_on, pulse_off),
+        )
+
+    # ── The Rule 1 path: wide, because the AND-stop holds the clip open ──
+
+    def test_rule1_candidate_eight_seconds_later_is_folded_and_held(self):
+        self.fire_rule1(self.monitor, "17:2", "2", "17", 1000.0)
+        self.fire_rule1(self.monitor, "17:46", "17", "46", 1008.0)
+        self.assertEqual(len(self.triggers()), 1)
+        owner_rt = self.monitor._pair_runtime["17:2"]
+        self.assertEqual(owner_rt.held_pair_keys, ["17:46"])
+
+    def test_a_folded_rule1_start_still_never_arms_its_own_recording(self):
+        # The 9C4 invariant, re-checked at the wider window.
+        self.fire_rule1(self.monitor, "17:2", "2", "17", 1000.0)
+        self.fire_rule1(self.monitor, "17:46", "17", "46", 1008.0)
+        rt = self.monitor._pair_runtime["17:46"]
+        self.assertIsNone(rt.active_trigger_id)
+        self.assertTrue(rt.cooldown_active)
+
+    def test_rule1_into_a_rule2_owner_is_still_refused_at_the_wider_window(self):
+        # dedup_window_rule1_sec must not override the rule-1-into-rule-2
+        # refusal: a fixed-length clip cannot be held open.
+        self.fire_rule2(self.monitor, "17:2", "2", "17", 993.0, 995.0)
+        self.fire_rule1(self.monitor, "17:46", "17", "46", 1008.0)
+        self.assertEqual(len(self.triggers()), 2)
+
+    def test_the_rule1_window_does_not_widen_the_rule2_path(self):
+        # A Rule 2 candidate 8 s after a Rule 1 owner is past its own 3.0 s
+        # window, whatever the Rule 1 window says.
+        self.fire_rule1(self.monitor, "17:2", "2", "17", 1000.0)
+        self.fire_rule2(self.monitor, "17:46", "17", "46", 1001.0, 1003.0)
+        self.assertEqual(len(self.triggers()), 2)
+
+    # ── The Rule 2 path: narrow, and only onto footage that exists ───────
+
+    def test_rule2_fold_inside_a_rule2_owners_fixed_span_is_suppressed(self):
+        # Owner clip spans [988.0, 1005.0] in event coordinates.
+        self.fire_rule2(self.monitor, "17:2", "2", "17", 993.0, 995.0)
+        self.fire_rule2(self.monitor, "17:46", "17", "46", 995.0, 997.0)
+        self.assertEqual(len(self.triggers()), 1)
+
+    def test_a_pulse_ending_past_the_owners_span_is_not_folded(self):
+        # Needed window runs to 1006.0; the owner's clip stops at 1005.0.
+        self.fire_rule2(self.monitor, "17:2", "2", "17", 993.0, 995.0)
+        self.fire_rule2(self.monitor, "17:46", "17", "46", 998.0, 1001.0)
+        self.assertEqual(len(self.triggers()), 2)
+
+    def test_a_pulse_starting_before_the_owners_span_is_not_folded(self):
+        # The owner's clip is anchored on its own event; a candidate whose
+        # pulse began earlier needs footage that clip never bought.
+        self.fire_rule2(self.monitor, "17:2", "2", "17", 993.0, 995.0)
+        self.fire_rule2(self.monitor, "17:46", "17", "46", 990.0, 996.0)
+        self.assertEqual(len(self.triggers()), 2)
+
+    def test_rule2_folds_into_a_rule1_owner_that_is_still_recording(self):
+        self.fire_rule1(self.monitor, "17:2", "2", "17", 1000.0)
+        self.fire_rule2(self.monitor, "17:46", "17", "46", 995.5, 997.5)
+        self.assertEqual(len(self.triggers()), 1)
+
+    def test_rule2_is_not_folded_into_a_rule1_owner_that_has_stopped(self):
+        # Only reachable with the window raised past the owner's own length,
+        # which is exactly why the guard is not optional.
+        monitor = self.build(dedup_window_sec=20.0)
+        self.fire_rule1(monitor, "17:2", "2", "17", 1000.0)
+        owner_id = monitor._pair_runtime["17:2"].active_trigger_id
+        monitor._fire_trigger(
+            pair_key="17:2", det_a_id="2", det_b_id="17",
+            rule="rule1_continuous_disagreement", description="test",
+            disagreement_sec=3.0, event_ts=1003.0, action="stop",
+            trigger_id_override=owner_id,
+        )
+        self.fire_rule2(monitor, "17:46", "17", "46", 1000.0, 1002.0)
+        # start + stop + the candidate's own start
+        self.assertEqual(len(self.triggers()), 3)
+
+    # ── Config ──────────────────────────────────────────────────────────
+
+    def test_defaults_are_three_and_ten(self):
+        self.assertEqual(self.monitor._dedup_window_sec, 3.0)
+        self.assertEqual(self.monitor._dedup_window_rule1_sec, 10.0)
+
+    def test_zero_rule2_window_leaves_the_rule1_path_alone(self):
+        monitor = self.build(dedup_window_sec=0)
+        self.fire_rule2(monitor, "17:2", "2", "17", 993.0, 995.0)
+        self.fire_rule2(monitor, "17:46", "17", "46", 995.0, 997.0)
+        self.assertEqual(len(self.triggers()), 2)
+        self.fire_rule1(monitor, "2:46", "2", "46", 1100.0)
+        self.fire_rule1(monitor, "17:2", "2", "17", 1108.0)
+        self.assertEqual(len(self.triggers()), 3)
+
+    def test_zero_rule1_window_leaves_the_rule2_path_alone(self):
+        monitor = self.build(dedup_window_rule1_sec=0)
+        self.fire_rule1(monitor, "17:2", "2", "17", 1000.0)
+        self.fire_rule1(monitor, "17:46", "17", "46", 1008.0)
+        self.assertEqual(len(self.triggers()), 2)
+        self.fire_rule2(monitor, "2:46", "2", "46", 1093.0, 1095.0)
+        self.fire_rule2(monitor, "17:2", "2", "17", 1095.0, 1097.0)
+        self.assertEqual(len(self.triggers()), 3)
+
+    def test_malformed_rule1_window_falls_back_to_the_default(self):
+        monitor = self.build(dedup_window_rule1_sec="ten")
+        self.assertEqual(monitor._dedup_window_rule1_sec, 10.0)
+
+    def test_reload_picks_up_both_windows(self):
+        self.monitor.reload(_StubProvider({
+            "timezone": "UTC",
+            "detectors": {
+                k: _det(v, threshold=self.THRESHOLD)
+                for k, v in (("2", "17"), ("17", "46"), ("46", "2"))
+            },
+            "dedup_window_sec": 4.0,
+            "dedup_window_rule1_sec": 12.0,
+        }))
+        self.assertEqual(self.monitor._dedup_window_sec, 4.0)
+        self.assertEqual(self.monitor._dedup_window_rule1_sec, 12.0)
 
 
 # ---------------------------------------------------------------------------

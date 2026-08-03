@@ -1,11 +1,18 @@
 # Scope: Partner-blip gate (12A), hysteresis decision (12B), dedup window re-derivation (14)
 
-**Status (2026-08-03):** analysis complete (Fable). **Item A implemented and
-Item B checked off (2026-08-03, Opus)** — the partner gate's offline
-counterfactual reproduced the expected kills exactly (08-01 6 FP + 5 TP,
-08-02 15 FP + 10 TP), as did every alternative row of its parameter table.
-**Item C (ROADMAP 14) is the open implementation work**; Item D is optional and
-awaits owner sign-off.
+**Status (2026-08-03):** analysis complete (Fable). **Items A, B and C are all
+closed (2026-08-03, Opus).** The partner gate's offline counterfactual
+reproduced the expected kills exactly (08-01 6 FP + 5 TP, 08-02 15 FP + 10 TP),
+as did every alternative row of its parameter table. **Item C shipped with two
+measured departures from the projections below** — replayed through the real
+`DiscrepancyMonitor` it gives **545** suppressions on 08-02 and **164** on
+08-01, not 543/170, because the coverage guard is implemented on **both** ends
+of the span while Item C's audit checked only the end; that start-side check
+refuses 6 folds on 08-01 (and 5 on 08-02 even at the old 1.0 s window) whose
+pulse began before the owner's event, so the "zero uncovered" property holds
+only with it. The headline figure the item existed for — 17 of the 38 contained
+same-group clips prevented — reproduces exactly. Item D is optional and awaits
+owner sign-off.
 This document re-derives ROADMAP Items 12 and 14 against the corrected
 post-Item-13 baselines (08-02 overall 94.1 %, rule 1 95.3 %, rule 2 92.8 %;
 08-01 overall 96.9 %) and prescribes exactly what to build. Items A and C are

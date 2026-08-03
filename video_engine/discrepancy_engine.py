@@ -335,8 +335,8 @@ every internal pair, or a 4-ring config would silently grow comparisons nobody
 asked for.  Pair generation stays link-driven.
 
 The rejection itself: immediately before the tmp-write in :meth:`_fire_trigger`,
-a ``start`` whose group fired another ``start`` less than ``dedup_window_sec``
-(config, default 1.0) ago is not written to the Hot Folder.  It is still
+a ``start`` whose group fired another ``start`` less than one dedup window ago
+is not written to the Hot Folder.  It is still
 appended to the decision log, marked with ``suppressed_as_duplicate`` and
 ``duplicate_of_trigger_id``, because it is engine output that ground truth also
 contains twice — dropping the row silently would score the sibling pair's GT
@@ -377,6 +377,36 @@ consequences:
 * Clips get longer, by design.  The buffer's ``max_duration_sec`` safety cap
   (300 s for Rule 1) still bounds them.
 
+**The window is per rule, and the Rule 2 half carries a coverage guard**
+(ROADMAP 14, 2026-08-03).  One number cannot serve both halves, because the
+guarantee a fold rests on is not the same:
+
+* ``dedup_window_rule1_sec`` (default **10.0**) governs a Rule 1 candidate
+  folding into a Rule 1 owner.  The AND-stop above makes *any* width safe —
+  the owner's recording is held open until the folded pair resolves too.
+* ``dedup_window_sec`` (default **3.0**, raised from 1.0) governs a Rule 2
+  candidate, which has no such lever: its pulse is over before it is
+  evaluated, so it is folded only if the owner's footage already contains it.
+  :meth:`DiscrepancyMonitor._owner_covers_event` is that check — the
+  candidate's ``[event_start - pre_roll, event_end + post_roll]`` must sit
+  inside a Rule 2 owner's fixed span (carried on the ``_GroupFire``), or the
+  Rule 1 owner must still be recording (``active_trigger_id`` set).  A Rule 1
+  owner that has already stopped is refused; that is unreachable at the
+  defaults and exists so raising the window in config cannot silently lose
+  footage.
+
+Both widths are measured on clip *containment*, not the fire-time clustering
+that sized the original 1.0 s — see the constants.  Replayed over the
+committed 2026-08-02 decision log (the replay reproduces that run's own 457
+suppression marks 457/457 at the shipped settings), the pair takes suppression
+to **545 of 1553 starts (35.1 %)**, prevents **17 of the 38** same-group clips
+the disk sweep had to delete as contained duplicates, and leaves **zero** Rule
+2 pulse windows uncovered — the guard refusing 5 folds that would have lost
+footage.  On the 2026-08-01 log: 164, up from 135, guard refusing 6.  The
+remaining same-group deletions (Rule 1 into Rule 2 by design, three 38 s+ gap
+outliers) and all 152 different-group ones stay with the disk sweep: this
+narrows its diet, it does not replace it.
+
 One exposure is widened rather than created: a detector stuck ON already holds
 its own Rule 1 recording open indefinitely (the engine sends no ``stop`` until
 the pair agrees again), and the AND now extends that to the held pairs as well.
@@ -397,7 +427,9 @@ lets the 2 rule2→rule1 cases through — replay it and expect 135, not 137.
 All four ``_fire_trigger`` call sites are on the evaluator thread, so the
 group bookkeeping needs no lock.
 
-Setting ``dedup_window_sec`` to ``0`` disables the whole mechanism.
+Setting a window to ``0`` disables its own path only: ``dedup_window_sec: 0``
+still folds Rule 1 into Rule 1, and ``dedup_window_rule1_sec: 0`` still folds
+Rule 2.  Zeroing both disables the mechanism.
 
 Thread-safety contract
 ──────────────────────
@@ -528,22 +560,50 @@ class _GroupFire:
             trigger, so it cannot be held open for a later Rule 1 duplicate;
             the rule is recorded here to make that decision (see
             :meth:`DiscrepancyMonitor._duplicate_within_group`).
+        span_start: Beginning of the clip this trigger buys, in **event
+            coordinates** — ``event_start_ts - pre_roll_sec``.  Set for Rule 2
+            owners only (their length is fixed at fire time); ``None`` for
+            Rule 1, whose span is open-ended and is judged by liveness instead.
+        span_end: End of that span — ``span_start + max_duration_sec``, i.e.
+            ``pulse_end + post_roll + threshold`` for a Rule 2 owner.  ``None``
+            for Rule 1, same reason.
     """
 
     fire_ts: float
     trigger_id: str
     pair_key: str
     rule: str
+    span_start: Optional[float] = None
+    span_end: Optional[float] = None
 
 
 # Seconds after a group's last emitted "start" during which another pair in the
-# same group is treated as a duplicate of it.  1.0 s is measured, not guessed:
-# on the 2026-08-01 run 103 of 523 starts landed on the same group at the
-# *identical* 0.1 s tick and a 1.0 s window caught 137 (26.2 %), while 2.0 s
-# caught 162 and 5.0 s only 181 — the curve is flat after ~1 s, so 1.0 s buys
-# the same-tick storm plus one evaluator cycle of slack without reaching into
-# genuinely separate events.  0 disables the mechanism.
-_DEFAULT_DEDUP_WINDOW_SEC = 1.0
+# same group is treated as a duplicate of it.  **Two windows, because the
+# footage guarantee differs by rule** (ROADMAP 14):
+#
+# * a Rule 1 candidate folded into a Rule 1 owner is safe at any width — the
+#   AND-stop holds the owner's recording open until the folded pair's own
+#   disagreement resolves, so the clip cannot end early;
+# * a Rule 2 candidate is folded into a *fixed* span, so its width is bounded
+#   by the coverage guard rather than by trust.
+#
+# Both values are measured against the committed 2026-08-02 run, on clip
+# *containment* rather than the fire-time clustering that sized the original
+# 1.0 s: of the 38 same-group clips the disk sweep deleted as wholly contained
+# in a sibling's, the inter-start gap median is 1.62 s, 29 are within 3 s and
+# 35 within 10 s.  10.0 (≈ this deployment's pre_roll + post_roll) sits just
+# above the p90 preventable gap; 3.0 is the knee of the histogram, past which
+# extra Rule 2 suppressions buy no further deletions.  The three 38 s+ outliers
+# are deliberately left to the disk sweep — a window that wide would fold
+# genuinely distinct events into one clip.  Either key set to 0 disables its
+# own path only.
+_DEFAULT_DEDUP_WINDOW_SEC = 3.0
+_DEFAULT_DEDUP_WINDOW_RULE1_SEC = 10.0
+
+# Slack on the Rule 2 coverage comparison, so a span that matches to the
+# millisecond is not refused by float representation alone.  Deliberately tiny:
+# this is not a tolerance for "close enough" footage.
+_COVERAGE_EPSILON_SEC = 1e-6
 
 # ---------------------------------------------------------------------------
 # Decision log (ROADMAP 9C1 — see the module docstring)
@@ -1104,8 +1164,13 @@ class DiscrepancyMonitor:
 
     ``dedup_window_sec``
         Seconds after a detector group's last emitted ``"start"`` during which
-        another pair in the same group is rejected as a duplicate of it.
-        Default ``1.0``; ``0`` disables the mechanism.
+        a **Rule 2** candidate from another pair in the same group is rejected
+        as a duplicate of it — subject to the coverage guard.  Default ``3.0``;
+        ``0`` disables the Rule 2 path only.
+    ``dedup_window_rule1_sec``
+        The same window for a **Rule 1** candidate folding into a Rule 1 owner,
+        where the AND-gated stop makes any width footage-safe.  Default
+        ``10.0``; ``0`` disables the Rule 1 path only.
 
     The floor itself is **not** read from config here; it is injected by
     ``system_runner`` via :meth:`set_sampling_floor` (at startup from the
@@ -1169,8 +1234,9 @@ class DiscrepancyMonitor:
         self._sampling_floor_sec = _DEFAULT_SAMPLING_FLOOR_SEC
         self._apply_floor_config()
 
-        # ── Cross-pair duplicate rejection (ROADMAP 9C4) ──────────────────
+        # ── Cross-pair duplicate rejection (ROADMAP 9C4, windows 14) ──────
         self._dedup_window_sec = _DEFAULT_DEDUP_WINDOW_SEC
+        self._dedup_window_rule1_sec = _DEFAULT_DEDUP_WINDOW_RULE1_SEC
         self._apply_dedup_config()
         # (group_id, cameras_key) -> the last START actually written to the Hot
         # Folder.  Written and read only on the evaluator thread, so no lock.
@@ -1212,6 +1278,7 @@ class DiscrepancyMonitor:
                 # over-grouped config is visible without reading the code.
                 "groups": list(self._groups.keys()),
                 "dedup_window_sec": self._dedup_window_sec,
+                "dedup_window_rule1_sec": self._dedup_window_rule1_sec,
                 "algorithm": "co-located-disagreement",
             },
         )
@@ -1293,18 +1360,25 @@ class DiscrepancyMonitor:
         )
 
     def _apply_dedup_config(self) -> None:
-        """Re-read the cross-pair duplicate window from the intersection config.
+        """Re-read the cross-pair duplicate windows from the intersection config.
 
         Called from ``__init__`` and :meth:`reload`.  A malformed or negative
         value falls back to the default rather than disabling the mechanism —
         a typo must not silently restore the duplicate storm.  ``0`` disables
-        it, but only when written as an explicit zero.
+        one path, but only when written as an explicit zero: the two keys are
+        independent, so ``dedup_window_sec: 0`` still leaves Rule 1 folding.
         """
         self._dedup_window_sec = _coerce_non_negative(
             self._intersection_cfg.get(
                 "dedup_window_sec", _DEFAULT_DEDUP_WINDOW_SEC
             ),
             _DEFAULT_DEDUP_WINDOW_SEC,
+        )
+        self._dedup_window_rule1_sec = _coerce_non_negative(
+            self._intersection_cfg.get(
+                "dedup_window_rule1_sec", _DEFAULT_DEDUP_WINDOW_RULE1_SEC
+            ),
+            _DEFAULT_DEDUP_WINDOW_RULE1_SEC,
         )
 
     def set_sampling_floor(self, sec: float) -> None:
@@ -2173,7 +2247,7 @@ class DiscrepancyMonitor:
         group_id    = self._pair_group.get(pair_key, pair_key)
         cameras_key = ";".join(cameras)
         duplicate   = self._duplicate_within_group(
-            action, rule, group_id, cameras_key, event_ts
+            action, rule, group_id, cameras_key, event_ts, event_window
         )
 
         if duplicate is not None:
@@ -2189,7 +2263,11 @@ class DiscrepancyMonitor:
                     "owner_pair_key":          duplicate.pair_key,
                     "rule":                    rule,
                     "cameras":                 cameras,
-                    "dedup_window_sec":        self._dedup_window_sec,
+                    "dedup_window_sec":        (
+                        self._dedup_window_rule1_sec
+                        if rule == "rule1_continuous_disagreement"
+                        else self._dedup_window_sec
+                    ),
                     # True when the owner's stop now waits on this pair too.
                     "held_open_by_owner":      held,
                 },
@@ -2260,9 +2338,24 @@ class DiscrepancyMonitor:
         # forward indefinitely; a "stop" never lands here either, or closing
         # one recording would suppress the next genuine event.
         if action == "start":
+            # A Rule 2 clip's span is fully determined here — the buffer starts
+            # it pre_roll before the event and stops it max_duration_sec later
+            # — so record it for the coverage guard.  Rule 1 leaves it None:
+            # its clip is open-ended and is judged by liveness instead.
+            span_start = span_end = None
+            if rule != "rule1_continuous_disagreement":
+                event_start = event_window[0] if event_window else None
+                # Same fallback as the candidate side of the guard: without an
+                # event window the trigger's own timestamp is the best anchor
+                # available.  Production Rule 2 always supplies one.
+                span_start = (
+                    event_start if event_start is not None else event_ts
+                ) - self._pre_roll_sec
+                span_end = span_start + float(payload["max_duration_sec"])
             self._group_last_fire[(group_id, cameras_key)] = _GroupFire(
                 fire_ts=event_ts, trigger_id=trigger_id,
                 pair_key=pair_key, rule=rule,
+                span_start=span_start, span_end=span_end,
             )
 
         # ── Post-write state management ───────────────────────────────────
@@ -2301,13 +2394,23 @@ class DiscrepancyMonitor:
         group_id: str,
         cameras_key: str,
         event_ts: float,
+        event_window: Optional[Tuple[Optional[float], Optional[float]]] = None,
     ) -> Optional[_GroupFire]:
         """Return the group fire this trigger duplicates, or ``None`` to proceed.
 
         A ``start`` is a duplicate when another pair in the same derived
-        detector group emitted a ``start`` for the same cameras less than
-        ``dedup_window_sec`` ago — the triangle case where one physical event
-        makes B disagree with both A and C (see the module docstring).
+        detector group emitted a ``start`` for the same cameras recently enough
+        — the triangle case where one physical event makes B disagree with both
+        A and C (see the module docstring).  "Recently enough" is **per rule**
+        (ROADMAP 14), because the guarantee a fold rests on is per rule:
+
+        * a **Rule 1** candidate uses ``dedup_window_rule1_sec`` (default
+          10.0).  Any width is footage-safe: the AND-stop holds the owner's
+          recording open until the folded pair's own disagreement resolves.
+        * a **Rule 2** candidate uses ``dedup_window_sec`` (default 3.0) *and*
+          must pass :meth:`_owner_covers_event` — an orphan pulse is over
+          before it is evaluated, so nothing can be held open for it and the
+          owner's footage has to already contain it.
 
         ``stop`` actions are never duplicates: the buffer already holds the
         matching recording, and suppressing the stop would strand it until the
@@ -2334,26 +2437,101 @@ class DiscrepancyMonitor:
                 Part of the key because two pairs in one group that resolve to
                 different cameras cover different footage.
             event_ts: Timestamp the candidate trigger carries.
+            event_window: ``(start_ts, end_ts)`` of the candidate's underlying
+                detector event, used by the Rule 2 coverage guard.  Production
+                Rule 2 always supplies both; a missing element falls back to
+                ``event_ts`` (see :meth:`_owner_covers_event`).
 
         Returns:
             The :class:`_GroupFire` this trigger duplicates, or ``None`` if it
             should be written.
         """
-        if action != "start" or self._dedup_window_sec <= 0.0:
+        if action != "start":
             return None
 
         previous = self._group_last_fire.get((group_id, cameras_key))
         if previous is None:
             return None
 
-        if abs(event_ts - previous.fire_ts) > self._dedup_window_sec:
+        is_rule1 = rule == "rule1_continuous_disagreement"
+        if is_rule1:
+            if previous.rule != "rule1_continuous_disagreement":
+                return None
+            window = self._dedup_window_rule1_sec
+        else:
+            window = self._dedup_window_sec
+
+        if window <= 0.0:
             return None
 
-        if (rule == "rule1_continuous_disagreement"
-                and previous.rule != "rule1_continuous_disagreement"):
+        if abs(event_ts - previous.fire_ts) > window:
+            return None
+
+        if not is_rule1 and not self._owner_covers_event(
+            previous, event_ts, event_window
+        ):
             return None
 
         return previous
+
+    def _owner_covers_event(
+        self,
+        owner: _GroupFire,
+        event_ts: float,
+        event_window: Optional[Tuple[Optional[float], Optional[float]]],
+    ) -> bool:
+        """Does the owner's recording contain the candidate's whole event?
+
+        The Rule 2 half of duplicate rejection has no AND-stop to fall back on
+        — the pulse is already over — so folding one is only safe while the
+        owner's clip provably covers it.  Everything is compared in **event
+        coordinates**: a clip is ``[event_start - pre_roll, that +
+        max_duration_sec]``, which is what the candidate's own clip would have
+        been, so the test is "does the owner's footage reach at least as far,
+        in both directions, as the clip this candidate would have bought".
+
+        Two owner shapes, two arguments:
+
+        * **Rule 2 owner** — its span is fixed at fire time and carried on the
+          :class:`_GroupFire`; compare directly.
+        * **Rule 1 owner** — open-ended, so liveness is the test: while its
+          ``active_trigger_id`` is still set the recording is running and will
+          run at least ``post_roll`` past any future resolution, so a pulse
+          that is already over is inside it by construction.  An owner that has
+          already stopped is refused — unreachable at the default windows (a
+          Rule 1 owner cannot stop within ``dedup_window_sec`` of starting),
+          but raising the window in config must not silently create footage
+          loss.  Same conservative-by-construction posture as
+          ``video_cleanup.plan_removals``.
+
+        Args:
+            owner: The group fire the candidate would be folded into.
+            event_ts: The candidate's trigger timestamp, used as the fallback
+                for a missing event-window element.
+            event_window: The candidate's ``(start_ts, end_ts)``.
+
+        Returns:
+            ``True`` when the fold is footage-safe.
+        """
+        if owner.rule == "rule1_continuous_disagreement":
+            owner_rt = self._pair_runtime.get(owner.pair_key)
+            return (
+                owner_rt is not None
+                and owner_rt.active_trigger_id == owner.trigger_id
+            )
+
+        if owner.span_start is None or owner.span_end is None:
+            return False
+
+        start, end = event_window if event_window else (None, None)
+        needed_start = (
+            start if start is not None else event_ts
+        ) - self._pre_roll_sec
+        needed_end = (end if end is not None else event_ts) + self._post_roll_sec
+        return (
+            needed_start >= owner.span_start - _COVERAGE_EPSILON_SEC
+            and needed_end <= owner.span_end + _COVERAGE_EPSILON_SEC
+        )
 
     def _join_owner_recording(
         self,

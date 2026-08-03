@@ -177,14 +177,29 @@ engine derives **detector groups** as the connected components of the pair
 graph and rejects the second trigger.  Groups are a dedup scope only — they
 never add a comparison.
 
+The window is **per rule**, because the guarantee a fold rests on differs by
+rule: a Rule 1 fold is held open by the owner's AND-gated stop (safe at any
+width), while a Rule 2 fold is only safe while the owner's footage already
+covers the orphan pulse.
+
 ``dedup_window_sec``     float — Seconds after a group's last emitted
-                                 ``"start"`` during which another pair in the
-                                 same group is rejected as a duplicate of it
-                                 (same cameras only).  Default ``1.0``, sized
-                                 from the 2026-08-01 run; ``0`` disables the
-                                 mechanism.  Rejected triggers still appear in
-                                 ``engine_decisions.csv``, marked with
-                                 ``suppressed_as_duplicate``.
+                                 ``"start"`` during which a **Rule 2**
+                                 candidate from another pair in the same group
+                                 is rejected as a duplicate of it (same cameras
+                                 only, and only when the owner's recording
+                                 provably covers the pulse window).  Default
+                                 ``3.0`` — the knee of the 2026-08-02 run's
+                                 clip-containment gap histogram; ``0`` disables
+                                 the Rule 2 path only.
+``dedup_window_rule1_sec``
+                         float — The same window for a **Rule 1** candidate
+                                 folding into a Rule 1 owner.  Default
+                                 ``10.0`` (≈ ``pre_roll + post_roll``, just
+                                 above the p90 preventable gap); ``0`` disables
+                                 the Rule 1 path only.
+
+Rejected triggers still appear in ``engine_decisions.csv``, marked with
+``suppressed_as_duplicate``.
 
 Duplicate-clip cleanup block (optional; ``video_cleanup``)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

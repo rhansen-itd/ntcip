@@ -2194,3 +2194,79 @@ decided. Entries after this point are logged as the decision lands.
   plumb-through/defaults/garbage/reload. Two existing cases were updated for
   the richer return type. ROADMAP 14 (SCOPE Item C) is unaffected and remains
   the next item.
+
+- 2026-08-03 — **ROADMAP 14 implemented: the cross-pair dedup window is now
+  per rule, and the Rule 2 half carries a coverage guard.** Built to
+  `SCOPE_partner_gate_dedup_window.md` Item C. 9C4 shipped one window
+  (`dedup_window_sec`, 1.0 s) for both rules; the 2026-08-02 run showed the
+  median recorded clip is 24.4 s and that same-group clips the disk sweep
+  deleted as *contained* in a sibling's typically start **1.0–2.3 s** after
+  their survivor — just past the window. **Why the answer is two windows and
+  not one bigger number:** the property a fold rests on is not the same for
+  the two rules. A Rule 1 candidate folded into a Rule 1 owner is safe at any
+  width, because 9C4's AND-gated stop holds the owner's recording open until
+  the folded pair's own disagreement resolves. A Rule 2 candidate has no such
+  lever — its pulse is over before it is even evaluated — so widening its
+  window trades footage for writer slots unless something checks that the
+  footage exists. A blanket `pre_roll + post_roll` window would have left 32
+  orphan pulse windows outside the clip they were folded into.
+
+  So: `dedup_window_rule1_sec` (new, default **10.0** ≈ this deployment's
+  `pre_roll + post_roll`, just above the p90 preventable gap of 9.0 s) for
+  Rule 1 → Rule 1, and `dedup_window_sec` (**1.0 → 3.0**, the knee of the
+  containment-gap histogram: 29 of the 38 preventable deletions sit within
+  3 s) for Rule 2, gated by the new `_owner_covers_event`. Each key's `0` now
+  disables **its own path only**. The guard compares in **event coordinates**
+  — a clip is `[event_start − pre_roll, that + max_duration_sec]`, which is
+  what the candidate's own clip would have been, so the question it answers is
+  "does the owner's footage reach at least as far, both ways, as the clip this
+  candidate would have bought". A Rule 2 owner's span is fixed at fire time
+  and is carried on `_GroupFire` (`span_start` / `span_end`); a Rule 1 owner
+  is judged by **liveness** (`active_trigger_id` still set), since an
+  open-ended recording that is still running necessarily contains a pulse that
+  is already over. An owner that has already stopped is refused — unreachable
+  at the defaults, and there precisely so that raising the window in config
+  cannot silently create footage loss, the same conservative-by-construction
+  posture as `video_cleanup.plan_removals`. The sizing comment on the window
+  constant was rewritten: the old "curve flattens after ~1 s" observation
+  counted *fire-time clustering*, and clip *containment* is the number that
+  actually matters.
+
+  **Verification replayed both committed decision logs through the real
+  `DiscrepancyMonitor`** — every logged trigger re-offered to `_fire_trigger`
+  in order, so what is measured is the shipped code path, not a model of it.
+  At the shipped 9C4 settings the replay reproduces the 2026-08-02 run's own
+  457 suppression marks exactly (457/457) and the documented 135 on 2026-08-01,
+  which is what makes the new numbers comparable. At the new defaults: 08-02
+  goes to **545 of 1553 starts (35.1 %)**, +93 newly suppressed, and prevents
+  **17 of the 38** same-group clips the sweep had to delete — matching the
+  scope's prediction on the number that was the point of the item. 08-01 goes
+  to **164 of 523 (31.4 %)**, from 135. ~93 fewer clips is ~37 min of writer
+  occupancy returned against a 20.0 % delivery loss.
+
+  Two measured corrections to the scope's projections, both from the guard's
+  **start-side** check. The scope predicted 543 / 170; the shipped code gives
+  545 / 164, and the 08-01 gap is the six folds whose pulse *began before the
+  owner's event* — the scope's audit checked only the end of the window, so
+  its "zero uncovered" claim holds only with the start check included. That
+  check is therefore load-bearing, not decoration: at the **old** 1.0 s window
+  it already refuses 5 folds on 08-02 and 3 on 08-01 that the shipped runs
+  performed, i.e. the guard corrects a small pre-existing footage-loss
+  population as well as bounding the new one. The sweep-log classification was
+  re-derived by trigger-ID prefix (never a filename join) and reproduces
+  **152 different-group / 38 same-group / 0 same-pair** exactly.
+
+  The remaining same-group deletions stay with the disk sweep by design: Rule
+  1 folded into a Rule 2 owner is still refused (a fixed-length clip cannot be
+  held open), and the three 38 s–243 s gap outliers are left alone because a
+  window that wide would fold genuinely distinct events into one clip. This
+  item narrows the sweep's diet; it does not replace it — all 152
+  different-group deletions are reachable by nothing else.
+
+  Tests: +14 cases in `test_discrepancy_rules.py` (168 total, 379 across the
+  seven suites) covering both windows, the rule-1-into-rule-2 refusal at the
+  wider width, both guard bounds against a Rule 2 owner, both liveness
+  outcomes against a Rule 1 owner, each key's independent `0`, defaults,
+  garbage-value fallback and reload. Four existing 9C4 cases had their
+  timestamps or expected default widened — the semantics they pin are
+  unchanged.
