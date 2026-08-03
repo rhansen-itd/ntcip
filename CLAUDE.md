@@ -209,24 +209,33 @@ invents misses — the cheap way to tell which config a run used is the set of
 `_intersections.json`, 17 pairs, **not** `video_engine/intersections.json`,
 which defines 5).
 
-**Every recorded precision figure is a floor, because the matcher scores
-mid-event triggers as false positives (2026-08-03, ROADMAP 13 —
-load-bearing).** `_match` compares a trigger's fire time against the GT
-anomaly's **start** (±`--tolerance`, 3.0 s). A rule 1 trigger that fires
-*inside* a long disagreement — after a cooldown, or picking it up part-way —
-is counted a false positive even though the engine caught the event; the
-durations line up exactly. On the 2026-08-02 run **62 of 135 listed FPs (46 %)
-fall inside a GT window on the same pair** (median fire lag 27 s past GT
-start). Correcting for it: 91.3 % → **95.3 %** (08-02) and 96.5 % → **97.5 %**
-(08-01). The artifact is volume-dependent, so it does **not** cancel between
-runs — don't compare two runs' precision until Item 13 lands.
+**The matcher matches on start alignment *and* containment (2026-08-03,
+ROADMAP 13 — load-bearing).** `_match` originally compared only the trigger's
+event start against the GT anomaly's **start** (±`--tolerance`, 3.0 s). Rule 1
+does not always observe a disagreement from its beginning: after a cooldown,
+or picking one up part-way, `event_start_ts` lands mid-event while ground
+truth records the whole thing as one long `extended_disagreement` — so the
+trigger scored as a phantom despite the engine having caught the event, with
+the two durations agreeing exactly. A second pass now matches a trigger whose
+event start falls inside `[gt.start − tol, gt.end + tol]`. On the 2026-08-02
+run that recovered **44 of 135 apparent FPs**, the engine's start sitting a
+median **38 s** past the GT start. The bias is **volume-dependent** — 2.8
+points over 11.9 h against 0.4 over 3.75 h — so pre-2026-08-03 precision
+figures are floors and are **not** comparable across runs of different length.
+
+Pass 1 (start-aligned) stays one-to-one; pass 2 (containment) allows
+many-to-one, because a long disagreement the engine re-fires inside really does
+correspond to several triggers. That allowance is reported, not hidden — and on
+both committed runs it was never exercised (all 44 and all 2 landed on distinct
+GT events), so it is currently a theoretical generosity, not a live one.
 
 Last measured **2026-08-02** (11.9 h, 1553 starts, 3× the prior sample):
-overall precision 91.3 % as reported / ~95.3 % corrected, rule 2 92.8 %,
-adjusted recall 87.6 %, writer-cap delivery loss 20.0 % (down from 33.6 %).
-2026-08-01 (ROADMAP 9C2, high-duty, 3.75 h): 96.5 % / ~97.5 % corrected, rule 2
-96.3 %, adjusted recall 86.2 %, zero stale-refire phantoms — all four §Item C
-criteria passed. Artifacts for both runs are committed
+overall precision **94.1 %**, rule 1 95.3 %, rule 2 92.8 %, adjusted recall
+88.3 %, writer-cap delivery loss 20.0 % (down from 33.6 %).
+2026-08-01 (ROADMAP 9C2, high-duty, 3.75 h): **96.9 %**, rule 1 97.5 %, rule 2
+96.3 %, adjusted recall 86.3 %, zero stale-refire phantoms — all four §Item C
+criteria passed. (Both figures pre-13 were 91.3 % and 96.5 %.) Artifacts for
+both runs are committed
 (`engine_decisions_*`, `engine_suppressions_*`, `discrepancies_log_*`,
 `banks_events_*`, `gt_anomalies_*`, plus `video_cleanup_log_20260802.csv`).
 The superseded 2026-07-31 figures (89.4 % / 59.9 %) were read off the
@@ -256,8 +265,9 @@ Uncorrected, a skew larger than `--tolerance` drags overall precision to
 **11.6 %** — a collapse that looks like a catastrophic engine regression and is
 not one. The tell: every candidate false positive reports nearly the *same*
 `nearest GT Δ`, while the per-pair table still shows healthy trigger and GT
-counts on the same pairs. (Contrast the ROADMAP 13 matcher defect, whose FPs
-show *scattered* deltas — median 117.9 s on 08-02, only 1 of 135 inside 5 s.)
+counts on the same pairs. (Contrast the ROADMAP 13 matcher defect, fixed
+2026-08-03, whose FPs showed *scattered* deltas — median 117.9 s on 08-02,
+only 1 of 135 inside 5 s.)
 
 Measure the skew from engine-observed detector edges (`engine_suppressions.csv`
 and rule-2 rows of `engine_decisions.csv` carry exact Unix ON/OFF windows)

@@ -1939,17 +1939,25 @@ decided. Entries after this point are logged as the decision lands.
   (pair, type)" with `diff <= tolerance` (3.0 s). The engine's rule 1 does not
   necessarily fire at the disagreement's start: after a cooldown, or when it
   picks the disagreement up mid-run, it fires deep inside an event that ground
-  truth records as a single long anomaly. On this run **62 of the 135 listed
-  FPs (46 %) fall inside a GT anomaly window on the same pair**, median fire
-  lag 27 s past GT start, p90 55 s, max 64 s — and the durations match
+  truth records as a single long anomaly. On this run **44 of the 135 listed
+  FPs fall inside a GT anomaly window on the same pair**, the engine's own
+  `event_start_ts` sitting a median 38 s past the GT start, p90 58 s, max 65 s
+  — and the durations match
   exactly (engine measures a 62.9 s mismatch; the GT row is a 62.9 s
-  `extended_disagreement` starting 53 s earlier). Counting a fire time inside
-  `[gt_start − tol, gt_end + tol]` as a match gives **91.3 % → 95.3 %** on
-  08-02 and **96.5 % → 97.5 %** on 08-01. The artifact is volume-dependent —
-  it costs 4.0 points on a 12 h Sunday against 1.0 on a 3.75 h Saturday,
+  `extended_disagreement` starting 53 s earlier). Counting an event start inside
+  `[gt_start − tol, gt_end + tol]` as a match gives **91.3 % → 94.1 %** on
+  08-02 and **96.5 % → 96.9 %** on 08-01. *(Figures corrected later the same
+  day, when Item 13 was implemented and the patched tool reported the real
+  numbers: this paragraph first read 62 / 46 % / 95.3 % / 97.5 %, computed
+  without respecting the matcher's `(pair, type)` scoping — it counted rule 2
+  orphan triggers landing inside rule 1 disagreement windows, which is a
+  different claim, not a match. 44 is the type-respecting figure. The
+  correction is recorded rather than silently applied because the wrong numbers
+  were committed and pushed in `57a1359`.)* The artifact is volume-dependent —
+  it costs 2.8 points on a 12 h Sunday against 0.4 on a 3.75 h Saturday,
   because long disagreements are what it mis-scores — so it is *not* a
   constant that cancels between runs, and every precision figure recorded
-  before today is a floor. Fixing the matcher is now ROADMAP 13 and gates 12.
+  before today is a floor. Fixing the matcher is ROADMAP 13, done the same day.
 
   **Ruled out, in order, before landing on the matcher** (recorded so nobody
   re-runs them): clock skew — the FP nearest-GT deltas are median 117.9 s with
@@ -2003,3 +2011,51 @@ decided. Entries after this point are logged as the decision lands.
   `gt_anomalies_20260802_0930-2229.csv`, `engine_decisions_20260802.csv`,
   `engine_suppressions_20260802.csv`, `discrepancies_log_20260802.csv`, and
   `video_cleanup_log_20260802.csv` (the first committed cleanup log).
+
+- 2026-08-03 — **ROADMAP 13 landed: `__accuracy_report.py` matches on start
+  alignment *and* window containment.** `_match` gains a second pass — a
+  trigger whose `event_start_ts` falls inside `[gt.start − tol, gt.end + tol]`
+  on the same `(pair, type)` now counts as a match. Recovered **44 of the
+  2026-08-02 run's 135 false positives** and 2 of 2026-08-01's: overall
+  precision **91.3 % → 94.1 %** and **96.5 % → 96.9 %**, rule 1 90.0 % →
+  95.3 %, adjusted recall 87.6 % → 88.3 %.
+
+  **Pass 1 is untouched**, deliberately: start-aligned candidates are still
+  collected globally and assigned smallest-difference-first, one-to-one, so
+  every row that matched before still matches the same event. Containment runs
+  only over what pass 1 left unmatched. The 2026-07-31 legacy-format artifacts
+  consequently score **identically** (89.4 %), preserving the guarantee
+  CLAUDE.md makes about them; the 08-01 legacy path moved 96.8 % → 97.1 %,
+  which is the fix working rather than drift.
+
+  **Two judgement calls, both recorded because they are easy to get wrong.**
+  *Type scoping was kept.* A rule 2 orphan claim landing inside a rule 1
+  disagreement window is a different assertion about the world, not a late
+  match, so containment is scoped to `(pair, gt_type)` exactly as start
+  alignment is. A first count of 62 that ignored this was wrong and was
+  committed in `57a1359` before the patch produced the real number; 44 is the
+  type-respecting figure and the earlier entry has been corrected in place with
+  a note. *Pass 2 allows many-to-one where pass 1 does not.* A 120 s
+  disagreement the engine re-fires inside genuinely corresponds to several
+  triggers, each of which observed a real disagreement — whereas two triggers
+  aligned on the same GT *start* are competing to describe one instant, where
+  one is a redundant detection. The generosity is bounded and visible: the
+  count is returned from `_match`, printed in the PRECISION block alongside how
+  many distinct GT events the contained matches landed on, and on **both**
+  committed runs every contained match landed on its own event (44 of 44, 2 of
+  2), so the many-to-one path has never actually fired. Redundant clips are
+  measured elsewhere anyway (9C4, the cleanup sweep, the DELIVERY section).
+
+  **What this does to Item 12.** All 44 recovered triggers are rule 1. Before
+  the fix rule 1 looked like the larger FP source on 08-02 (83 vs 52),
+  inverting the 08-01 ordering that made 12A the priority; after it, rule 1 has
+  39 real FPs against rule 2's 52, so **12A is once again the higher-value
+  item** and 12B's evidence base shrank by more than half. Both sub-items still
+  need re-deriving against 94.1 % / 96.9 % baselines before anything is
+  implemented — that was the point of gating them.
+
+  Verified against an oracle computed independently of the tool, from the raw
+  decision log and GT export, before the patch was written: it predicted 44 and
+  94.1 % / 96.9 %, and the patched tool reported exactly that. All output paths
+  (`--verbose` FP listing, per-pair table, DELIVERY cross-reference) exercised
+  on the 08-02 artifacts.

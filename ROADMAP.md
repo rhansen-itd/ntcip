@@ -37,22 +37,19 @@ highest used so far.
 > questions the previous status block was holding open, and surfaced a
 > measurement defect that now gates the rule work.
 >
-> **Read this before trusting any precision figure in this file.**
-> `__accuracy_report.py` matches a trigger to ground truth on **GT start time
-> only** (±`--tolerance`, default 3.0 s). A rule 1 trigger that fires *mid-event*
-> — after a cooldown, or picking a disagreement up part-way — is scored a false
-> positive even though the engine caught it. **62 of the 08-02 run's 135 listed
-> FPs (46 %) fall inside a GT anomaly window on the same pair**, median fire lag
-> 27 s past GT start. Counting window containment as a match gives **91.3 % →
-> 95.3 %** (08-02) and **96.5 % → 97.5 %** (08-01). The artifact is
-> volume-dependent, so it does *not* cancel between runs: **every precision
-> number recorded before 2026-08-03 is a floor.** That is **Item 13**, and it
-> gates **12**.
+> **Item 13 landed 2026-08-03**, and it moved every precision figure.
+> `__accuracy_report.py` had matched a trigger to ground truth on GT *start*
+> alone, scoring a rule 1 trigger that picks a disagreement up mid-event as a
+> false positive. Adding a containment pass recovered **44 of the 08-02 run's
+> 135 FPs** and **2 of 08-01's**: precision is now **94.1 %** (08-02) and
+> **96.9 %** (08-01). The old bias was volume-dependent, so **any precision
+> number quoted from before 2026-08-03 is a floor and is not comparable across
+> runs of different length** — re-score rather than cite.
 >
-> **Suggested order:** **13** (fix the matcher, re-score both committed runs) →
-> **12** (re-derive both sub-items against corrected numbers; 12A's sizing and
-> 12B's "probably don't" verdict were both computed on the uncorrected data) →
-> **14** (the dedup-window gap) → **2** or **3** (self-contained).
+> **Suggested order:** **12** (re-derive both sub-items against the corrected
+> numbers; 12A's sizing and 12B's "probably don't" verdict were both computed
+> on the uncorrected data) → **14** (the dedup-window gap) → **2** or **3**
+> (self-contained).
 >
 > **Also ready, no hardware:** **10**, and **4e / 4h** (unblocked by 4d).
 >
@@ -97,50 +94,37 @@ highest used so far.
 
 ---
 
-## 13 — `__accuracy_report.py` scores mid-event triggers as false positives (Target: Opus)
+## 13 — Accuracy matcher scored mid-event triggers as FPs — **done 2026-08-03**
 
-**Prerequisite for Item 12.** `_match` is documented as "one-to-one
-nearest-*start* matching per (pair, type)" and tests `abs(trigger.start_ts −
-gt.start) <= tolerance`. The engine's rule 1 does not always fire at a
-disagreement's start: after a cooldown, or when it picks the disagreement up
-part-way, it fires deep inside an event that ground truth records as one long
-`extended_disagreement`. The trigger is then counted a false positive despite
-the engine having caught the event — the durations line up exactly (engine
-measures a 62.9 s mismatch; the GT row is a 62.9 s anomaly starting 53 s
-earlier).
+`_match` compared only the trigger's event start against the GT anomaly's
+start (±`--tolerance`). Rule 1 does not always observe a disagreement from its
+beginning — after a cooldown, or picking one up part-way, `event_start_ts`
+lands mid-event while ground truth records one long `extended_disagreement` —
+so the trigger scored as a phantom despite the engine having caught the event.
+A second containment pass now matches a trigger whose event start falls inside
+`[gt.start − tol, gt.end + tol]`.
 
-Sized on the committed artifacts:
-
-| Run | Listed FPs | Inside a GT window | Precision → corrected |
+| Run | FPs before | Recovered | Precision |
 |---|---|---|---|
-| 2026-08-02 | 135 | **62 (46 %)** | 91.3 % → **95.3 %** |
-| 2026-08-01 | 18 | 5 (28 %) | 96.5 % → **97.5 %** |
+| 2026-08-02 | 135 | **44** | 91.3 % → **94.1 %** |
+| 2026-08-01 | 18 | 2 | 96.5 % → **96.9 %** |
 
-Median fire lag past GT start on 08-02 is 27 s (p90 55 s, max 64 s). The
-artifact is **volume-dependent** — 4.0 points on a 12 h run against 1.0 on a
-3.75 h one — so it does not cancel between runs, and every precision figure
-recorded before 2026-08-03 is a floor.
+Median engine-start lag past GT start on 08-02: **38 s** (p90 58 s, max 65 s).
+The bias is volume-dependent (2.8 points over 11.9 h vs 0.4 over 3.75 h), so
+pre-fix figures are floors and are not comparable across runs of different
+length. Rule 1 precision on 08-02 went 90.0 % → 95.3 %; adjusted recall
+87.6 % → 88.3 %. The 2026-07-31 legacy-format artifacts score **identically**
+(89.4 %), preserving that guarantee; the 08-01 legacy path moved 96.8 % →
+97.1 %.
 
-- [ ] Match a trigger when its fire time falls within
-  `[gt.start − tolerance, gt.end + tolerance]`, keeping the existing
-  one-to-one constraint and the per-(pair, type) scoping. Prefer the
-  earliest-starting eligible GT event so a long anomaly can't steal a match
-  from a short one it encloses.
-- [ ] Keep nearest-start as the tiebreak among candidates, and keep
-  `nearest_diff` reporting for genuinely unmatched rows.
-- [ ] Decide explicitly whether one long GT anomaly may absorb **several**
-  triggers (the engine legitimately re-fires after cooldown inside a 120 s
-  disagreement). One-to-one currently forces all but the first to be FPs; that
-  is arguably also wrong, but it is a separate call from this fix — record
-  whichever way it goes.
-- [ ] Re-score both committed runs and update the figures in CLAUDE.md,
-  ROADMAP and DESIGN_HISTORY that were measured on the old matcher.
-
-Suggested prompt:
-> [Opus] In the ntcip project, do Item 13 of ROADMAP.md: fix
-> `__accuracy_report.py`'s matcher to count a trigger whose fire time falls
-> inside a GT anomaly window as a match, then re-score the committed
-> 2026-08-01 and 2026-08-02 artifacts and update the recorded figures.
+Two things worth knowing if this is revisited. **Type scoping was kept** — a
+rule 2 orphan claim landing inside a rule 1 disagreement window is a different
+claim, not a match; an early count of 62 that ignored this was wrong, and 44 is
+the type-respecting figure. **Pass 2 allows many-to-one** (pass 1 stays
+one-to-one): a long disagreement the engine re-fires inside genuinely
+corresponds to several triggers. On both committed runs that allowance was
+never exercised — all 44 and all 2 landed on distinct GT events — so it is a
+theoretical generosity today, and it is reported rather than silent.
 
 ---
 
@@ -176,11 +160,13 @@ already couples the folded pair's resolution to the owner's.
 
 ## 12 — Two rule-level accuracy findings from the 9C re-baseline (Target: Opus)
 
-**Blocked on Item 13** — both sub-items were sized on precision figures the
-matcher defect understates, and 46 % of the FP population they reason about
-turned out to be mis-scored matches. Re-derive both against corrected numbers
-before implementing either; the shape of each argument may survive, but the
-sizing will not.
+**Unblocked — Item 13 landed 2026-08-03.** Both sub-items were sized on
+precision figures the old matcher understated, and 44 of the 08-02 FP
+population they reason about turned out to be mis-scored matches — all of them
+rule 1, which is exactly what 12B argues about. Re-derive both against the
+corrected numbers before implementing either; the shape of each argument may
+survive, but the sizing will not. Current baselines to beat: 08-02 overall
+94.1 % (rule 1 95.3 %, rule 2 92.8 %), 08-01 overall 96.9 %.
 
 Both were surfaced by Item 9's measurement work and re-measured on the
 2026-08-01 high-duty run; Item 9 itself is closed (see DESIGN_HISTORY,
@@ -189,8 +175,10 @@ measurement is settled" gate is open — these are the rule changes it was
 holding back. They are independent of each other.
 
 **What the 2026-08-02 run changed about each** (see DESIGN_HISTORY 2026-08-03):
-rule 1 is now the larger raw FP source (83 vs 52), inverting 08-01's ordering —
-but 47 of those 83 fall inside a GT window and are Item 13's, not real. Pair
+rule 1 looked like the larger raw FP source (83 vs 52), inverting 08-01's
+ordering — but **44 of those 83 were Item 13's mis-scoring**, leaving rule 1
+with 39 real FPs against rule 2's 52, so 08-01's ordering stands after all and
+**12A is once again the higher-value item**. Pair
 26:33 was **50.0 % precision on 08-01** (7/14) and *improved* to 62.2 % on
 08-02, the day its phase gained the most volume, which weakens "high duty
 drives its FPs". Volume change vs precision change across all 17 pairs is

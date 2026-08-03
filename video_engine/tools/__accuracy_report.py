@@ -124,6 +124,9 @@ class EngineTrigger:
     # refire bug (fixed 2026-07-19) re-firing on unchanged detector state.
     stale_refire: bool = False
     recorded: Optional[bool] = None  # set only when --recording-log is given
+    # ROADMAP 13: matched because the trigger's event start fell inside a GT
+    # anomaly window, not because it aligned with that window's start.
+    matched_by_containment: bool = False
     # ROADMAP 9C4: formed, scored, but never written to the Hot Folder because
     # a sibling pair in the same detector group had just fired.
     dedup_suppressed: bool = False
@@ -387,19 +390,50 @@ def _match(
     triggers: List[EngineTrigger],
     gt_events: List[GTEvent],
     tolerance: float,
-) -> None:
-    """One-to-one nearest-start matching per (pair, type).
+) -> int:
+    """Match per (pair, type) by start alignment first, then by containment.
 
-    All within-tolerance (trigger, event) candidate pairs are collected and
-    assigned globally smallest-difference-first, so a later trigger is never
-    starved of its own nearby event by an earlier trigger grabbing it (the
-    early-cooldown-reset path legitimately produces same-pair triggers only
-    seconds apart).
+    Two correspondences count as a match, applied in that order:
+
+    * **Start-aligned** (pass 1, unchanged) — ``|gt.start - trig.start_ts| <=
+      tolerance``.  All such candidate pairs are collected and assigned
+      globally smallest-difference-first, one-to-one, so a later trigger is
+      never starved of its own nearby event by an earlier trigger grabbing it
+      (the early-cooldown-reset path legitimately produces same-pair triggers
+      only seconds apart).
+
+    * **Contained** (pass 2, ROADMAP 13) — the trigger's event start falls in
+      ``[gt.start - tolerance, gt.end + tolerance]``.  Rule 1 does not always
+      observe a disagreement from its beginning: after a cooldown, or when it
+      picks one up part-way, ``event_start_ts`` lands mid-event while ground
+      truth records the whole thing as one long ``extended_disagreement``.  On
+      the 2026-08-02 run that was 44 of 135 apparent false positives, the
+      engine's start sitting a median 38 s past the GT start, with the two
+      durations agreeing exactly.  Scoring those as phantoms understates
+      precision by an amount that grows with run length (4.0 points over
+      11.9 h against 0.4 over 3.75 h), so it does not cancel between runs.
+
+    A contained match may be **many-to-one**: a 120 s disagreement the engine
+    re-fires inside legitimately corresponds to several triggers, and each of
+    them did detect a real disagreement.  Pass 1 stays one-to-one because two
+    triggers aligned on the same GT *start* are competing to describe the same
+    instant, where one of them is a redundant detection rather than an
+    independent observation.  The redundancy that many-to-one lets through is
+    not hidden: it is returned as ``extra`` and reported, and the delivery cost
+    of duplicate clips is already measured separately (9C4, the cleanup sweep).
+
+    Ground-truth events are marked ``matched`` for recall regardless of how
+    many triggers landed on them, so recall counts each event once.
+
+    Returns:
+        The number of triggers matched by containment rather than start
+        alignment (the ``extra`` figure above).
     """
     by_key: Dict[Tuple[Tuple[str, str], str], List[GTEvent]] = {}
     for e in gt_events:
         by_key.setdefault((e.pair, e.gt_type), []).append(e)
 
+    # ── Pass 1: start-aligned, one-to-one ────────────────────────────────
     within: List[Tuple[float, EngineTrigger, GTEvent]] = []
     for trig in triggers:
         candidates = by_key.get((trig.pair, _ENGINE_TO_GT_TYPE[trig.rule]), [])
@@ -416,6 +450,30 @@ def _match(
             trig.matched_gt = e
             e.matched_by = trig
             e.category = "matched"
+
+    # ── Pass 2: containment, many-to-one ─────────────────────────────────
+    contained = 0
+    for trig in triggers:
+        if trig.matched_gt is not None:
+            continue
+        candidates = by_key.get((trig.pair, _ENGINE_TO_GT_TYPE[trig.rule]), [])
+        enclosing = [
+            e for e in candidates
+            if e.start - tolerance <= trig.start_ts <= e.end + tolerance
+        ]
+        if not enclosing:
+            continue
+        # Earliest-starting enclosing event, so a long anomaly cannot steal a
+        # trigger from a shorter one nested inside it.
+        e = min(enclosing, key=lambda ev: ev.start)
+        trig.matched_gt = e
+        trig.matched_by_containment = True
+        if e.matched_by is None:
+            e.matched_by = trig
+        e.category = "matched"
+        contained += 1
+
+    return contained
 
 
 def _suppression_windows(
@@ -547,7 +605,7 @@ def main() -> int:
         print(f"  {_fmt_ts(lo, tz)} – {_fmt_ts(hi, tz)} "
               f"({(hi - lo) / 60.0:.1f} min)")
 
-    _match(triggers, gt_events, args.tolerance)
+    contained_matches = _match(triggers, gt_events, args.tolerance)
     windows = _suppression_windows(triggers, args.cooldown, args.post_roll)
 
     # ── Categorize ground-truth events ───────────────────────────────────
@@ -600,6 +658,16 @@ def main() -> int:
           f"{len(tp) / len(triggers):.1%}" if triggers else "  (no triggers)")
     print(f"  rule1:   {_rule_stats('rule1_continuous_disagreement', 'extended_disagreement')}")
     print(f"  rule2:   {_rule_stats('rule2_orphan_pulse', 'isolated_pulse')}")
+    if contained_matches:
+        shared = len({id(t.matched_gt) for t in tp if t.matched_by_containment})
+        print(f"  {contained_matches} matched by CONTAINMENT — the trigger's event "
+              f"start fell inside a GT")
+        print(f"  anomaly window rather than aligning with its start "
+              f"(engine picked the event up")
+        print(f"  mid-flight, e.g. after a cooldown). They land on "
+              f"{shared} distinct GT events, so")
+        print(f"  {contained_matches - shared} are re-fires inside an event "
+              f"another trigger already matched.")
     if phantoms:
         projected_n = len(triggers) - len(phantoms)
         print(f"  {len(phantoms)} triggers are stale-refire phantoms "
