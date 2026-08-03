@@ -2120,3 +2120,77 @@ decided. Entries after this point are logged as the decision lands.
   17 of the 38 contained clips prevented, zero uncovered windows; 170
   (32.5 %) on 08-01. The sweep keeps the rest (152 different-group by
   construction, plus outliers) — its diet narrows, it is not replaced.
+
+- 2026-08-03 — **ROADMAP 12A implemented: Rule 2 gains a partner
+  sub-floor-activity gate; 12B closed as decided-no (documentation only).**
+  Built exactly to `SCOPE_partner_gate_dedup_window.md` Item A. The floor gate
+  (ROADMAP 9) bounds the *orphan's* side of Rule 2; this bounds the
+  **partner's**, from the same principle — the engine must not treat partner
+  silence as evidence when that partner has been producing pulses below the
+  engine's own resolution. **Why a statistical signal rather than a check at
+  event time:** the separating variable (a 0.1–0.4 s partner blip) is by
+  definition invisible to the sampler at the moment of the event; the
+  engine-visible-pulse test already exists in the rule and kills 0–2 of these
+  FPs. What *is* visible is the partner's recent history of blips — and the
+  engine already collects it, once per candidate the floor gate declines.
+
+  Mechanics: `_DetectorState` gains `below_floor_pulses`, a deque of the
+  `(on_ts, off_ts)` windows that detector's own pulses were declined at,
+  appended by the caller of `_maybe_register_orphan` (deduped against the
+  deque's tail, because a triangle declines one physical pulse once per pair)
+  and pruned to `partner_blip_window_sec` next to `on_intervals`. It is the
+  **one field on `_DetectorState` not guarded by its lock** — both the write
+  and the read are on the evaluator thread, and the docstring says so
+  explicitly rather than leaving the class invariant quietly violated. The
+  gate itself sits in `_maybe_register_orphan`, **strictly after** the floor
+  gate: a below-floor pulse must always be counted and reported as
+  `below_sampling_floor`, so the two populations stay disjoint and both counts
+  keep meaning something. Config (intersection level, read where
+  `min_pulse_floor_multiple` is): `partner_blip_window_sec` 300.0,
+  `partner_blip_max` 5, `0` on either disabling the gate; a malformed or
+  negative value falls back to the default, the same posture as
+  `dedup_window_sec` — a typo must not silently restore an FP population.
+
+  The helper's return grew from a bare pulse tuple to an `_OrphanSuppression`
+  NamedTuple (reason + pulse + count) because two gates now report through the
+  same seam and the caller must not have to *infer* which one fired. New
+  suppression reason `partner_below_floor_activity` — the extension path the
+  `reason` column was designed for, and the first to use it — plus
+  `partner_blip_count` / `partner_blip_window_sec` appended (end of the tuple,
+  never mid-list) so a finished run can be re-scored at other thresholds
+  without another controller session, exactly the reasoning that put
+  `sampling_floor_sec` and `min_pulse_floor_multiple` in as separate columns.
+  Blank on `below_sampling_floor` rows.
+
+  **Verification was offline and reproduced the scope's numbers exactly**, on
+  both committed runs, before anything shipped: replaying the gate over
+  `engine_decisions_*` + `engine_suppressions_*` (distinct pulses deduped on
+  `(orphan_det, event_start_ts)`, counted at each rule-2 trigger's
+  `event_timestamp`) kills **6 FP + 5 TP on 08-01** (96.9 % → 98.0 % overall,
+  96.3 % → 98.7 % rule 2) and **15 FP + 10 TP on 08-02** (94.1 % → 95.0 %,
+  92.8 % → 94.7 %). The whole parameter table reproduced too — N=3 keeps the
+  same FP kill at 3–4× the TP cost, N=8 loses a third of the FP kill, a 600 s
+  horizon costs 4× the TPs — so N=5/300 s is confirmed, not assumed. Kills
+  concentrate where the mechanism predicts: 26:33 supplies 6 of 6 (08-01) and
+  14 of 15 FP kills (08-02). **These are projections from replay; the next
+  owner run is what measures the gate**, and `partner_below_floor_activity`
+  rows should appear at roughly 15–25/day, dominated by pairs whose partner is
+  det 33. The gate is the software mitigation for a detector that likely needs
+  physical service; being rolling rather than a static "disable rule 2 on
+  26:33" is what lets it recover on its own once it is fixed.
+
+  **12B (Rule 1 hysteresis) is closed as decided-no with no code and no config
+  key** — the 2026-08-03 re-derivation above settles it (4–9 FPs prevented
+  against 22–53 genuine events demoted; the FP mechanism is sub-floor chatter
+  stitching, which a one-cycle bump does not address). Recorded as a paragraph
+  in `discrepancy_engine.py`'s Rule 1 docstring section, mirroring the
+  "document, don't code" precedent of SCOPE_sampling_floor Item B.2, so the
+  next person to have the idea finds the measurement before writing the patch.
+
+  Tests: +23 cases in `test_discrepancy_rules.py` (154 total, 365 across the
+  seven suites) covering the gate's arithmetic and horizon edge, the ordering
+  against the floor gate, once-per-pulse counting, the triangle dedupe, both
+  disable paths, the row's columns in both reasons, and config
+  plumb-through/defaults/garbage/reload. Two existing cases were updated for
+  the richer return type. ROADMAP 14 (SCOPE Item C) is unaffected and remains
+  the next item.

@@ -46,10 +46,14 @@ highest used so far.
 > number quoted from before 2026-08-03 is a floor and is not comparable across
 > runs of different length** — re-score rather than cite.
 >
-> **Suggested order:** **12** (re-derive both sub-items against the corrected
-> numbers; 12A's sizing and 12B's "probably don't" verdict were both computed
-> on the uncorrected data) → **14** (the dedup-window gap) → **2** or **3**
-> (self-contained).
+> **Item 12 landed 2026-08-03** too — 12A's partner sub-floor-activity gate is
+> implemented and its offline counterfactual reproduces the scoped kills
+> exactly (08-01 → 98.0 % overall, 08-02 → 95.0 %; those are *projections* from
+> replay, not a new measured run), and 12B is closed as decided-no.
+>
+> **Suggested order:** **14** (the dedup-window gap — SCOPE Item C, the last
+> open piece of that document) → **2** or **3** (self-contained). SCOPE Item D
+> (the boundary-zone report diagnostic) is optional and needs owner sign-off.
 >
 > **Also ready, no hardware:** **10**, and **4e / 4h** (unblocked by 4d).
 >
@@ -172,7 +176,18 @@ Suggested prompt:
 
 ---
 
-## 12 — Two rule-level accuracy findings from the 9C re-baseline (Target: Opus)
+## 12 — Two rule-level accuracy findings from the 9C re-baseline — **done 2026-08-03 (12A implemented, 12B decided-no)**
+
+**Both sub-items are closed; the full record moved to DESIGN_HISTORY
+(2026-08-03 entries). 12A shipped** as the partner sub-floor-activity gate
+(`partner_blip_window_sec` 300 / `partner_blip_max` 5, suppression reason
+`partner_below_floor_activity`); the offline counterfactual reproduced the
+scoped kills exactly — 08-01 6 FP + 5 TP → 98.0 % overall / 98.7 % rule 2,
+08-02 15 FP + 10 TP → 95.0 % / 94.7 %. **12B is decided-no** and is recorded
+in `discrepancy_engine.py`'s Rule 1 docstring section, not in code.
+
+<details>
+<summary>Original item text (kept for context)</summary>
 
 **Re-derivation done 2026-08-03 (Fable) — see
 [SCOPE_partner_gate_dedup_window.md](SCOPE_partner_gate_dedup_window.md).**
@@ -204,8 +219,8 @@ drives its FPs". Volume change vs precision change across all 17 pairs is
 r = +0.19. And 7 of 17 pairs carried under 15 triggers on 08-01 — five reading
 "100 %" on 1–9 triggers — so per-pair 08-01 figures are thin evidence.
 
-- [ ] **A — Rule 2's floor gate is asymmetric; a partner-side gate is
-  designed and sized** (SCOPE Item A). The gate bounds the *orphan's*
+- [x] **A — Rule 2's floor gate is asymmetric; a partner-side gate is
+  designed and sized** (SCOPE Item A) — **implemented 2026-08-03**. The gate bounds the *orphan's*
   duration but says nothing about whether the *partner* is resolvable: the
   FPs it targets are real orphan pulses whose partner responded with
   0.1–0.4 s blips the engine cannot see (partner active in ±5 s for 6/9 of
@@ -235,6 +250,8 @@ Suggested prompt:
 > SCOPE_partner_gate_dedup_window.md (ROADMAP 12A): the partner
 > sub-floor-activity gate for Rule 2, exactly as scoped — and fold in Item B's
 > documentation-only check-off for 12B.
+
+</details>
 
 ---
 

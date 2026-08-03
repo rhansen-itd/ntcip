@@ -147,6 +147,27 @@ that rate is ~1.0–1.5 s regardless of ``poll_interval_sec``.
                                  Default ``false`` (advisory only) — a
                                  deployment decision, not an engine default.
 
+Partner sub-floor-activity gate (optional; ROADMAP 12A)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The floor fields above bound the *orphan's* side of Rule 2; these bound the
+**partner's**.  Rule 2's evidence is that the partner was completely OFF —
+worthless when that partner keeps producing pulses too short for the engine to
+see at all.  The engine counts each detector's own below-floor pulses (the ones
+the floor gate declined) and refuses a Rule 2 candidate whose partner has been
+blipping too often.  Declined candidates get an ``engine_suppressions.csv`` row
+with ``reason=partner_below_floor_activity``, carrying the count and horizon
+that produced the verdict.
+
+``partner_blip_window_sec`` float — Trailing horizon over which a detector's
+                                 below-floor pulses are counted.  Default
+                                 ``300.0``; ``0`` disables the gate.
+``partner_blip_max``     int   — Below-floor pulses on the partner inside that
+                                 horizon at which its silence stops counting as
+                                 evidence.  Default ``5``, measured against the
+                                 2026-08-01/02 runs (see
+                                 SCOPE_partner_gate_dedup_window.md);
+                                 ``0`` disables the gate.
+
 Duplicate-rejection field (optional; ROADMAP 9C4)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Detectors linked into groups of three or more (see ``paired_detector_id``)

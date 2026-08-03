@@ -191,8 +191,43 @@ disable Rules 1+2 for such pairs. Because the duty computation reads the same
 `max(3 × threshold + grace, 120 s)` — keep the two consistent if either
 changes.
 
+**Partner sub-floor-activity gate (added 2026-08-03, ROADMAP 12A —
+load-bearing).** The floor gate bounds the *orphan's* side of Rule 2; this one
+bounds the **partner's**, from the same principle. Rule 2's evidence is that
+the partner was completely OFF — worthless when that partner keeps producing
+0.1–0.4 s pulses a ~0.33 s sampler cannot see. That is the dominant rule-2 FP
+mechanism in ground truth (the orphan was real in 61 of 61 FPs checked; the
+partner *did* respond, sub-floor, in 6/9 and 28/52 of the two runs' rule-2
+FPs, against ~1 % of TPs). The signal is invisible at event time, so the gate
+is **statistical**: each `_DetectorState` keeps `below_floor_pulses`, a deque
+of the pulse windows *its own* candidates were declined at by the floor gate,
+and a Rule 2 candidate whose **partner** has ≥ `partner_blip_max` (config,
+default **5**) entries inside the trailing `partner_blip_window_sec` (default
+**300**, `0` on either disables) is declined — per-pair
+`partner_blip_suppressed`, plus an `engine_suppressions.csv` row with reason
+`partner_below_floor_activity` carrying `partner_blip_count` and the horizon.
+Four things are load-bearing: the gate sits **strictly after** the floor gate
+(a below-floor pulse is always `below_sampling_floor`, so the two populations
+stay disjoint); the deque counts **distinct pulses, not evaluations** (a
+triangle declines one physical pulse once per pair — entries are deduped
+against the deque's tail); it is the **one `_DetectorState` field not guarded
+by the lock** (written and read only on the evaluator thread); and the
+parameters are measured, not guessed — replayed over both committed runs, ≥5
+in 300 s kills 6 FP + 5 TP on 08-01 (→ **98.0 %** overall / 98.7 % rule 2) and
+15 FP + 10 TP on 08-02 (→ **95.0 %** / 94.7 %), while N=3 triples the TP cost
+for the same FPs and 600 s horizons are strictly worse. **Those two figures
+are replay projections, not measured runs** — the table further down still
+reports the last measured run. Kills concentrate on 26:33, whose det 33 is the
+#1 below-floor producer on both runs by ~2.4× and probably needs physical
+service; the gate is rolling precisely so it recovers on its own if that
+happens. Rule 1 hysteresis was evaluated on the same evidence and
+**rejected** (ROADMAP 12B — 4–9 FPs prevented against 22–53 genuine events
+demoted); the arithmetic lives in `discrepancy_engine.py`'s Rule 1 docstring
+section, and there is deliberately no config key for it.
+
 The rule functions are pinned by `video_engine/tests/test_discrepancy_rules.py`
-(131 stdlib-`unittest` cases, incl. the stale-refire guard, the floor gate, the
+(154 stdlib-`unittest` cases, incl. the stale-refire guard, the floor gate, the
+partner gate, the
 decision log, the suppression log, group derivation in both config forms,
 cross-pair duplicate rejection and its AND-gated stop, and `_resolve_pytz`) —
 run it after any
@@ -320,8 +355,11 @@ load-bearing for anyone measuring accuracy).** All land in `output_dir`:
   from timestamps is unaffected.
 - **`engine_suppressions.csv`** — written by
   `discrepancy_engine._log_suppression`, one row per candidate the engine
-  deliberately **declined** to act on, tagged with a `reason` column. Today
-  the only reason is `below_sampling_floor` (the Rule 2 gate). Same injected
+  deliberately **declined** to act on, tagged with a `reason` column. Two
+  reasons today: `below_sampling_floor` (the Rule 2 floor gate) and
+  `partner_below_floor_activity` (the 12A partner gate; its rows carry
+  `partner_blip_count` / `partner_blip_window_sec`, blank on the other
+  reason). Same injected
   path (`suppression_log_path`, `None` disables) and the same best-effort
   contract as the decision log; both share `_append_csv_row`, so the
   never-re-header-a-resumed-file behavior cannot drift between them.
@@ -332,9 +370,10 @@ load-bearing for anyone measuring accuracy).** All land in `output_dir`:
   **A suppressed row is not a would-have-fired trigger** — the gate sits at
   candidate registration, ahead of Rule 2's partner-overlap test, so recall
   attributed to it is an upper bound. `reason` is a plain string precisely so
-  the other populations `__accuracy_report.py` currently *models* (cooldown,
-  grace expiry, high-duty) can land here later as new values, with no schema
-  change and no fourth file. The cross-pair duplicate deliberately did **not**
+  new populations can land here as new values, with no schema change and no
+  fourth file — the partner gate was the first to take that path, and the ones
+  `__accuracy_report.py` still *models* (cooldown, grace expiry, high-duty)
+  can follow it. The cross-pair duplicate deliberately did **not**
   land here — see the decision log above.
 
 `__accuracy_report.py` auto-detects which format it was handed (on the
@@ -661,11 +700,11 @@ them relaxes the rule that the two packages don't import each other.
 
 Seven suites, all **stdlib `unittest`** (pytest is not installed here), one file
 per subject, each runnable directly from any working directory via its own
-`sys.path` bootstrap. 342 cases total as of 2026-08-01:
+`sys.path` bootstrap. 365 cases total as of 2026-08-03:
 
 | Suite | Cases | Subject |
 |---|---|---|
-| `video_engine/tests/test_discrepancy_rules.py` | 131 | rule functions, `_evaluate_pair` integration, decision log, suppression log, detector groups + cross-pair duplicate rejection + AND-gated stop, `_resolve_pytz` |
+| `video_engine/tests/test_discrepancy_rules.py` | 154 | rule functions, `_evaluate_pair` integration, decision log, suppression log, sampling-floor + partner sub-floor-activity gates, detector groups + cross-pair duplicate rejection + AND-gated stop, `_resolve_pytz` |
 | `video_engine/tests/test_video_cleanup.py` | 44 | clip-name parsing, containment + tolerance, `plan_removals` invariants, log rewrite, scan/sweep (stubbed duration probe) |
 | `video_engine/tests/test_remux_manager.py` | 22 | manager writer/timer bookkeeping (stubbed remuxer) |
 | `video_engine/tests/test_config_manager.py` | 9 | `ConfigProviderError` |

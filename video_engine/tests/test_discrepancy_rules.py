@@ -3,7 +3,8 @@
 Covers ``_check_rule1_continuous``, ``_check_rule2_orphan`` (interval-based
 partner overlap), ``_compute_on_duty_fraction``, and
 ``DiscrepancyMonitor._maybe_register_orphan`` (including the 2026-07-19
-stale-refire guard and the 2026-07-30 sampling-floor gate), plus a set of
+stale-refire guard, the 2026-07-30 sampling-floor gate and the 2026-08-03
+partner sub-floor-activity gate), plus a set of
 integration tests that drive ``DiscrepancyMonitor._evaluate_pair`` directly
 (no evaluator thread) against a stub ``ConfigProvider`` and a temp Hot Folder,
 the 2026-08-01 decision log (``engine_decisions.csv``), the 2026-08-01
@@ -39,11 +40,14 @@ from config_manager import ConfigProvider  # noqa: E402
 from discrepancy_engine import (  # noqa: E402
     DiscrepancyMonitor,
     _DECISION_LOG_FIELDS,
+    _DEFAULT_PARTNER_BLIP_MAX,
+    _DEFAULT_PARTNER_BLIP_WINDOW_SEC,
     _DEFAULT_SAMPLING_FLOOR_SEC,
     _DUTY_WINDOW_SEC,
     _ORPHAN_DECISION_GRACE_SEC,
     _PairRuntimeState,
     _SUPPRESS_BELOW_FLOOR,
+    _SUPPRESS_PARTNER_BLIP,
     _SUPPRESSION_LOG_FIELDS,
     _check_rule1_continuous,
     _check_rule2_orphan,
@@ -262,7 +266,9 @@ class TestMaybeRegisterOrphan(unittest.TestCase):
     # via its return value and the caller owns the log write.
 
     def test_suppressed_pulse_is_returned(self):
-        self.assertEqual(self.register(min_pulse_sec=3.2), (100.0, 102.0))
+        suppressed = self.register(min_pulse_sec=3.2)
+        self.assertEqual(suppressed.reason, _SUPPRESS_BELOW_FLOOR)
+        self.assertEqual(suppressed.pulse, (100.0, 102.0))
 
     def test_registered_pulse_returns_none(self):
         self.assertIsNone(self.register(min_pulse_sec=0.4))
@@ -278,7 +284,10 @@ class TestMaybeRegisterOrphan(unittest.TestCase):
         # Same guard as the counter: the evaluator re-examines this pulse
         # every 0.1 s tick, and only the first call may produce a row.
         results = [self.register(min_pulse_sec=3.2) for _ in range(5)]
-        self.assertEqual(results, [(100.0, 102.0), None, None, None, None])
+        self.assertEqual(
+            [None if r is None else r.pulse for r in results],
+            [(100.0, 102.0), None, None, None, None],
+        )
 
     def test_already_watched_pulse_reports_nothing(self):
         self.register(min_pulse_sec=0.4)                    # arms the slot
@@ -1083,6 +1092,293 @@ class TestSuppressionLog(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Partner sub-floor-activity gate (ROADMAP 12A)
+# ---------------------------------------------------------------------------
+
+class TestPartnerBlipGate(unittest.TestCase):
+    """The gate itself, driven directly through the registration helper.
+
+    Rule 2's evidence is the partner's silence; this gate refuses that
+    evidence when the partner has recently been producing pulses the engine
+    cannot resolve.  Ordering against the floor gate is part of the contract.
+    """
+
+    THRESHOLD = 5.0
+    NOW = 1000.0
+
+    def setUp(self):
+        self.rt = _PairRuntimeState(pair_key="1:2")
+
+    def register(self, blips=(), max_blips=5, window=300.0,
+                 last_pulse_on=990.0, last_off=992.0, min_pulse_sec=0.0):
+        return DiscrepancyMonitor._maybe_register_orphan(
+            self.rt, "a", False, last_pulse_on, last_off, self.THRESHOLD,
+            min_pulse_sec, blips, self.NOW, window, max_blips,
+        )
+
+    @staticmethod
+    def blips(count, first_off=900.0, spacing=10.0):
+        """``count`` sub-floor partner pulses, oldest first."""
+        return tuple(
+            (first_off + i * spacing - 0.2, first_off + i * spacing)
+            for i in range(count)
+        )
+
+    def test_partner_at_the_limit_declines_the_candidate(self):
+        suppressed = self.register(blips=self.blips(5))
+        self.assertIsNone(self.rt.orphan_watch_a)
+        self.assertEqual(suppressed.reason, _SUPPRESS_PARTNER_BLIP)
+        self.assertEqual(suppressed.pulse, (990.0, 992.0))
+        self.assertEqual(suppressed.partner_blip_count, 5)
+        self.assertEqual(self.rt.partner_blip_suppressed, 1)
+        self.assertEqual(self.rt.below_floor_suppressed, 0)
+
+    def test_partner_below_the_limit_registers_normally(self):
+        self.assertIsNone(self.register(blips=self.blips(4)))
+        self.assertEqual(self.rt.orphan_watch_a, (990.0, 992.0))
+        self.assertEqual(self.rt.partner_blip_suppressed, 0)
+
+    def test_blips_outside_the_horizon_do_not_count(self):
+        # Five blips, but all of them closed before now - window.
+        old = self.blips(5, first_off=self.NOW - 400.0, spacing=5.0)
+        self.assertIsNone(self.register(blips=old))
+        self.assertEqual(self.rt.orphan_watch_a, (990.0, 992.0))
+
+    def test_only_blips_inside_the_horizon_are_counted(self):
+        mixed = self.blips(4, first_off=self.NOW - 400.0, spacing=5.0) + \
+            self.blips(4, first_off=self.NOW - 100.0, spacing=5.0)
+        self.assertIsNone(self.register(blips=mixed))   # 4 inside, not 5
+        self.assertEqual(self.rt.orphan_watch_a, (990.0, 992.0))
+
+    def test_blip_exactly_at_the_horizon_edge_is_excluded(self):
+        # off_ts must be strictly newer than now - window.
+        edge = ((self.NOW - 300.2, self.NOW - 300.0),) + self.blips(4)
+        self.assertIsNone(self.register(blips=edge))
+        self.assertEqual(self.rt.orphan_watch_a, (990.0, 992.0))
+
+    def test_zero_max_disables_the_gate(self):
+        self.assertIsNone(self.register(blips=self.blips(50), max_blips=0))
+        self.assertEqual(self.rt.orphan_watch_a, (990.0, 992.0))
+        self.assertEqual(self.rt.partner_blip_suppressed, 0)
+
+    def test_zero_window_disables_the_gate(self):
+        self.assertIsNone(self.register(blips=self.blips(50), window=0.0))
+        self.assertEqual(self.rt.orphan_watch_a, (990.0, 992.0))
+
+    def test_floor_gate_runs_first(self):
+        # Load-bearing ordering: a below-floor pulse on a blip-heavy pair is
+        # a below-floor suppression, never a partner-activity one — otherwise
+        # the two populations overlap and neither count means anything.
+        suppressed = self.register(
+            blips=self.blips(5), last_pulse_on=990.0, last_off=990.05,
+            min_pulse_sec=0.5,
+        )
+        self.assertEqual(suppressed.reason, _SUPPRESS_BELOW_FLOOR)
+        self.assertEqual(suppressed.partner_blip_count, 0)
+        self.assertEqual(self.rt.below_floor_suppressed, 1)
+        self.assertEqual(self.rt.partner_blip_suppressed, 0)
+
+    def test_declined_candidate_is_counted_once_not_per_tick(self):
+        results = [self.register(blips=self.blips(5)) for _ in range(5)]
+        self.assertEqual(
+            [None if r is None else r.reason for r in results],
+            [_SUPPRESS_PARTNER_BLIP, None, None, None, None],
+        )
+        self.assertEqual(self.rt.partner_blip_suppressed, 1)
+
+    def test_gate_does_not_reject_a_pulse_over_the_threshold(self):
+        # Rule 1 territory: still not a Rule 2 candidate, and not a
+        # suppression row either.
+        self.assertIsNone(
+            self.register(blips=self.blips(5), last_pulse_on=990.0,
+                          last_off=996.0)
+        )
+
+
+class TestPartnerBlipGateIntegration(unittest.TestCase):
+    """End to end: the floor gate fills the blip history the partner gate reads."""
+
+    THRESHOLD = 0.4
+    FLOOR = 0.06          # gate = FLOOR x _DEFAULT_MIN_PULSE_FLOOR_MULTIPLE
+    GATE = 0.12
+    BLIP = 0.05           # below the gate
+    ORPHAN = 0.2          # above the gate, below the threshold
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.log_path = Path(self._tmp.name) / "out" / "engine_suppressions.csv"
+        self.monitor = _build_monitor(
+            self._tmp.name, threshold=self.THRESHOLD, floor=self.FLOOR,
+            suppression_log=self.log_path,
+        )
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def rows(self):
+        with self.log_path.open(newline="", encoding="utf-8") as fh:
+            return list(csv.DictReader(fh))
+
+    def pulse(self, det_id, duration, pair="1:2", dets=("1", "2")):
+        self.monitor.on_detector_on(det_id)
+        time.sleep(duration)
+        self.monitor.on_detector_off(det_id)
+        self.monitor._evaluate_pair(pair, *dets)
+
+    def blip_partner(self, count, det_id="2"):
+        for _ in range(count):
+            self.pulse(det_id, self.BLIP)
+
+    def test_blip_history_comes_from_declined_floor_candidates(self):
+        self.blip_partner(3)
+        self.assertEqual(
+            len(self.monitor._detector_states["2"].below_floor_pulses), 3
+        )
+        # A registered (above-floor) pulse is evidence, not a blip.
+        self.pulse("2", self.ORPHAN)
+        self.assertEqual(
+            len(self.monitor._detector_states["2"].below_floor_pulses), 3
+        )
+
+    def test_blip_heavy_partner_declines_the_orphan(self):
+        self.blip_partner(5)
+        self.pulse("1", self.ORPHAN)
+        rt = self.monitor._pair_runtime["1:2"]
+        self.assertIsNone(rt.orphan_watch_a)
+        self.assertEqual(rt.partner_blip_suppressed, 1)
+        # Declined, so nothing reached the Hot Folder for it.
+        self.assertEqual(sorted(Path(self._tmp.name).glob("trigger_*.json")), [])
+
+    def test_quiet_partner_still_arms_the_orphan(self):
+        self.blip_partner(4)
+        self.pulse("1", self.ORPHAN)
+        rt = self.monitor._pair_runtime["1:2"]
+        self.assertIsNotNone(rt.orphan_watch_a)
+        self.assertEqual(rt.partner_blip_suppressed, 0)
+
+    def test_row_records_the_reason_count_and_horizon(self):
+        self.blip_partner(5)
+        self.pulse("1", self.ORPHAN)
+        row = self.rows()[-1]
+        self.assertEqual(row["reason"], _SUPPRESS_PARTNER_BLIP)
+        self.assertEqual(row["orphan_det"], "1")
+        self.assertEqual(row["slot"], "a")
+        self.assertEqual(int(row["partner_blip_count"]), 5)
+        self.assertAlmostEqual(
+            float(row["partner_blip_window_sec"]),
+            _DEFAULT_PARTNER_BLIP_WINDOW_SEC,
+        )
+        self.assertIn("'2' produced 5 below-floor pulses", row["description"])
+        # The pulse columns still describe the declined candidate itself.
+        self.assertAlmostEqual(
+            float(row["pulse_duration_sec"]), self.ORPHAN, places=1
+        )
+
+    def test_below_floor_rows_leave_the_partner_columns_blank(self):
+        self.blip_partner(5)
+        floor_rows = [r for r in self.rows()
+                      if r["reason"] == _SUPPRESS_BELOW_FLOOR]
+        self.assertEqual(len(floor_rows), 5)
+        for row in floor_rows:
+            self.assertEqual(row["partner_blip_count"], "")
+            self.assertEqual(row["partner_blip_window_sec"], "")
+
+    def test_header_still_matches_the_declared_field_order(self):
+        self.blip_partner(1)
+        header = self.log_path.read_text(encoding="utf-8").splitlines()[0]
+        self.assertEqual(header.split(","), list(_SUPPRESSION_LOG_FIELDS))
+
+    def test_expired_blips_are_pruned_from_the_deque(self):
+        self.blip_partner(2)
+        blips = self.monitor._detector_states["2"].below_floor_pulses
+        self.assertEqual(len(blips), 2)
+        # Age both past the horizon; the next evaluation must drop them.
+        self.monitor._partner_blip_window_sec = 0.001
+        time.sleep(0.01)
+        self.monitor._evaluate_pair("1:2", "1", "2")
+        self.assertEqual(len(blips), 0)
+
+    def test_triangle_records_one_entry_per_physical_pulse(self):
+        # The same sub-floor pulse on a shared detector is declined once per
+        # pair it participates in; the gate counts pulses, not evaluations.
+        monitor = _build_grouped_monitor(
+            self._tmp.name,
+            {"1": _det("2", threshold=self.THRESHOLD),
+             "2": _det("3", threshold=self.THRESHOLD),
+             "3": _det("1", threshold=self.THRESHOLD)},
+            floor=self.FLOOR,
+        )
+        monitor.on_detector_on("2")
+        time.sleep(self.BLIP)
+        monitor.on_detector_off("2")
+        monitor._evaluate_pair("1:2", "1", "2")
+        monitor._evaluate_pair("2:3", "2", "3")
+        self.assertEqual(len(monitor._detector_states["2"].below_floor_pulses), 1)
+        # Both pairs did count the suppression for themselves, though.
+        self.assertEqual(monitor._pair_runtime["1:2"].below_floor_suppressed, 1)
+        self.assertEqual(monitor._pair_runtime["2:3"].below_floor_suppressed, 1)
+
+
+class TestPartnerBlipConfig(unittest.TestCase):
+    """Config plumb-through for the gate's two keys."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def build(self, **cfg):
+        return _build_monitor(self._tmp.name, **cfg)
+
+    def test_defaults_when_absent(self):
+        monitor = self.build()
+        self.assertEqual(
+            monitor._partner_blip_window_sec, _DEFAULT_PARTNER_BLIP_WINDOW_SEC
+        )
+        self.assertEqual(monitor._partner_blip_max, _DEFAULT_PARTNER_BLIP_MAX)
+
+    def test_config_values_are_read(self):
+        monitor = self.build(partner_blip_window_sec=120.0, partner_blip_max=3)
+        self.assertEqual(monitor._partner_blip_window_sec, 120.0)
+        self.assertEqual(monitor._partner_blip_max, 3)
+
+    def test_explicit_zero_disables_each_side(self):
+        self.assertEqual(self.build(partner_blip_max=0)._partner_blip_max, 0)
+        self.assertEqual(
+            self.build(partner_blip_window_sec=0)._partner_blip_window_sec, 0.0
+        )
+
+    def test_malformed_or_negative_values_fall_back_to_the_default(self):
+        # A typo must not silently disable a gate that exists to prevent a
+        # false-positive population — same posture as dedup_window_sec.
+        for bad in ("banana", None, -5):
+            with self.subTest(value=bad):
+                monitor = self.build(
+                    partner_blip_max=bad, partner_blip_window_sec=bad
+                )
+                self.assertEqual(
+                    monitor._partner_blip_max, _DEFAULT_PARTNER_BLIP_MAX
+                )
+                self.assertEqual(
+                    monitor._partner_blip_window_sec,
+                    _DEFAULT_PARTNER_BLIP_WINDOW_SEC,
+                )
+
+    def test_reload_re_reads_both_keys(self):
+        monitor = self.build(partner_blip_max=3)
+        cfg = {
+            "timezone": "UTC",
+            "partner_blip_max": 9,
+            "partner_blip_window_sec": 60.0,
+            "detectors": monitor._intersection_cfg["detectors"],
+        }
+        monitor.reload(_StubProvider(cfg))
+        self.assertEqual(monitor._partner_blip_max, 9)
+        self.assertEqual(monitor._partner_blip_window_sec, 60.0)
+
+
+# ---------------------------------------------------------------------------
 # Detector groups — connected components over the pair graph (ROADMAP 9C4)
 # ---------------------------------------------------------------------------
 
@@ -1097,7 +1393,8 @@ def _det(partner, phase=2, camera="cam1", threshold=0.2, det_type="radar"):
     }
 
 
-def _build_grouped_monitor(trigger_dir, detectors, **extra_cfg):
+def _build_grouped_monitor(trigger_dir, detectors, floor=0.01,
+                           suppression_log=None, **extra_cfg):
     """Build a monitor over an arbitrary detector map (no pair assumptions)."""
     cfg = {"timezone": "UTC", "detectors": detectors}
     cfg.update(extra_cfg)
@@ -1106,8 +1403,9 @@ def _build_grouped_monitor(trigger_dir, detectors, **extra_cfg):
         config_provider=_StubProvider(cfg),
         trigger_dir=trigger_dir,
         cooldown_sec=60.0,
+        suppression_log_path=suppression_log,
     )
-    monitor.set_sampling_floor(0.01)
+    monitor.set_sampling_floor(floor)
     return monitor
 
 

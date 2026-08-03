@@ -34,6 +34,25 @@ Rule 1 — Extended Holdover / Missed Call (Continuous Disagreement)
       • One system picks up a vehicle the other completely misses.
       • One system drops its call while the other continues to hold.
 
+    **No hysteresis, and that is a measured decision (2026-08-03, ROADMAP
+    12B).**  Raising the fire threshold by one sampling cycle (5.0 → 5.33 s),
+    or requiring a confirmation sample before firing, was evaluated against
+    controller ground truth on both committed runs and **rejected**: on the
+    2026-08-02 run it would have prevented only ~4–9 of rule 1's 39 false
+    positives while pushing 22–53 genuine events below the bar (matched GT
+    ``extended_disagreement`` shorter than 5.33 s: 53 on 08-02, 20 on 08-01) —
+    net-negative by 3–6×.  The reason it does not work is that the FP
+    mechanism is not marginal duration: it is sub-floor chatter *stitching*.
+    The controller-truth continuous-XOR run at the FP event start has a median
+    of **1.8 s**, so the engine's "continuous ≥ 5 s disagreement" was assembled
+    across true agreements its sampling never saw — and its stale disagreement
+    image then persists a median 7.2 s, so a one-cycle bump only delays the
+    same fire.  Every consecutive-sample or agreement-confirmation variant is
+    the same trade under a different name.  The genuine fix is finer sampling
+    or per-pair suppression of chatter-prone channels (the existing
+    ``suppress_high_duty_pairs`` family) — a deployment decision.  See
+    SCOPE_partner_gate_dedup_window.md Item B.
+
 Rule 2 — Orphan Pulse (Ghost Car)
     When System A turns OFF after a brief actuation whose total ON-duration was
     less than ``lag_threshold_sec``, we wait an additional ``lag_threshold_sec``
@@ -64,9 +83,12 @@ Rule 2 — Orphan Pulse (Ghost Car)
         never saw at all.
       • Works symmetrically: A brief pulse on B that A never sees also fires.
 
-    Rule 2 is additionally gated by the **sampling floor** (see below): a
-    pulse shorter than ``min_pulse_floor_multiple × sampling_floor_sec`` is
-    not registered as a candidate at all.
+    Rule 2 is additionally gated by the **sampling floor** (see below) on
+    both sides of the comparison: a pulse shorter than
+    ``min_pulse_floor_multiple × sampling_floor_sec`` is not registered as a
+    candidate at all, and a candidate whose *partner* has recently produced
+    ``partner_blip_max`` such sub-floor pulses is declined too — that
+    partner's silence is not observable evidence.
 
 Rule 3 — Chatter Exception (must NOT trigger)
     System A is solidly ON for 30 s; System B is chattering (ON 2 s / OFF 0.5 s
@@ -160,6 +182,60 @@ Three consequences, in order of how much they change behavior:
    (default **false**) fully disables Rules 1+2 for those pairs — a
    deployment decision, off until the owner opts in.
 
+Partner sub-floor-activity gate (ROADMAP 12A, 2026-08-03)
+─────────────────────────────────────────────────────────
+The floor gate above bounds the *orphan's* side of Rule 2.  This one bounds
+the **partner's**, from the same principle: **the engine must not treat
+partner silence as evidence when that partner's recent behavior shows it
+produces pulses below the engine's own resolution.**
+
+Ground truth says why.  Classifying every rule-2 false positive on the two
+committed runs against the controller's own 82/81 edges, the dominant
+population is not a bad orphan — the orphan pulse was real in 61 of 61 cases
+checked — it is a partner that *did* respond, with a 0.1–0.4 s blip a ~0.33 s
+sampling cycle cannot see.  The engine's "partner completely OFF during the
+window" evidence is structurally blind to those, while the ground truth sees
+them and refuses the anomaly.  Among rule-2 **true** positives the partner was
+active in the window only ~1 % of the time (2/232 and 4/668), so the
+separation is nearly perfect — but the separating variable is invisible to the
+engine at event time.  Only a *statistical* signal can work, and the engine
+already collects one: every candidate the floor gate declines is a recorded
+sub-floor blip on a known detector.
+
+So each detector keeps ``_DetectorState.below_floor_pulses``, a deque of the
+``(on_ts, off_ts)`` windows its own pulses were declined at, deduped per
+detector (a triangle declines one physical pulse once per pair) and pruned to
+the gate's horizon.  A Rule 2 candidate whose partner has ≥ ``partner_blip_max``
+(default **5**) entries inside the trailing ``partner_blip_window_sec``
+(default **300**) is declined: it bumps a per-pair ``partner_blip_suppressed``
+counter, logs at DEBUG, and writes a suppression row with reason
+``partner_below_floor_activity``.  ``0`` on either key disables the gate.
+
+**Order matters and is load-bearing**: the gate sits strictly *after* the
+floor gate, so a below-floor pulse is always counted and reported as
+``below_sampling_floor`` and the two populations stay disjoint.  The gate is
+also blind to the *engine-visible* partner pulses Rule 2 already tests — that
+check is the existing ``on_intervals`` overlap test and is unchanged.
+
+Parameters are measured, not guessed (SCOPE_partner_gate_dedup_window.md,
+Item A; counting distinct pulses over both committed runs): ≥5 in 300 s kills
+6 FP / 5 TP on 2026-08-01 and 15 FP / 10 TP on 2026-08-02, taking those runs
+to 98.0 % / 95.0 % overall and 98.7 % / 94.7 % on rule 2.  ≥3 keeps the same
+FP kill at triple the TP cost; 600 s and 1800 s horizons are strictly worse.
+The kills concentrate exactly where the mechanism says they should — the
+26:33 pair, whose det 33 is also the #1 producer of below-floor candidates on
+both runs by ~2.4×.  The gate is the software mitigation; a detector that
+blips that much likely needs service, and being rolling rather than a static
+"disable rule 2 on 26:33" is what lets it recover on its own once it is fixed.
+
+Two rule-2 FP populations were examined and only this one is acted on.  The
+other is a *threshold-boundary type flip*: the engine measures a pulse at
+4.3–4.96 s (< 5.0 → rule 2) where the controller measures ≥ 5.0, so ground
+truth files the same physical event as ``extended_disagreement``.  That is a
+scoring artifact, not an engine defect, and suppressing the boundary zone is
+net-negative (47 rule-2 TPs live there against 21 FPs on 2026-08-02) — so the
+engine deliberately does nothing about it.
+
 Decision log vs. recording log
 ──────────────────────────────
 The engine appends one row to its own **decision log** (``engine_decisions.
@@ -193,8 +269,13 @@ The decision log records what the engine *did*.  The **suppression log**
 records what it deliberately **declined to do**, one row per distinct
 suppressed candidate with a ``reason`` column.
 
-Today ``reason`` has exactly one value, ``below_sampling_floor`` — the Rule 2
-gate in consequence 1 above.  The column exists because the accuracy report
+``reason`` has two values today: ``below_sampling_floor`` — the Rule 2 gate in
+consequence 1 above — and ``partner_below_floor_activity``, the partner gate
+described in the section just above it.  Rows of the second kind carry
+``partner_blip_count`` and ``partner_blip_window_sec`` (appended to the end of
+the field tuple, the same discipline as every other column here); rows of the
+first kind leave both blank, since the partner gate never sees a pulse the
+floor gate already declined.  The floor columns exist because the accuracy report
 currently *models* this population from the ground-truth side (it drops GT
 pulses shorter than ``2 × poll``) rather than reading what the engine actually
 suppressed, and those two selections are not the same events: the report
@@ -208,20 +289,20 @@ columns rather than only their product, so a consumer can recompute the gate
 at other multiples and recover the counterfactual — "what would this run have
 scored at 1.5× instead of 2.0×" — without another controller session.
 
-**A suppressed row is not a would-have-fired trigger.**  The gate sits at
+**A suppressed row is not a would-have-fired trigger.**  Both gates sit at
 candidate *registration*, ahead of Rule 2's partner-overlap test, so a
 suppressed pulse never gets that far and might well have been rejected there
-too.  Any recall attributed to the gate is therefore an **upper bound**.
+too.  Any recall attributed to either is therefore an **upper bound**.
 Making it exact would mean arming below-floor pulses and gating at fire time,
 which is a real behavior change — the ``orphan_watch_*`` slots hold one
 candidate each, so arming junk would evict live candidates — and is
 deliberately not done here.
 
-``reason`` is a plain string precisely so the other populations the accuracy
-report also models rather than measures (cooldown suppression, a Rule 2 verdict
-discarded past ``_ORPHAN_DECISION_GRACE_SEC``, and ``suppress_high_duty_pairs``)
-can land in this file later as new values, with no schema change and no second
-artifact.  Note the cross-pair duplicate rejection below deliberately does
+``reason`` is a plain string precisely so new populations can land in this file
+as new values, with no schema change and no second artifact — the partner gate
+was the first to take that path, and the ones the accuracy report still models
+rather than measures (cooldown suppression, a Rule 2 verdict discarded past
+``_ORPHAN_DECISION_GRACE_SEC``, and ``suppress_high_duty_pairs``) can follow it.  Note the cross-pair duplicate rejection below deliberately does
 **not** live here: it happens after a trigger is fully formed and keeps its
 trigger ID, so it is a *decision* the engine made about a real detection, and a
 consumer scoring accuracy must still credit it.  It is marked in the decision
@@ -354,7 +435,7 @@ from dataclasses import dataclass, field
 import pytz
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Deque, Dict, List, Optional, Sequence, Tuple
+from typing import Deque, Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 from config_manager import ConfigProvider, ConfigProviderError
 
@@ -394,6 +475,28 @@ _DEFAULT_MIN_PULSE_FLOOR_MULTIPLE = 2.0
 # A pair whose *minimum* detector ON-duty exceeds this fraction is flagged as
 # operating outside the regime where NTCIP sampling can resolve its edges.
 _DEFAULT_HIGH_DUTY_WARN_FRACTION = 0.8
+
+# ---------------------------------------------------------------------------
+# Partner sub-floor-activity gate (ROADMAP 12A — see the module docstring)
+# ---------------------------------------------------------------------------
+
+# Rolling horizon over which a detector's *declined* below-floor pulses are
+# remembered, and how many of them make that detector's silence untrustworthy
+# as a Rule 2 partner.  Both measured against the committed 2026-08-01 and
+# 2026-08-02 artifacts (SCOPE_partner_gate_dedup_window.md, Item A): counting
+# distinct pulses, "≥5 in 300 s" kills 6 FP / 5 TP on 08-01 and 15 FP / 10 TP
+# on 08-02 — the best FP:TP ratio of every (N, horizon) combination tried.
+# Loosening N to 3 triples the TP cost for no extra FPs; 600 s and 1800 s
+# horizons are strictly worse (same FP kill, 2–5× the TP kill).
+_DEFAULT_PARTNER_BLIP_WINDOW_SEC = 300.0
+_DEFAULT_PARTNER_BLIP_MAX = 5
+
+# Hard cap on the per-detector below-floor-pulse deque.  The time-based pruning
+# against ``partner_blip_window_sec`` is the real bound; this is a RAM
+# backstop.  The worst detector on record (det 33) produced 731 distinct
+# below-floor pulses over 11.9 h — ~5 per 300 s window — so 256 is ~50×
+# headroom at ~4 KB/detector.
+_BELOW_FLOOR_PULSE_MAXLEN = 256
 
 # Rolling window over which ON-duty is measured.
 _DUTY_WINDOW_SEC = 120.0
@@ -483,6 +586,28 @@ _DECISION_LOG_FIELDS = (
 # populations (cooldown, grace expiry, high-duty, cross-pair duplicate) become
 # new values here, never new files or new columns.
 _SUPPRESS_BELOW_FLOOR = "below_sampling_floor"
+_SUPPRESS_PARTNER_BLIP = "partner_below_floor_activity"
+
+
+class _OrphanSuppression(NamedTuple):
+    """One Rule 2 candidate that ``_maybe_register_orphan`` declined to arm.
+
+    The registration helper stays static and free of I/O; it reports what it
+    declined through this value and the caller — which owns the instance and
+    the log paths — writes the row.  Two gates can produce one, so the reason
+    travels with the pulse rather than being inferred by the caller.
+
+    Attributes:
+        reason: One of the ``_SUPPRESS_*`` codes above.
+        pulse: ``(on_ts, off_ts)`` of the declined pulse, exact Unix floats.
+        partner_blip_count: Below-floor pulses counted on the *partner* inside
+            the gate's horizon.  Meaningful only for
+            ``_SUPPRESS_PARTNER_BLIP``; ``0`` otherwise.
+    """
+
+    reason: str
+    pulse: Tuple[float, float]
+    partner_blip_count: int = 0
 
 # Column order of ``engine_suppressions.csv``.  Append-only for the same reason
 # as _DECISION_LOG_FIELDS: a resumed log keeps its original header.
@@ -509,6 +634,13 @@ _SUPPRESSION_LOG_FIELDS = (
     "sampling_floor_sec",        # ── the gate's two factors, kept separate so
     "min_pulse_floor_multiple",  #    a consumer can re-derive it at other × ──
     "description",
+    # ── ROADMAP 12A, appended 2026-08-03 (end of the tuple, never mid-list) ──
+    # The partner gate's two factors, same reasoning as the floor gate's: store
+    # the count and the horizon it was counted over, not just the verdict, so a
+    # finished run can be re-scored at other thresholds.  Blank on
+    # ``below_sampling_floor`` rows, which the partner gate never sees.
+    "partner_blip_count",
+    "partner_blip_window_sec",
 )
 
 # ---------------------------------------------------------------------------
@@ -535,6 +667,37 @@ def _sort_detector_ids(det_ids: Sequence[str]) -> List[str]:
     if values and all(v.isdigit() for v in values):
         return sorted(values, key=int)
     return sorted(values)
+
+
+# ---------------------------------------------------------------------------
+# Config coercion helper
+# ---------------------------------------------------------------------------
+
+def _coerce_non_negative(raw: object, default: float) -> float:
+    """Coerce a config value to a non-negative float, falling back on garbage.
+
+    The posture every tuning knob in this module shares: a malformed or
+    negative value falls back to the default rather than disabling the
+    mechanism it belongs to, because a typo must never silently restore the
+    behaviour the mechanism exists to prevent.  An explicit ``0`` is a
+    legitimate value and is passed through — each caller documents what zero
+    means for its own knob.
+
+    Args:
+        raw: The value as read from the intersection config.
+        default: Value to fall back to when ``raw`` is not a non-negative
+            number.
+
+    Returns:
+        ``float(raw)`` when that is a non-negative number, else ``default``.
+    """
+    try:
+        value = float(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+    if value < 0.0 or value != value:  # NaN fails every comparison
+        return default
+    return value
 
 
 # ---------------------------------------------------------------------------
@@ -581,7 +744,8 @@ class _DetectorState:
     """Mutable state for a single physical detector / sensing system.
 
     All fields are protected by ``lock`` and must not be read or written
-    outside of a ``with self.lock`` block.
+    outside of a ``with self.lock`` block — with one documented exception,
+    ``below_floor_pulses``, which no callback path touches at all (see below).
 
     Attributes:
         detector_id: String identifier matching the config schema.
@@ -604,6 +768,19 @@ class _DetectorState:
             largest window Rule 2 ever inspects; ``maxlen`` is only a RAM
             backstop.  The *current* ON (if any) is not in the deque — it is
             represented by ``is_on`` / ``last_on_time``.
+        below_floor_pulses: Bounded history of this detector's ON pulses that
+            the Rule 2 sampling-floor gate **declined**, as ``(on_ts, off_ts)``
+            tuples (ROADMAP 12A).  This is the evidence the partner
+            sub-floor-activity gate counts: a detector that keeps producing
+            pulses too short for the engine to resolve is a detector whose
+            *silence* cannot be trusted as proof it saw nothing.
+            **Unlike every other field here it is written and read only on the
+            evaluator thread** — the floor gate that fills it and the partner
+            gate that reads it both run there — so it is deliberately not
+            protected by ``lock``.  Pruned to ``partner_blip_window_sec``
+            alongside ``on_intervals``; ``maxlen`` is only a RAM backstop.
+            Entries are deduped against the deque's tail: a detector in two
+            pairs has the same physical pulse declined once per pair.
     """
 
     detector_id: str
@@ -613,6 +790,9 @@ class _DetectorState:
     last_pulse_on_time: float = 0.0
     on_intervals: Deque[Tuple[float, float]] = field(
         default_factory=lambda: deque(maxlen=_PARTNER_INTERVAL_MAXLEN)
+    )
+    below_floor_pulses: Deque[Tuple[float, float]] = field(
+        default_factory=lambda: deque(maxlen=_BELOW_FLOOR_PULSE_MAXLEN)
     )
     lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -650,6 +830,13 @@ class _PairRuntimeState:
             large value relative to fired triggers means the pair is being
             sampled too slowly to judge — it is diagnostic, never an input to
             any rule.
+        partner_blip_suppressed: Count of orphan candidates rejected because
+            the *partner* detector has been producing too many below-floor
+            pulses recently (ROADMAP 12A), i.e. its silence during the
+            observation window is not trustworthy evidence.  Diagnostic in the
+            same way ``below_floor_suppressed`` is; the two populations are
+            disjoint (a below-floor pulse is declined before the partner gate
+            ever sees it).
         last_duty_eval_ts: ``time.time()`` of the most recent ON-duty
             computation for this pair (throttled to ``_DUTY_EVAL_INTERVAL_SEC``).
         pair_min_duty: Most recently computed ``min(duty_a, duty_b)``.
@@ -688,8 +875,9 @@ class _PairRuntimeState:
     # not actuated again.  See _maybe_register_orphan.
     last_handled_pulse_on_a: float = 0.0
     last_handled_pulse_on_b: float = 0.0
-    # Sampling-floor bookkeeping (ROADMAP 9).
+    # Sampling-floor bookkeeping (ROADMAP 9) and the partner gate (12A).
     below_floor_suppressed: int = 0
+    partner_blip_suppressed: int = 0
     last_duty_eval_ts: float = 0.0
     pair_min_duty: float = 0.0
     high_duty_active: bool = False
@@ -902,6 +1090,14 @@ class DiscrepancyMonitor:
     ``suppress_high_duty_pairs``
         When ``True``, Rules 1+2 are disabled entirely for pairs over that
         duty threshold.  Default ``False`` — advisory only.
+    ``partner_blip_window_sec``
+        Trailing horizon over which a detector's below-floor pulses are
+        counted for the partner sub-floor-activity gate (ROADMAP 12A).
+        Default ``300.0``; ``0`` disables the gate.
+    ``partner_blip_max``
+        Below-floor pulses on the partner inside that horizon that make its
+        silence untrustworthy, declining the Rule 2 candidate.  Default
+        ``5``; ``0`` disables the gate.
 
     Duplicate-rejection configuration (read from the intersection config; see
     the module docstring):
@@ -1077,6 +1273,24 @@ class DiscrepancyMonitor:
         self._suppress_high_duty_pairs = bool(
             self._intersection_cfg.get("suppress_high_duty_pairs", False)
         )
+        # Partner sub-floor-activity gate (ROADMAP 12A).  Same validation
+        # posture as _apply_dedup_config: a malformed or negative value falls
+        # back to the default rather than silently disabling the gate; only an
+        # explicit ``0`` on ``partner_blip_max`` turns it off.
+        self._partner_blip_window_sec = _coerce_non_negative(
+            self._intersection_cfg.get(
+                "partner_blip_window_sec", _DEFAULT_PARTNER_BLIP_WINDOW_SEC
+            ),
+            _DEFAULT_PARTNER_BLIP_WINDOW_SEC,
+        )
+        self._partner_blip_max = int(
+            _coerce_non_negative(
+                self._intersection_cfg.get(
+                    "partner_blip_max", _DEFAULT_PARTNER_BLIP_MAX
+                ),
+                float(_DEFAULT_PARTNER_BLIP_MAX),
+            )
+        )
 
     def _apply_dedup_config(self) -> None:
         """Re-read the cross-pair duplicate window from the intersection config.
@@ -1086,16 +1300,12 @@ class DiscrepancyMonitor:
         a typo must not silently restore the duplicate storm.  ``0`` disables
         it, but only when written as an explicit zero.
         """
-        raw = self._intersection_cfg.get(
-            "dedup_window_sec", _DEFAULT_DEDUP_WINDOW_SEC
+        self._dedup_window_sec = _coerce_non_negative(
+            self._intersection_cfg.get(
+                "dedup_window_sec", _DEFAULT_DEDUP_WINDOW_SEC
+            ),
+            _DEFAULT_DEDUP_WINDOW_SEC,
         )
-        try:
-            value = float(raw)
-        except (TypeError, ValueError):
-            value = _DEFAULT_DEDUP_WINDOW_SEC
-        if value < 0.0:
-            value = _DEFAULT_DEDUP_WINDOW_SEC
-        self._dedup_window_sec = value
 
     def set_sampling_floor(self, sec: float) -> None:
         """Set the effective sampling resolution of the upstream detector source.
@@ -1404,6 +1614,19 @@ class DiscrepancyMonitor:
                 state_b.on_intervals.popleft()
             b_intervals     = tuple(state_b.on_intervals)
 
+        # Sub-floor blip history (ROADMAP 12A) lives on its own, much longer
+        # horizon and is evaluator-thread-only, so it is pruned outside the
+        # per-detector locks rather than inside them.
+        blip_prune_before = now - self._partner_blip_window_sec
+        for blip_state in (state_a, state_b):
+            while (
+                blip_state.below_floor_pulses
+                and blip_state.below_floor_pulses[0][1] < blip_prune_before
+            ):
+                blip_state.below_floor_pulses.popleft()
+        a_blips = tuple(state_a.below_floor_pulses)
+        b_blips = tuple(state_b.below_floor_pulses)
+
         # ── 3b. High-duty advisory ────────────────────────────────────────
         if now - rt.last_duty_eval_ts >= _DUTY_EVAL_INTERVAL_SEC:
             rt.last_duty_eval_ts = now
@@ -1494,32 +1717,56 @@ class DiscrepancyMonitor:
         # The registration helper stays pure and static (it is exercised
         # directly by the unit tests); it reports what it suppressed and this
         # caller, which has the instance, does the I/O.
+        # Each slot is judged against the *partner's* blip history: slot "a"'s
+        # evidence is detector B's silence, so it is B's sub-floor behaviour
+        # that decides whether that silence can be trusted (ROADMAP 12A).
         suppressed_a = self._maybe_register_orphan(
             rt, "a", a_is_on, a_last_pulse_on, a_last_off, threshold,
             min_pulse_sec,
+            b_blips, now,
+            self._partner_blip_window_sec, self._partner_blip_max,
         )
         suppressed_b = self._maybe_register_orphan(
             rt, "b", b_is_on, b_last_pulse_on, b_last_off, threshold,
             min_pulse_sec,
+            a_blips, now,
+            self._partner_blip_window_sec, self._partner_blip_max,
         )
-        for slot, orphan_id, suppressed in (
-            ("a", det_a_id, suppressed_a),
-            ("b", det_b_id, suppressed_b),
+        for slot, orphan_id, orphan_state, suppressed in (
+            ("a", det_a_id, state_a, suppressed_a),
+            ("b", det_b_id, state_b, suppressed_b),
         ):
-            if suppressed is not None:
-                self._log_suppression(
-                    reason=_SUPPRESS_BELOW_FLOOR,
-                    pair_key=pair_key,
-                    det_a_id=det_a_id,
-                    det_b_id=det_b_id,
-                    slot=slot,
-                    orphan_det_id=orphan_id,
-                    pulse=suppressed,
-                    min_pulse_sec=min_pulse_sec,
-                    floor_sec=floor_sec,
-                    floor_multiple=floor_multiple,
-                    now=now,
-                )
+            if suppressed is None:
+                continue
+            if suppressed.reason == _SUPPRESS_BELOW_FLOOR:
+                # Remember the blip on the detector that produced it, deduped
+                # against the tail: in a triangle the same physical pulse is
+                # declined once per pair it participates in, and the gate
+                # counts distinct pulses, not evaluations of them.
+                blips = orphan_state.below_floor_pulses
+                if not blips or blips[-1] != suppressed.pulse:
+                    blips.append(suppressed.pulse)
+            self._log_suppression(
+                reason=suppressed.reason,
+                pair_key=pair_key,
+                det_a_id=det_a_id,
+                det_b_id=det_b_id,
+                slot=slot,
+                orphan_det_id=orphan_id,
+                pulse=suppressed.pulse,
+                min_pulse_sec=min_pulse_sec,
+                floor_sec=floor_sec,
+                floor_multiple=floor_multiple,
+                now=now,
+                partner_blip_count=(
+                    suppressed.partner_blip_count
+                    if suppressed.reason == _SUPPRESS_PARTNER_BLIP else None
+                ),
+                partner_blip_window_sec=(
+                    self._partner_blip_window_sec
+                    if suppressed.reason == _SUPPRESS_PARTNER_BLIP else None
+                ),
+            )
 
         # Evaluate detector-A orphan candidate against detector-B history.
         if rt.orphan_watch_a is not None:
@@ -1603,7 +1850,11 @@ class DiscrepancyMonitor:
         last_off: float,
         threshold: float,
         min_pulse_sec: float = 0.0,
-    ) -> Optional[Tuple[float, float]]:
+        partner_blip_pulses: Sequence[Tuple[float, float]] = (),
+        now: float = 0.0,
+        partner_blip_window_sec: float = 0.0,
+        partner_blip_max: int = 0,
+    ) -> Optional[_OrphanSuppression]:
         """Register a new Rule-2 orphan candidate if one is not already tracked.
 
         A candidate is registered when ALL of the following hold:
@@ -1629,6 +1880,19 @@ class DiscrepancyMonitor:
           absence.  Rejected pulses bump ``rt.below_floor_suppressed`` and are
           marked handled, so each distinct pulse is counted (and logged) once
           rather than on every 0.1 s tick it remains the detector's last pulse.
+        * The **partner** has produced fewer than ``partner_blip_max``
+          below-floor pulses in the trailing ``partner_blip_window_sec`` — the
+          partner sub-floor-activity gate (ROADMAP 12A).  Rule 2's evidence is
+          the partner's *silence*; a partner that keeps blipping below the
+          engine's own resolution is one whose silence the engine cannot
+          observe reliably, so the candidate is declined.  Rejected pulses bump
+          ``rt.partner_blip_suppressed`` and are marked handled the same way.
+
+        The two gates are ordered and the order is load-bearing: a below-floor
+        pulse must be counted and reported as ``below_sampling_floor``, never
+        as ``partner_below_floor_activity``.  The populations are therefore
+        disjoint, and the second gate only ever judges pulses the engine
+        considers resolvable.
 
         Args:
             rt: The pair runtime state object to update.
@@ -1640,15 +1904,25 @@ class DiscrepancyMonitor:
             min_pulse_sec: Sampling-floor gate in seconds
                 (``floor × min_pulse_floor_multiple``).  ``0.0`` disables the
                 gate — used only by callers that have no floor to apply.
+            partner_blip_pulses: Snapshot of the **partner** detector's
+                ``below_floor_pulses`` deque, as ``(on_ts, off_ts)`` tuples.
+            now: Evaluator-tick timestamp, used only as the right edge of the
+                partner-blip horizon.
+            partner_blip_window_sec: Trailing horizon over which those pulses
+                are counted.  ``0.0`` disables the partner gate.
+            partner_blip_max: Number of partner below-floor pulses inside the
+                horizon that makes the partner's silence untrustworthy.  ``0``
+                disables the partner gate.
 
         Returns:
-            ``(pulse_on, pulse_off)`` of the pulse this call suppressed at the
-            sampling-floor gate, or ``None`` in every other case — including a
-            successful registration and every early return.  This method stays
-            static and side-effect-free apart from ``rt``; the caller owns the
-            suppression log, so the reporting seam is a return value rather
-            than a write from here.  Because a suppressed pulse is marked
-            handled, a given pulse is reported at most once, not once per tick.
+            An :class:`_OrphanSuppression` describing the pulse this call
+            declined and which gate declined it, or ``None`` in every other
+            case — including a successful registration and every early return.
+            This method stays static and side-effect-free apart from ``rt``;
+            the caller owns the suppression log, so the reporting seam is a
+            return value rather than a write from here.  Because a suppressed
+            pulse is marked handled, a given pulse is reported at most once,
+            not once per tick.
         """
         if is_on or last_pulse_on == 0.0 or last_off == 0.0:
             return None
@@ -1683,7 +1957,41 @@ class DiscrepancyMonitor:
                     "below_floor_suppressed": rt.below_floor_suppressed,
                 },
             )
-            return last_pulse_on, last_off
+            return _OrphanSuppression(
+                _SUPPRESS_BELOW_FLOOR, (last_pulse_on, last_off)
+            )
+
+        # Partner sub-floor-activity gate (ROADMAP 12A).  Strictly after the
+        # floor gate above: the pulse in hand is one the engine can resolve,
+        # and what is in question is whether the *partner's* silence means
+        # anything.  Counts pulses, not ticks — the deque holds one entry per
+        # distinct declined pulse, deduped by the caller.
+        if partner_blip_max > 0 and partner_blip_window_sec > 0.0:
+            horizon = now - partner_blip_window_sec
+            blip_count = sum(
+                1 for _blip_on, blip_off in partner_blip_pulses
+                if blip_off > horizon
+            )
+            if blip_count >= partner_blip_max:
+                rt.partner_blip_suppressed += 1
+                setattr(rt, handled_attr, last_pulse_on)
+                log.debug(
+                    "Orphan candidate declined — partner blips below the "
+                    "sampling floor too often for its silence to be evidence",
+                    extra={
+                        "pair_key": rt.pair_key,
+                        "slot": which,
+                        "pulse_duration_sec": round(pulse_duration, 3),
+                        "partner_blip_count": blip_count,
+                        "partner_blip_max": partner_blip_max,
+                        "partner_blip_window_sec": partner_blip_window_sec,
+                        "partner_blip_suppressed": rt.partner_blip_suppressed,
+                    },
+                )
+                return _OrphanSuppression(
+                    _SUPPRESS_PARTNER_BLIP, (last_pulse_on, last_off),
+                    blip_count,
+                )
 
         setattr(rt, attr, (last_pulse_on, last_off))
         setattr(rt, handled_attr, last_pulse_on)
@@ -2255,6 +2563,8 @@ class DiscrepancyMonitor:
         floor_sec: float,
         floor_multiple: float,
         now: float,
+        partner_blip_count: Optional[int] = None,
+        partner_blip_window_sec: Optional[float] = None,
     ) -> None:
         """Append one row to the engine's suppression log.
 
@@ -2278,6 +2588,13 @@ class DiscrepancyMonitor:
                 separate from ``min_pulse_sec`` so a consumer can re-derive
                 the gate at other multiples.
             now: Evaluator-tick timestamp the decision was taken at.
+            partner_blip_count: Partner below-floor pulses counted inside the
+                gate's horizon (ROADMAP 12A), or ``None`` for a row the
+                partner gate did not produce — in which case both partner
+                columns are written blank.
+            partner_blip_window_sec: The horizon they were counted over, kept
+                separate from the count for the same reason ``floor_sec`` is
+                kept separate from ``min_pulse_sec``.
         """
         if self._suppression_log_path is None:
             return
@@ -2296,6 +2613,20 @@ class DiscrepancyMonitor:
 
         det_a_cfg = self._intersection_cfg["detectors"].get(det_a_id, {})
         det_b_cfg = self._intersection_cfg["detectors"].get(det_b_id, {})
+
+        if reason == _SUPPRESS_PARTNER_BLIP:
+            partner_det_id = det_b_id if slot == "a" else det_a_id
+            description = (
+                f"orphan candidate on detector '{orphan_det_id}' not "
+                f"registered: partner '{partner_det_id}' produced "
+                f"{partner_blip_count} below-floor pulses in the last "
+                f"{partner_blip_window_sec:g}s"
+            )
+        else:
+            description = (
+                f"orphan candidate on detector '{orphan_det_id}' not "
+                f"registered: pulse {duration:.3f}s < gate {min_pulse_sec:.3f}s"
+            )
 
         row = {
             "event_timestamp":          f"{now:.3f}",
@@ -2316,9 +2647,13 @@ class DiscrepancyMonitor:
             "min_pulse_sec":            round(min_pulse_sec, 4),
             "sampling_floor_sec":       round(floor_sec, 4),
             "min_pulse_floor_multiple": floor_multiple,
-            "description": (
-                f"orphan candidate on detector '{orphan_det_id}' not "
-                f"registered: pulse {duration:.3f}s < gate {min_pulse_sec:.3f}s"
+            "description":              description,
+            "partner_blip_count": (
+                "" if partner_blip_count is None else partner_blip_count
+            ),
+            "partner_blip_window_sec": (
+                "" if partner_blip_window_sec is None
+                else round(partner_blip_window_sec, 3)
             ),
         }
 

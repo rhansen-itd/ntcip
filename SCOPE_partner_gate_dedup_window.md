@@ -1,6 +1,11 @@
 # Scope: Partner-blip gate (12A), hysteresis decision (12B), dedup window re-derivation (14)
 
-**Status (2026-08-03):** analysis complete (Fable); implementation not started.
+**Status (2026-08-03):** analysis complete (Fable). **Item A implemented and
+Item B checked off (2026-08-03, Opus)** — the partner gate's offline
+counterfactual reproduced the expected kills exactly (08-01 6 FP + 5 TP,
+08-02 15 FP + 10 TP), as did every alternative row of its parameter table.
+**Item C (ROADMAP 14) is the open implementation work**; Item D is optional and
+awaits owner sign-off.
 This document re-derives ROADMAP Items 12 and 14 against the corrected
 post-Item-13 baselines (08-02 overall 94.1 %, rule 1 95.3 %, rule 2 92.8 %;
 08-01 overall 96.9 %) and prescribes exactly what to build. Items A and C are
