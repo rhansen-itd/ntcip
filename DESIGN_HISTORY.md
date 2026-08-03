@@ -1923,3 +1923,83 @@ decided. Entries after this point are logged as the decision lands.
   dry run reported the plan, `--apply` deleted only the contained clip,
   repointed its `discrepancies_log.csv` row, left the other camera alone, and a
   second run was a no-op.
+
+- 2026-08-03 — **The 2026-08-02 (Sunday) full-day run measured. Headline
+  finding: `__accuracy_report.py` matches on GT *start time* only, so a
+  trigger that fires mid-event is scored as a false positive — this, not an
+  engine regression, is most of the apparent 96.5 % → 91.3 % precision drop.**
+  First run with 9C4 and the cleanup sweep both live: 11.9 h (09:39–21:35
+  site), 1553 starts, 877 clips, 2808 floor suppressions, 190 sweep deletions
+  — 3× the 2026-08-01 sample. Scored with `_intersections.json` (17 pairs, the
+  config the run actually used — `video_engine/intersections.json` defines only
+  5 and would have invented misses; the decision log's `pair_key` set is the
+  cheap way to tell which config a run used).
+
+  **The matcher defect.** `_match` is "one-to-one nearest-*start* matching per
+  (pair, type)" with `diff <= tolerance` (3.0 s). The engine's rule 1 does not
+  necessarily fire at the disagreement's start: after a cooldown, or when it
+  picks the disagreement up mid-run, it fires deep inside an event that ground
+  truth records as a single long anomaly. On this run **62 of the 135 listed
+  FPs (46 %) fall inside a GT anomaly window on the same pair**, median fire
+  lag 27 s past GT start, p90 55 s, max 64 s — and the durations match
+  exactly (engine measures a 62.9 s mismatch; the GT row is a 62.9 s
+  `extended_disagreement` starting 53 s earlier). Counting a fire time inside
+  `[gt_start − tol, gt_end + tol]` as a match gives **91.3 % → 95.3 %** on
+  08-02 and **96.5 % → 97.5 %** on 08-01. The artifact is volume-dependent —
+  it costs 4.0 points on a 12 h Sunday against 1.0 on a 3.75 h Saturday,
+  because long disagreements are what it mis-scores — so it is *not* a
+  constant that cancels between runs, and every precision figure recorded
+  before today is a floor. Fixing the matcher is now ROADMAP 13 and gates 12.
+
+  **Ruled out, in order, before landing on the matcher** (recorded so nobody
+  re-runs them): clock skew — the FP nearest-GT deltas are median 117.9 s with
+  only 1 of 135 inside 5 s, the opposite of the skew signature; time-of-day and
+  duration — restricting 08-02 to 08-01's window gives 91.4 %, versus 91.3 %
+  for the whole run; **pair mix** — re-weighting 08-02's per-pair precision
+  onto 08-01's trigger mix gives 92.0 %, and the reverse 96.6 %, so the
+  directional shift is worth ~0.7 points; **9C4** — duplicates score 91.9 %
+  against non-duplicates' 91.1 %; and detector health — per-detector sub-floor
+  blip rates move ≤ 2.8 points either way.
+
+  **Controller clock skew drifts *within* a run; it is not a per-run
+  constant.** Two independent estimators (nearest-neighbour, and
+  cross-correlation over ±20 s at 0.05 s steps, which does not alias when the
+  offset approaches the ~3.2 s median inter-edge gap) agree: −0.30 s at
+  09:39, +2.2 s by 18:15, +1.2 s at 21:35 — ~2.5 s peak-to-peak, no step.
+  Best single scalar +0.75 s, max residual ~1.45 s, inside the 3.0 s
+  tolerance, so one `--clock-offset` is still safe *here*; on a run that
+  wanders further it would not be. The 24-minute hole at 11:12–11:35 is a VPN
+  outage, correctly handled as two coverage blocks. Note the monitoring
+  machine runs **PDT** while the site is **MDT** — `datetime.fromtimestamp()`
+  in an ad-hoc script prints an hour behind the site-local times the report
+  and the datZ filenames use.
+
+  **The traffic genuinely differed, as the owner predicted, and it explains
+  the trigger distribution but not the precision delta.** Share of all
+  detector activations: ph6 (SB) 22.1 % → 31.7 % (**+9.6 pts**) and ph7 (WB)
+  12.1 % → 12.9 % were the only phases to gain; ph8 −3.3, ph2 −2.8, ph3 −2.3,
+  ph1 −1.9. Pair-level volume change vs precision change is r = +0.19 — no
+  relationship. Two corrections to earlier readings fell out: 26:33 (the 12A
+  poster child) was **50.0 % on 08-01** (7/14 — CLAUDE.md's own figure) and
+  *improved* to 62.2 % on the day its phase gained the most volume; and 7 of
+  17 pairs carried under 15 triggers on 08-01, five of them reading "100 %"
+  on 1–9 triggers, so that baseline was thinner per-pair than its headline
+  suggests.
+
+  **Delivery and cleanup, the other two things the status block wanted
+  re-measured.** The writer-cap decision loss fell **33.6 % → 20.0 %** (219 of
+  1553), so 9C4 recovered roughly 40 % of it. The cleanup sweep removed **190
+  of 877 clips (21.7 %, 93 min, 371 MB)** against a predicted 6.6 % residual;
+  the prediction was wrong because it was sized on a 3.75 h run. Breakdown:
+  **139 (73.2 %) different-group** — the population only the sweep can catch,
+  which grows with run length as unrelated pairs overlap the same approach;
+  30 (15.8 %) same-pair cooldown re-fires, never a 9C4 case; and **21 (11.1 %)
+  same-group, different pair, which 9C4 should have caught**. The last is a
+  real gap: `dedup_window_sec` defaults to **1.0 s** but the median clip is
+  **24.4 s**, so two same-group starts a few seconds apart escape dedup and
+  still produce a wholly-contained clip. That is ROADMAP 14.
+
+  Artifacts committed: `banks_events_20260802_0930-2229.csv`,
+  `gt_anomalies_20260802_0930-2229.csv`, `engine_decisions_20260802.csv`,
+  `engine_suppressions_20260802.csv`, `discrepancies_log_20260802.csv`, and
+  `video_cleanup_log_20260802.csv` (the first committed cleanup log).

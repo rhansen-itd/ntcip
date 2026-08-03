@@ -204,30 +204,74 @@ precision/recall; models cooldown + poll aliasing), not by comparing raw
 counts. Build the export with `__decode_datz.py` → `__make_gt_export.py`, and
 pass the *same* intersection config the engine ran with — the three
 intersection JSONs disagree on pairs, and scoring against the wrong set
-invents misses. **Last measured 2026-08-01 (ROADMAP 9C2, the high-duty run):
-overall precision 96.5 %, rule 2 precision 96.3 %, adjusted recall 86.2 %,
-zero stale-refire phantoms, no zero-correspondence pair — all four §Item C
-criteria pass.** Artifacts are committed as `engine_decisions_20260801.csv`,
-`engine_suppressions_20260801.csv`, `discrepancies_log_20260801.csv`,
-`banks_events_20260801_1300-1645.csv` and
-`gt_anomalies_20260801_1300-1645.csv`. The superseded 2026-07-31 figures
-(89.4 % / 59.9 %) were read off the *recording* log and were a floor.
+invents misses — the cheap way to tell which config a run used is the set of
+`pair_key` values in its decision log (the 2026-08-02 run used the root
+`_intersections.json`, 17 pairs, **not** `video_engine/intersections.json`,
+which defines 5).
 
-**Controller clock skew is real and must be measured per run (2026-08-01 —
-load-bearing).** The engine stamps events with the monitoring machine's clock;
-the ground truth is stamped by the Econolite controller. Nothing keeps them in
-sync, and on the 2026-08-01 run the controller ran **+4.49 s ahead** (vs ~0 s
-on 2026-07-31). Uncorrected, that is larger than `--tolerance` (3.0 s) and
-drags overall precision from 96.5 % to **11.6 %** — a collapse that looks like
-a catastrophic engine regression and is not one. The tell: every candidate
-false positive reports nearly the *same* `nearest GT Δ`, while the per-pair
-table still shows healthy trigger and GT counts on the same pairs. Measure the
-skew by comparing engine-observed detector edges (`engine_suppressions.csv`
+**Every recorded precision figure is a floor, because the matcher scores
+mid-event triggers as false positives (2026-08-03, ROADMAP 13 —
+load-bearing).** `_match` compares a trigger's fire time against the GT
+anomaly's **start** (±`--tolerance`, 3.0 s). A rule 1 trigger that fires
+*inside* a long disagreement — after a cooldown, or picking it up part-way —
+is counted a false positive even though the engine caught the event; the
+durations line up exactly. On the 2026-08-02 run **62 of 135 listed FPs (46 %)
+fall inside a GT window on the same pair** (median fire lag 27 s past GT
+start). Correcting for it: 91.3 % → **95.3 %** (08-02) and 96.5 % → **97.5 %**
+(08-01). The artifact is volume-dependent, so it does **not** cancel between
+runs — don't compare two runs' precision until Item 13 lands.
+
+Last measured **2026-08-02** (11.9 h, 1553 starts, 3× the prior sample):
+overall precision 91.3 % as reported / ~95.3 % corrected, rule 2 92.8 %,
+adjusted recall 87.6 %, writer-cap delivery loss 20.0 % (down from 33.6 %).
+2026-08-01 (ROADMAP 9C2, high-duty, 3.75 h): 96.5 % / ~97.5 % corrected, rule 2
+96.3 %, adjusted recall 86.2 %, zero stale-refire phantoms — all four §Item C
+criteria passed. Artifacts for both runs are committed
+(`engine_decisions_*`, `engine_suppressions_*`, `discrepancies_log_*`,
+`banks_events_*`, `gt_anomalies_*`, plus `video_cleanup_log_20260802.csv`).
+The superseded 2026-07-31 figures (89.4 % / 59.9 %) were read off the
+*recording* log and were a floor for a different reason.
+
+**Two traps when comparing runs**, both hit on 2026-08-03 and both ruled out
+before the matcher was found: per-pair figures from the 08-01 run are thin
+(7 of 17 pairs under 15 triggers, five reading "100 %" on 1–9), and traffic
+composition shifts between days (ph6 gained 9.6 points of share on the Sunday
+run) — but re-weighting one run's per-pair precision onto the other's trigger
+mix moves it only ~0.7 points, so mix is *not* an explanation for a precision
+gap. Neither is dedup (duplicates scored 91.9 % vs non-duplicates' 91.1 %).
+
+**Controller clock skew is real, must be measured per run, and drifts *within*
+a run (2026-08-01, revised 2026-08-03 — load-bearing).** The engine stamps
+events with the monitoring machine's clock; the ground truth is stamped by the
+Econolite controller. Nothing keeps them in sync. Measured values so far: ~0 s
+(2026-07-31), **+4.49 s** (2026-08-01), and on 2026-08-02 a *drift* from
+−0.30 s at 09:39 to **+2.2 s** by 18:15 and back to +1.2 s — ~2.5 s
+peak-to-peak with no step, even though the clock had been synced shortly
+before that run. `--clock-offset` takes a single scalar, which was still safe
+there (best fit +0.75 s, max residual ~1.45 s, inside the 3.0 s tolerance);
+on a run that wanders further it would not be, and the run would need scoring
+in segments.
+
+Uncorrected, a skew larger than `--tolerance` drags overall precision to
+**11.6 %** — a collapse that looks like a catastrophic engine regression and is
+not one. The tell: every candidate false positive reports nearly the *same*
+`nearest GT Δ`, while the per-pair table still shows healthy trigger and GT
+counts on the same pairs. (Contrast the ROADMAP 13 matcher defect, whose FPs
+show *scattered* deltas — median 117.9 s on 08-02, only 1 of 135 inside 5 s.)
+
+Measure the skew from engine-observed detector edges (`engine_suppressions.csv`
 and rule-2 rows of `engine_decisions.csv` carry exact Unix ON/OFF windows)
-against the controller's 82/81 codes, then pass `--clock-offset` to
-`__accuracy_report.py`. The result is insensitive to the exact value (3.5–5.5 s
-all score identically, since the offset only has to land inside the tolerance)
+against the controller's 82/81 codes. **Use cross-correlation, not
+nearest-neighbour matching** — scan candidate offsets and take the peak match
+count; nearest-neighbour aliases onto the wrong pulse once the offset
+approaches the ~3.2 s median inter-edge gap, and reports a falsely small skew.
+The result is otherwise insensitive to the exact value (3.5–5.5 s scored
+identically on 08-01, since the offset only has to land inside the tolerance)
 — what matters is not leaving it at zero.
+
+Unrelated but adjacent: the monitoring machine here runs **PDT** while the site
+is **MDT**, so `datetime.fromtimestamp()` in an ad-hoc script prints an hour
+behind the site-local times `__accuracy_report.py` and the datZ filenames use.
 
 **Three logs, and they mean different things (2026-08-01, ROADMAP 9C1 + 9C3 —
 load-bearing for anyone measuring accuracy).** All land in `output_dir`:
@@ -302,10 +346,20 @@ reference at the survivor. It is the counterpart to 9C4, not a replacement:
 construction cannot touch a Rule 2 orphan clip nested inside a Rule 1 clip
 (it explicitly refuses to fold those), two unrelated pairs disagreeing about
 the same approach, or a hand-dropped trigger over live footage. Sized against
-the committed 2026-08-01 artifacts: **91 of 348 recorded clips (26.1 %) were
-wholly contained in another**; 68 of those are the population 9C4 now rejects
-upstream, leaving **23 (6.6 %, ~11 min of footage) that only this sweep
-catches**.
+the committed 2026-08-01 artifacts (retrospectively, before 9C4 was live):
+**91 of 348 recorded clips (26.1 %) were wholly contained in another**; 68 of
+those were the population 9C4 now rejects upstream, predicting a **6.6 %**
+residual.
+
+**Measured for real on 2026-08-02, the first run with both live: 190 of 877
+clips (21.7 %, 93 min, 371 MB), not 6.6 %.** The prediction was sized on a
+3.75 h run and the dominant population grows with run length. Breakdown:
+**139 (73.2 %) different-group** — unrelated pairs covering the same approach,
+which only this sweep can catch; **30 (15.8 %) same-pair** cooldown re-fires,
+never a 9C4 case; and **21 (11.1 %) same-group/different-pair, which 9C4
+should have caught** — `dedup_window_sec` defaults to 1.0 s while the median
+clip is 24.4 s, so same-group starts a few seconds apart both record and one
+ends up nested (ROADMAP 14).
 
 Four things are load-bearing:
 

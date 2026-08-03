@@ -29,39 +29,53 @@ highest used so far.
 
 ---
 
-> **Status at a glance (2026-08-01).**
+> **Status at a glance (2026-08-03).**
 >
-> **Nothing is waiting on hardware.** **Item 9 is closed in full** — A, B, C
-> and C1–C4 all landed between 2026-07-30 and 2026-08-01 (see DESIGN_HISTORY).
-> The high-duty re-baseline passed all four §Item C criteria (precision
-> 96.5 %, rule 2 precision 96.3 %, adjusted recall 86.2 %, zero phantoms) with
-> the regime genuinely reached, and **9C4** then removed the cross-pair
-> duplicate storm (137 of 523 starts, 26.2 %) that was burning writer slots on
-> second copies of the same moment.
+> **Nothing is waiting on hardware, and no further engine run is needed to
+> proceed.** The 2026-08-02 Sunday run (11.9 h, 1553 starts — 3× the 08-01
+> sample) is measured and committed; it answered all three of the re-measurement
+> questions the previous status block was holding open, and surfaced a
+> measurement defect that now gates the rule work.
 >
-> **Ready to start now, no hardware:** **12** (the two rule-level findings the
-> re-baseline surfaced — the 26:33 partner-side gate is the highest-value
-> change available), **2**, **3**, **10**, and **4e / 4h** (unblocked by 4d).
+> **Read this before trusting any precision figure in this file.**
+> `__accuracy_report.py` matches a trigger to ground truth on **GT start time
+> only** (±`--tolerance`, default 3.0 s). A rule 1 trigger that fires *mid-event*
+> — after a cooldown, or picking a disagreement up part-way — is scored a false
+> positive even though the engine caught it. **62 of the 08-02 run's 135 listed
+> FPs (46 %) fall inside a GT anomaly window on the same pair**, median fire lag
+> 27 s past GT start. Counting window containment as a match gives **91.3 % →
+> 95.3 %** (08-02) and **96.5 % → 97.5 %** (08-01). The artifact is
+> volume-dependent, so it does *not* cancel between runs: **every precision
+> number recorded before 2026-08-03 is a floor.** That is **Item 13**, and it
+> gates **12**.
 >
-> **Suggested order:** **12A** (partner-side gate: ~96.5 % → ~97.8 % precision
-> on paper, sized from committed artifacts) — then **2** or **3** (both
-> self-contained). Note **12B** is written as "probably don't"; read it before
-> starting it.
+> **Suggested order:** **13** (fix the matcher, re-score both committed runs) →
+> **12** (re-derive both sub-items against corrected numbers; 12A's sizing and
+> 12B's "probably don't" verdict were both computed on the uncorrected data) →
+> **14** (the dedup-window gap) → **2** or **3** (self-contained).
+>
+> **Also ready, no hardware:** **10**, and **4e / 4h** (unblocked by 4d).
+>
+> **The three re-measurements, answered.** *Clock skew* **drifts within a run**
+> and is not a per-run constant: −0.30 s → +2.2 s → +1.2 s across 08-02, ~2.5 s
+> peak-to-peak, no step (best scalar +0.75 s, still inside tolerance — but do
+> not assume that holds). *Writer-cap decision loss* fell **33.6 % → 20.0 %**,
+> so 9C4 recovered ~40 % of it. *Cleanup sweep* removed **190 of 877 clips
+> (21.7 %)** versus the predicted 6.6 % residual — the prediction was sized on a
+> 3.75 h run; 73.2 % of removals are different-group (only the sweep can catch
+> those, and the population grows with run length), 15.8 % same-pair cooldown
+> re-fires, and **11.1 % same-group leaks that 9C4 should have caught** (Item
+> 14).
 >
 > **Automated duplicate-clip cleanup** landed 2026-08-01 as a same-session
 > follow-on to 9C4 (`video_engine/video_cleanup.py`; see DESIGN_HISTORY) — a
 > clip wholly contained in another from the same camera is deleted and its
-> `discrepancies_log.csv` rows repointed at the survivor. Sized on the
-> committed artifacts: 91 of 348 recorded clips (26.1 %) were contained, 68 of
-> them the population 9C4 now rejects upstream, so **23 (6.6 %) is the residual
-> to re-measure** on the first post-9C4 run.
+> `discrepancies_log.csv` rows repointed at the survivor.
 >
-> **The next engine run should re-measure three things regardless of item:**
-> the controller clock skew (`--clock-offset`; +4.49 s on 2026-08-01, ~0 s the
-> day before — it is not a constant), how much of the writer-cap's 33.6 %
-> decision loss 9C4 actually recovered, and how many clips the cleanup sweep
-> removes now that 9C4 is upstream of it. Only a fresh run can show any of the
-> three.
+> **Item 9 is closed in full** — A, B, C and C1–C4 all landed between
+> 2026-07-30 and 2026-08-01 (see DESIGN_HISTORY), and **9C4** removed the
+> cross-pair duplicate storm that was burning writer slots on second copies of
+> the same moment.
 >
 > Items **8** (remux manager thread-safety + the single-camera assumption) and
 > **4f** (web UI: loopback default + shared-secret control endpoints) landed
@@ -83,14 +97,105 @@ highest used so far.
 
 ---
 
+## 13 — `__accuracy_report.py` scores mid-event triggers as false positives (Target: Opus)
+
+**Prerequisite for Item 12.** `_match` is documented as "one-to-one
+nearest-*start* matching per (pair, type)" and tests `abs(trigger.start_ts −
+gt.start) <= tolerance`. The engine's rule 1 does not always fire at a
+disagreement's start: after a cooldown, or when it picks the disagreement up
+part-way, it fires deep inside an event that ground truth records as one long
+`extended_disagreement`. The trigger is then counted a false positive despite
+the engine having caught the event — the durations line up exactly (engine
+measures a 62.9 s mismatch; the GT row is a 62.9 s anomaly starting 53 s
+earlier).
+
+Sized on the committed artifacts:
+
+| Run | Listed FPs | Inside a GT window | Precision → corrected |
+|---|---|---|---|
+| 2026-08-02 | 135 | **62 (46 %)** | 91.3 % → **95.3 %** |
+| 2026-08-01 | 18 | 5 (28 %) | 96.5 % → **97.5 %** |
+
+Median fire lag past GT start on 08-02 is 27 s (p90 55 s, max 64 s). The
+artifact is **volume-dependent** — 4.0 points on a 12 h run against 1.0 on a
+3.75 h one — so it does not cancel between runs, and every precision figure
+recorded before 2026-08-03 is a floor.
+
+- [ ] Match a trigger when its fire time falls within
+  `[gt.start − tolerance, gt.end + tolerance]`, keeping the existing
+  one-to-one constraint and the per-(pair, type) scoping. Prefer the
+  earliest-starting eligible GT event so a long anomaly can't steal a match
+  from a short one it encloses.
+- [ ] Keep nearest-start as the tiebreak among candidates, and keep
+  `nearest_diff` reporting for genuinely unmatched rows.
+- [ ] Decide explicitly whether one long GT anomaly may absorb **several**
+  triggers (the engine legitimately re-fires after cooldown inside a 120 s
+  disagreement). One-to-one currently forces all but the first to be FPs; that
+  is arguably also wrong, but it is a separate call from this fix — record
+  whichever way it goes.
+- [ ] Re-score both committed runs and update the figures in CLAUDE.md,
+  ROADMAP and DESIGN_HISTORY that were measured on the old matcher.
+
+Suggested prompt:
+> [Opus] In the ntcip project, do Item 13 of ROADMAP.md: fix
+> `__accuracy_report.py`'s matcher to count a trigger whose fire time falls
+> inside a GT anomaly window as a match, then re-score the committed
+> 2026-08-01 and 2026-08-02 artifacts and update the recorded figures.
+
+---
+
+## 14 — `dedup_window_sec` (1.0 s) is far shorter than a clip (24 s median) (Target: Opus)
+
+9C4 suppresses a same-group `start` fired within `dedup_window_sec` (default
+**1.0 s**) of the group's last emitted start for the same cameras. But the
+median recorded clip on the 2026-08-02 run is **24.4 s**, so two same-group
+starts a few seconds apart both fire, both record, and one clip ends up wholly
+inside the other. Measured on that run: of 190 sweep deletions, **21 (11.1 %)
+are same-group/different-pair** — precisely the population 9C4 exists to
+prevent. (The other 169 are out of its reach by construction: 139 different-group,
+30 same-pair cooldown re-fires.)
+
+The disk-side sweep does catch these, so this is a cost question, not a
+correctness one — a duplicate clip burns one of `max_concurrent_writers`
+(default 2) for its whole length, and the writer cap still drops 20.0 % of
+decisions. Raising the window is not obviously right: it must not swallow a
+genuinely separate event on a busy group, and 9C4's held-pair AND-gated stop
+already couples the folded pair's resolution to the owner's.
+
+- [ ] Re-derive the window from the committed 08-02 artifacts: for same-group
+  start pairs, plot inter-start gap against whether the resulting clips were
+  contained. The 21 deletions carry both spans in `video_cleanup_log.csv`.
+- [ ] Decide between a larger fixed default and deriving the window from the
+  trigger's own `pre_roll + post_roll` (which is what actually determines
+  overlap).
+- [ ] Whatever lands, re-check it against the 26.2 % duplicate rate 9C4 was
+  built for — the goal is fewer contained clips, not a broader suppression that
+  starts eating real events.
+
+---
+
 ## 12 — Two rule-level accuracy findings from the 9C re-baseline (Target: Opus)
 
-Both were surfaced by Item 9's measurement work and **re-measured on the
-2026-08-01 high-duty run**; Item 9 itself is closed (see DESIGN_HISTORY,
+**Blocked on Item 13** — both sub-items were sized on precision figures the
+matcher defect understates, and 46 % of the FP population they reason about
+turned out to be mis-scored matches. Re-derive both against corrected numbers
+before implementing either; the shape of each argument may survive, but the
+sizing will not.
+
+Both were surfaced by Item 9's measurement work and re-measured on the
+2026-08-01 high-duty run; Item 9 itself is closed (see DESIGN_HISTORY,
 2026-07-30 → 2026-08-01). §Item C's "don't touch rule code until the
 measurement is settled" gate is open — these are the rule changes it was
-holding back. They are independent of each other; the first is the
-high-value one.
+holding back. They are independent of each other.
+
+**What the 2026-08-02 run changed about each** (see DESIGN_HISTORY 2026-08-03):
+rule 1 is now the larger raw FP source (83 vs 52), inverting 08-01's ordering —
+but 47 of those 83 fall inside a GT window and are Item 13's, not real. Pair
+26:33 was **50.0 % precision on 08-01** (7/14) and *improved* to 62.2 % on
+08-02, the day its phase gained the most volume, which weakens "high duty
+drives its FPs". Volume change vs precision change across all 17 pairs is
+r = +0.19. And 7 of 17 pairs carried under 15 triggers on 08-01 — five reading
+"100 %" on 1–9 triggers — so per-pair 08-01 figures are thin evidence.
 
 - [ ] **A — Rule 2's floor gate is asymmetric, and it is the single largest
   FP source.** The gate bounds the *orphan's* duration but says nothing about
@@ -115,18 +220,20 @@ high-value one.
   this without re-deriving it from GT durations first** — the answer may well
   be "no".
 
-Both are measured against a fresh engine run with
-`__decode_datz.py` → `__make_gt_export.py` → `__accuracy_report.py`, and
-**the controller clock skew must be re-measured every run** (`--clock-offset`;
-+4.49 s on 2026-08-01, ~0 s on 2026-07-31). The 2026-08-01 artifacts are
-committed if a before/after comparison is wanted.
+Both can be re-derived from the **committed** 2026-08-01 and 2026-08-02
+artifacts — no new engine run is required. **The controller clock skew must be
+re-measured per run** and now also *within* one: it drifted −0.30 s → +2.2 s
+→ +1.2 s across 08-02 (best scalar +0.75 s; +4.49 s on 08-01, ~0 s on
+07-31). Measure it by cross-correlating engine-observed detector edges
+(`engine_suppressions.csv`, rule-2 rows of `engine_decisions.csv`) against the
+controller's 82/81 codes — nearest-neighbour matching aliases once the offset
+approaches the ~3.2 s median inter-edge gap.
 
 Suggested prompt:
-> [Opus] In the ntcip project, do Item 12A of ROADMAP.md: add a partner-side
-> resolvability gate to Rule 2 so an orphan pulse is only trusted when the
-> partner's silence is itself resolvable at the current sampling floor. Size it
-> against pair 26:33 in the committed 2026-08-01 artifacts, and re-score with
-> `__accuracy_report.py --poll 0.33 --clock-offset 4.49` before and after.
+> [Opus] In the ntcip project, do Item 12 of ROADMAP.md, after Item 13 has
+> landed: re-derive 12A's partner-side gate and 12B's hysteresis argument
+> against the corrected precision figures, using the committed 2026-08-01 and
+> 2026-08-02 artifacts, then implement whichever survives.
 
 ---
 
