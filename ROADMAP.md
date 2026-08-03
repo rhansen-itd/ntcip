@@ -130,43 +130,62 @@ theoretical generosity today, and it is reported rather than silent.
 
 ## 14 — `dedup_window_sec` (1.0 s) is far shorter than a clip (24 s median) (Target: Opus)
 
+**Re-derivation done 2026-08-03 (Fable) — design and parameters are decided in
+[SCOPE_partner_gate_dedup_window.md](SCOPE_partner_gate_dedup_window.md)
+Item C; what remains is the implementation session.** Two findings changed
+the item's premises: the recorded 139/30/21 deletion breakdown was a join
+defect (through the rewritten recording log); the correct split by trigger-ID
+prefix is **152 different-group / 38 same-group-different-pair / 0
+same-pair**, so the 9C4-reachable population is 20 %, nearly double. And a
+blanket `pre_roll + post_roll` window is **unsafe for rule 2** (32 orphan
+pulse windows would lose footage coverage at W=10) while any width is safe
+for rule-1→rule-1 folds (AND-stop) — the answer is per-rule windows, not one
+number.
+
 9C4 suppresses a same-group `start` fired within `dedup_window_sec` (default
 **1.0 s**) of the group's last emitted start for the same cameras. But the
-median recorded clip on the 2026-08-02 run is **24.4 s**, so two same-group
-starts a few seconds apart both fire, both record, and one clip ends up wholly
-inside the other. Measured on that run: of 190 sweep deletions, **21 (11.1 %)
-are same-group/different-pair** — precisely the population 9C4 exists to
-prevent. (The other 169 are out of its reach by construction: 139 different-group,
-30 same-pair cooldown re-fires.)
-
-The disk-side sweep does catch these, so this is a cost question, not a
-correctness one — a duplicate clip burns one of `max_concurrent_writers`
+median recorded clip on the 2026-08-02 run is **24.4 s**, and most contained
+same-group clips start **1.0–2.3 s** after their survivor — just past the
+window. The disk-side sweep does catch these, so this is a cost question, not
+a correctness one — a duplicate clip burns one of `max_concurrent_writers`
 (default 2) for its whole length, and the writer cap still drops 20.0 % of
-decisions. Raising the window is not obviously right: it must not swallow a
-genuinely separate event on a busy group, and 9C4's held-pair AND-gated stop
-already couples the folded pair's resolution to the owner's.
+decisions.
 
-- [ ] Re-derive the window from the committed 08-02 artifacts: for same-group
-  start pairs, plot inter-start gap against whether the resulting clips were
-  contained. The 21 deletions carry both spans in `video_cleanup_log.csv`.
-- [ ] Decide between a larger fixed default and deriving the window from the
-  trigger's own `pre_roll + post_roll` (which is what actually determines
-  overlap).
-- [ ] Whatever lands, re-check it against the 26.2 % duplicate rate 9C4 was
-  built for — the goal is fewer contained clips, not a broader suppression that
-  starts eating real events.
+- [x] Re-derive the window from the committed 08-02 artifacts (gap histogram
+  of the 38: median 1.62 s, 29 ≤ 3 s, 35 ≤ 10 s, 3 outliers ≥ 38 s; replay
+  simulator validated 457/457 on the run's own marks and 135 on 08-01).
+- [x] Decide fixed vs `pre_roll + post_roll`: **per-rule** —
+  `dedup_window_rule1_sec` new, default 10.0 (≈ pre+post, safe via AND-stop);
+  `dedup_window_sec` 1.0 → 3.0 for rule-2 candidates plus a coverage guard
+  (suppress only if the pulse window sits inside the owner's guaranteed
+  recording span).
+- [x] Re-check against the 26.2 % duplicate-rate goal: 08-02 replay gives +91
+  suppressions (35.0 % of starts), prevents 17 of the 38 contained clips,
+  zero uncovered rule-2 windows; 08-01 replay 170 (32.5 %).
+- [ ] Implement per SCOPE Item C (config keys, `_GroupFire.span_end`, guard,
+  8 tests, docstring updates), verify the replay figures, commit.
+
+Suggested prompt:
+> [Opus] In the ntcip project, implement Item C of
+> SCOPE_partner_gate_dedup_window.md (ROADMAP 14): per-rule dedup windows and
+> the rule-2 coverage guard, exactly as scoped.
 
 ---
 
 ## 12 — Two rule-level accuracy findings from the 9C re-baseline (Target: Opus)
 
-**Unblocked — Item 13 landed 2026-08-03.** Both sub-items were sized on
-precision figures the old matcher understated, and 44 of the 08-02 FP
-population they reason about turned out to be mis-scored matches — all of them
-rule 1, which is exactly what 12B argues about. Re-derive both against the
-corrected numbers before implementing either; the shape of each argument may
-survive, but the sizing will not. Current baselines to beat: 08-02 overall
-94.1 % (rule 1 95.3 %, rule 2 92.8 %), 08-01 overall 96.9 %.
+**Re-derivation done 2026-08-03 (Fable) — see
+[SCOPE_partner_gate_dedup_window.md](SCOPE_partner_gate_dedup_window.md).**
+Outcome: **12A survives, redesigned** as a partner sub-floor-activity gate
+(SCOPE Item A; parameters decided: ≥ 5 distinct below-floor partner pulses in
+a trailing 300 s declines the orphan; projected 08-02 94.1 % → 95.0 %
+overall, 08-01 96.9 % → 98.0 %) — the rule-2 FP population splits into two
+disjoint mechanisms, and 26:33 dominates the gateable one (sub-floor partner
+blips) while the 42:8/31:8 counts are threshold-boundary scoring artifacts no
+engine gate should touch. **12B is decided-no** (SCOPE Item B): from GT
+durations and the engine's own stop rows, a 5.33 s bump removes ~4–9 of 39
+FPs while costing 22–53 genuine events; only the docstring/DESIGN_HISTORY
+check-off remains. Implementation of 12A is the open work.
 
 Both were surfaced by Item 9's measurement work and re-measured on the
 2026-08-01 high-duty run; Item 9 itself is closed (see DESIGN_HISTORY,
@@ -185,43 +204,37 @@ drives its FPs". Volume change vs precision change across all 17 pairs is
 r = +0.19. And 7 of 17 pairs carried under 15 triggers on 08-01 — five reading
 "100 %" on 1–9 triggers — so per-pair 08-01 figures are thin evidence.
 
-- [ ] **A — Rule 2's floor gate is asymmetric, and it is the single largest
-  FP source.** The gate bounds the *orphan's* duration but says nothing about
-  whether the *partner* is resolvable. Pair 26:33 produced **6 of the 9 rule 2
-  FPs** on the 2026-08-01 run (and 7 of all 18), as 1.32–1.94 s orphan pulses
-  on det 26 — the same pair as 2026-07-31, opposite detector. It is also the
-  only pair whose precision is poor (7 matched / 14 triggers) while having
-  **zero** true misses. A partner-side gate is the indicated fix: fixing 26:33
-  alone would take overall precision from 96.5 % to ~97.8 %.
+- [ ] **A — Rule 2's floor gate is asymmetric; a partner-side gate is
+  designed and sized** (SCOPE Item A). The gate bounds the *orphan's*
+  duration but says nothing about whether the *partner* is resolvable: the
+  FPs it targets are real orphan pulses whose partner responded with
+  0.1–0.4 s blips the engine cannot see (partner active in ±5 s for 6/9 of
+  08-01's and 28/52 of 08-02's rule-2 FPs, vs 1 % of TPs). Implement the
+  rolling below-floor-blip gate per the SCOPE: config
+  `partner_blip_window_sec` 300 / `partner_blip_max` 5, suppression reason
+  `partner_below_floor_activity`, two appended log columns, 8 tests, offline
+  counterfactual verification (expected kills: 08-01 6 FP/5 TP, 08-02
+  15 FP/10 TP).
 
-- [ ] **B — Rule 1 has no hysteresis, but the obvious evidence for adding it
-  is not diagnostic, and the fix currently looks net-negative.** All 9 rule 1
-  FPs measured 5.033–5.081 s against the 5.0 s threshold — but **all 281 rule 1
-  triggers measure ≤ 5.1 s**, because the engine fires the instant the
-  disagreement crosses the threshold, so `disagreement_sec` is the duration *at
-  fire time*, not the event's true length. "The FPs cluster at threshold"
-  describes every rule 1 trigger and separates nothing. Judge it against
-  ground-truth durations instead: the 15 true-missed `extended_disagreement`
-  events run 5.1–8.0 s (median 5.4, **9 of 15 ≤ 5.5 s**), so firing at
-  `threshold + one cycle` (5.33 s) would push a meaningful share of genuine
-  events below the bar to remove 9 FPs out of 518 triggers. **Don't implement
-  this without re-deriving it from GT durations first** — the answer may well
-  be "no".
+- [x] **B — Rule 1 hysteresis: re-derived from GT durations and decided
+  NO** (2026-08-03, SCOPE Item B). The FP mechanism is sub-floor chatter
+  stitching (controller-truth XOR run median 1.8 s at event start), and the
+  engine's observed FP episodes run a median 7.2 s — a 5.33 s bump prevents
+  only ~4–9 of 39 FPs on 08-02 while pushing 22–53 genuine events below the
+  bar (matched GT `extended_disagreement` < 5.33 s: 53 on 08-02, 20 on
+  08-01). Remaining action is documentation only (docstring paragraph +
+  DESIGN_HISTORY entry), folded into the 12A session.
 
-Both can be re-derived from the **committed** 2026-08-01 and 2026-08-02
-artifacts — no new engine run is required. **The controller clock skew must be
-re-measured per run** and now also *within* one: it drifted −0.30 s → +2.2 s
-→ +1.2 s across 08-02 (best scalar +0.75 s; +4.49 s on 08-01, ~0 s on
-07-31). Measure it by cross-correlating engine-observed detector edges
-(`engine_suppressions.csv`, rule-2 rows of `engine_decisions.csv`) against the
-controller's 82/81 codes — nearest-neighbour matching aliases once the offset
-approaches the ~3.2 s median inter-edge gap.
+The re-derivation used the committed 2026-08-01 and 2026-08-02 artifacts with
+their measured clock offsets (+4.49 s / +0.75 s); any *new* run scored against
+ground truth must still re-measure its own skew per the cross-correlation
+protocol in CLAUDE.md.
 
 Suggested prompt:
-> [Opus] In the ntcip project, do Item 12 of ROADMAP.md, after Item 13 has
-> landed: re-derive 12A's partner-side gate and 12B's hysteresis argument
-> against the corrected precision figures, using the committed 2026-08-01 and
-> 2026-08-02 artifacts, then implement whichever survives.
+> [Opus] In the ntcip project, implement Item A of
+> SCOPE_partner_gate_dedup_window.md (ROADMAP 12A): the partner
+> sub-floor-activity gate for Rule 2, exactly as scoped — and fold in Item B's
+> documentation-only check-off for 12B.
 
 ---
 

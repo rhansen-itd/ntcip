@@ -2059,3 +2059,64 @@ decided. Entries after this point are logged as the decision lands.
   94.1 % / 96.9 %, and the patched tool reported exactly that. All output paths
   (`--verbose` FP listing, per-pair table, DELIVERY cross-reference) exercised
   on the 08-02 artifacts.
+
+- 2026-08-03 — **Items 12 and 14 re-derived against the corrected baselines;
+  designs decided and scoped in `SCOPE_partner_gate_dedup_window.md`
+  (analysis only — no engine code changed).** Everything below reproduces
+  from the committed 08-01/08-02 artifacts alone, cross-referenced against
+  the controller's own 82/81 edges shifted by the per-run offsets.
+
+  **12A: the rule-2 FP population splits into two disjoint mechanisms**, and
+  the split settles the "is 26:33 still dominant" question both ways. (1)
+  *Sub-floor partner response* — the orphan pulse is real, and the partner
+  responded with 0.1–0.4 s blips below the ~0.33 s sampling floor, so the
+  engine's "partner completely OFF" evidence is structurally blind: 6/9 of
+  08-01's and 28/52 of 08-02's rule-2 FPs, vs 1 % of TPs — near-perfect
+  separation on a variable the engine cannot observe at event time. 26:33
+  dominates this mechanism (6/6, 14/28); det 33 is the #1 sub-floor-blip
+  producer on both runs (304 and 731 distinct pulses) and probably needs
+  physical service. (2) *Threshold-boundary type flips* — 21 of 08-02's FPs
+  (all on the det-8 triangle) measured 4.3–4.96 s pulses the controller saw
+  as ≥ 5.0 s, so GT typed the same event `extended_disagreement`; 14 sit
+  inside such a GT row that itself scores as a true miss. A scoring artifact,
+  not an engine defect — suppressing the boundary zone would cost 47 TPs to
+  kill 21 FPs and must not be done. The prescribed fix for (1) is a rolling
+  partner-blip gate fed by the engine's own floor-gate declines (≥ 5 distinct
+  below-floor partner pulses in 300 s declines the orphan; suppression reason
+  `partner_below_floor_activity`): measured offline, it kills 6 FP/5 TP on
+  08-01 and 15 FP/10 TP on 08-02 → 96.9 % → 98.0 % and 94.1 % → 95.0 %
+  overall. 600/1800 s horizons and N=3 are strictly worse; N=8 is cheaper
+  but kills a third fewer FPs.
+
+  **12B: hysteresis re-derived from GT durations and decided NO.** The rule-1
+  FPs are not marginal-duration events: their controller-truth XOR run at the
+  event start is a median 1.8 s (08-02) — the "continuous ≥ 5 s" image was
+  stitched across true agreements by the same sub-floor blips — and the
+  engine's *observed* FP episodes run a median 7.2 s, so a bump to
+  `threshold + one cycle` (5.33 s) prevents only ~4–9 of 39 FPs while
+  demoting 22–53 genuine matched events (< 5.33 s GT duration). Net-negative
+  by 3–6× on a rule already at 95.3 %. The 08-01 "9 of 15 ≤ 5.5 s"
+  true-missed population reproduces unchanged post-Item-13.
+
+  **14: the recorded 139/30/21 deletion breakdown was a join defect.**
+  Joining through the recording log after the sweep's rewrite aliases every
+  deleted clip onto its survivor; classifying by the trigger-ID prefix in the
+  clip filename (unique, 190/190 mapped) gives **152 different-group / 38
+  same-group-different-pair / 0 same-pair** — zero same-pair is what the 60 s
+  cooldown vs 24.4 s median clip predicts, and the 9C4-reachable population
+  is 20 %, nearly double the recorded figure. CLAUDE.md and ROADMAP corrected.
+  Gap structure of the 38: median 1.62 s (the sibling pair crosses threshold
+  1–2.3 s after the owner — just past the 1.0 s window), 29 ≤ 3 s, 35 ≤ 10 s,
+  3 outliers ≥ 38 s; 5 are rule-1-deleted-into-rule-2-kept, unpreventable by
+  design. A replay simulator (validated exactly: 457/457 against 08-02's own
+  suppression marks, 135 on the 08-01 log) shows a blanket
+  `pre_roll + post_roll` window (10 s) would strand 32 rule-2 pulse windows
+  outside their owner's recording — so the decision is **per-rule windows**:
+  `dedup_window_rule1_sec` 10.0 (any width is footage-safe via the AND-stop)
+  and `dedup_window_sec` 1.0 → 3.0 for rule-2 candidates plus a coverage
+  guard (suppress only if the pulse window sits inside the owner's guaranteed
+  span; a rule-1 owner still active always qualifies at sane windows).
+  Expected from replay: +91 suppressions on 08-02 (543 total, 35.0 %),
+  17 of the 38 contained clips prevented, zero uncovered windows; 170
+  (32.5 %) on 08-01. The sweep keeps the rest (152 different-group by
+  construction, plus outliers) — its diet narrows, it is not replaced.

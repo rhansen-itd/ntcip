@@ -363,13 +363,19 @@ residual.
 
 **Measured for real on 2026-08-02, the first run with both live: 190 of 877
 clips (21.7 %, 93 min, 371 MB), not 6.6 %.** The prediction was sized on a
-3.75 h run and the dominant population grows with run length. Breakdown:
-**139 (73.2 %) different-group** — unrelated pairs covering the same approach,
-which only this sweep can catch; **30 (15.8 %) same-pair** cooldown re-fires,
-never a 9C4 case; and **21 (11.1 %) same-group/different-pair, which 9C4
-should have caught** — `dedup_window_sec` defaults to 1.0 s while the median
-clip is 24.4 s, so same-group starts a few seconds apart both record and one
-ends up nested (ROADMAP 14).
+3.75 h run and the dominant population grows with run length. Breakdown
+(corrected 2026-08-03 — the first published split, 139/30/21, was joined
+through the *rewritten* recording log, where every kept file appears in ≥ 2
+rows and aliases deleted clips onto their survivors; classify by the
+trigger-ID prefix in the clip filename instead, which maps 190/190 uniquely):
+**152 (80 %) different-group** — unrelated pairs covering the same approach,
+which only this sweep can catch; **38 (20 %) same-group/different-pair, which
+9C4 should have caught** — `dedup_window_sec` defaults to 1.0 s while the
+median clip is 24.4 s and the sibling pair typically crosses threshold
+1.0–2.3 s later, so same-group starts both record and one ends up nested
+(ROADMAP 14; parameters decided in SCOPE_partner_gate_dedup_window.md); and
+**zero same-pair** — the 60 s cooldown spaces same-pair clips further apart
+than a 24.4 s median clip can contain.
 
 Four things are load-bearing:
 
