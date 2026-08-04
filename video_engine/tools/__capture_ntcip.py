@@ -44,7 +44,7 @@ Usage::
 
     # Pull controller address from an intersection config:
     python3 video_engine/tools/__capture_ntcip.py \
-        --config _intersections.json --intersection 201 --duration 600
+        --config video_engine/intersections/201.json --intersection 201 --duration 600
 
     # Or fully explicit:
     python3 video_engine/tools/__capture_ntcip.py \
@@ -146,7 +146,7 @@ def main() -> int:
                     "(all 64 channels by default) for pyatspm correlation."
     )
     src = ap.add_argument_group("controller address")
-    src.add_argument("--config", help="intersection JSON (e.g. _intersections.json) "
+    src.add_argument("--config", help="intersection JSON (e.g. video_engine/intersections/201.json) "
                                       "to read ip/port/community from")
     src.add_argument("--intersection", help="intersection ID key inside --config")
     src.add_argument("--ip", help="controller IP (overrides --config)")

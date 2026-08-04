@@ -2,7 +2,7 @@
 """sync_ui_config.py — copy shared deployment values into the monitor's config.
 
 The two packages keep their own config file on purpose: ``ntcip_monitor`` reads
-``config.json`` and ``video_engine`` reads ``intersections.json``, and neither
+``config.json`` and ``video_engine`` reads ``intersections/``, and neither
 imports the other (CLAUDE.md, "Module boundaries"). A handful of values are
 nonetheless the *same fact* about one intersection — the controller's SNMP
 endpoint and the camera's URL — and hand-copying them is how they drift.
@@ -33,11 +33,10 @@ intersection).
 embedded in a camera URL are masked in the printed output.
 
 Usage:
-    python tools/sync_ui_config.py                       # show 201's drift
-    python tools/sync_ui_config.py --apply
-    python tools/sync_ui_config.py -i 701 \
-        --intersections video_engine/701_intersection.json --apply
-    python tools/sync_ui_config.py --camera fisheye --show-secrets
+    python tools/sync_ui_config.py -i 201                # show 201's drift
+    python tools/sync_ui_config.py -i 201 --apply
+    python tools/sync_ui_config.py -i 701 --apply           # the other site
+    python tools/sync_ui_config.py -i 201 --camera fisheye --show-secrets
 """
 
 import argparse
@@ -103,6 +102,47 @@ def load_json(path: Path) -> Dict[str, Any]:
         sys.exit(f"error: {path} is not valid JSON: {exc}")
 
 
+def load_intersections(path: Path) -> Dict[str, Any]:
+    """Read the video engine's intersection config, file or directory.
+
+    Mirrors ``JsonFileConfigProvider``'s two accepted shapes (ROADMAP 2) so a
+    deploy-time tool sees exactly what the runtime will: a directory of
+    per-intersection ``*.json`` files, or a single multi-intersection file.
+    Deliberately re-implemented rather than importing the provider — these
+    scripts belong to neither package, and a half-authored config that fails
+    the provider's validation is precisely when you still want the tool that
+    helps you finish it to run.
+
+    Args:
+        path: Config directory or file.
+
+    Returns:
+        dict: All intersection blocks, keyed by intersection ID.
+
+    Raises:
+        SystemExit: If the path is missing, a directory holds no ``*.json``
+            files, a file is not valid JSON, or an intersection is defined
+            twice — a silent last-file-wins would be the worst outcome here.
+    """
+    if not path.is_dir():
+        return load_json(path)
+
+    files = sorted(path.glob("*.json"))
+    if not files:
+        sys.exit(f"error: {path} contains no *.json intersection configs")
+
+    merged: Dict[str, Any] = {}
+    sources: Dict[str, Path] = {}
+    for one in files:
+        for iid, block in load_json(one).items():
+            if iid in sources:
+                sys.exit(f"error: intersection {iid} is defined in both "
+                         f"{sources[iid]} and {one}")
+            merged[iid] = block
+            sources[iid] = one
+    return merged
+
+
 def get_dotted(config: Dict[str, Any], path: str) -> Tuple[bool, Any]:
     """Read a dotted key path out of a nested dict.
 
@@ -146,7 +186,8 @@ def select_intersection(
     """Pick the intersection to sync from.
 
     Args:
-        data: The parsed intersection-config file (keyed by intersection ID).
+        data: The parsed intersection config (keyed by intersection ID),
+            merged across every file when a directory was given.
         wanted: The requested ID, or None to take the only one present.
 
     Returns:
@@ -158,11 +199,11 @@ def select_intersection(
     ids = [key for key, value in data.items() if isinstance(value, dict)]
     if wanted is None:
         if len(ids) != 1:
-            sys.exit("error: --intersection is required; this file has: "
+            sys.exit("error: --intersection is required; available: "
                      + ", ".join(ids))
         return (ids[0], data[ids[0]])
     if wanted not in data:
-        sys.exit(f"error: intersection {wanted!r} not in this file; "
+        sys.exit(f"error: intersection {wanted!r} not found; "
                  "available: " + ", ".join(ids))
     return (wanted, data[wanted])
 
@@ -285,9 +326,10 @@ def main() -> int:
                     help="intersection ID to sync from (default: the only one "
                          "in the file)")
     ap.add_argument("--intersections", type=Path,
-                    default=Path("video_engine/intersections.json"),
-                    help="video engine intersection config "
-                         "(default: video_engine/intersections.json)")
+                    default=Path("video_engine/intersections"),
+                    help="video engine intersection config: a directory of "
+                         "per-intersection *.json files, or one multi-"
+                         "intersection file (default: video_engine/intersections)")
     ap.add_argument("--config", type=Path, default=Path("config.json"),
                     help="monitor config to update (default: config.json)")
     ap.add_argument("--camera", metavar="ID",
@@ -299,7 +341,7 @@ def main() -> int:
                     help="print camera URLs with their credentials intact")
     args = ap.parse_args()
 
-    data = load_json(args.intersections)
+    data = load_intersections(args.intersections)
     config = load_json(args.config)
 
     intersection_id, section = select_intersection(data, args.intersection)

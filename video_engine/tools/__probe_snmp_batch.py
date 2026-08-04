@@ -34,7 +34,7 @@ A full default run (4 chunk sizes × 25 reps + extras) takes ~2–4 minutes.
 Usage (on the controller-reachable machine)::
 
     python3 video_engine/tools/__probe_snmp_batch.py \
-        --config _intersections.json --intersection 201
+        --config video_engine/intersections/201.json --intersection 201
     # then: git add snmp_batch_probe_*.json && git commit && git push
 
     # offline self-test of the report/JSON plumbing (no hardware, no pysnmp):

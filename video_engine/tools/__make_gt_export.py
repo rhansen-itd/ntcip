@@ -20,7 +20,7 @@ dependencies here::
 
     /home/hansrkid/pyatspm/.venv/bin/python \
         video_engine/tools/__make_gt_export.py events.csv \
-        --config _intersections.json --intersection 201 --out gt.csv
+        --config video_engine/intersections/201.json --intersection 201 --out gt.csv
 
 Two arguments must match the engine run being scored or the comparison is
 meaningless:
@@ -29,8 +29,10 @@ meaningless:
   (``paired_detector_id``, scalar **or list**, symmetric and deduplicated
   exactly as ``discrepancy_engine._build_structures`` does it), so the GT
   covers exactly the pairs the engine was watching.  Check the engine log's
-  pair set against it: the three intersection JSONs in this repo do **not**
-  agree on pairs.  If this reader and the engine ever disagree about the
+  pair set against it — ROADMAP 2 collapsed the repo's three drifted
+  intersection JSONs into one file per site (2026-08-03), but a run scored
+  against a config edited since is the same failure.  If this reader and the
+  engine ever disagree about the
   schema, every trigger on a pair the export missed scores as a false
   positive — the "scoring against the wrong pair set" failure, arriving by a
   new route.
@@ -52,7 +54,10 @@ def _load_pairs(config_path: str, intersection: str):
     """Read deduplicated (phase, det_a, det_b) pairs from an intersection JSON.
 
     Args:
-        config_path: Path to the intersection JSON.
+        config_path: Path to the intersection JSON, or to a directory of
+            per-intersection ``*.json`` files (ROADMAP 2) — the same two
+            shapes ``JsonFileConfigProvider`` accepts, so this can be handed
+            whatever the engine ran with.
         intersection: Intersection ID key inside it.
 
     Returns:
@@ -63,7 +68,13 @@ def _load_pairs(config_path: str, intersection: str):
     Raises:
         SystemExit: If the intersection key is absent.
     """
-    doc = json.loads(Path(config_path).read_text(encoding="utf-8"))
+    path = Path(config_path)
+    if path.is_dir():
+        doc = {}
+        for one in sorted(path.glob("*.json")):
+            doc.update(json.loads(one.read_text(encoding="utf-8")))
+    else:
+        doc = json.loads(path.read_text(encoding="utf-8"))
     try:
         detectors = doc[intersection]["detectors"]
     except KeyError:
@@ -103,7 +114,8 @@ def main() -> int:
     )
     ap.add_argument("events", help="controller events CSV from __decode_datz.py")
     ap.add_argument("--config", required=True,
-                    help="intersection JSON the engine ran with")
+                    help="intersection config the engine ran with: a directory "
+                         "of per-intersection *.json files, or one JSON file")
     ap.add_argument("--intersection", required=True, help="intersection ID key")
     ap.add_argument("-o", "--out", required=True, help="output anomalies CSV")
     ap.add_argument("--lag-threshold", type=float, default=None,

@@ -9,7 +9,7 @@ each channel's ON/OFF waveform over the overlapping time window, and scores
 every (NTCIP channel × controller channel) pair by the **Matthews
 correlation coefficient** of the two binary waveforms.  For each NTCIP
 channel the best-scoring controller channel is its empirically-true identity
-— this is the tool that settles whether ``_intersections.json``'s channel
+— this is the tool that settles whether ``intersections/201.json``'s channel
 assignments are right.
 
 Why MCC and not Jaccard/overlap: detector channels can sit ON for most of a
@@ -37,7 +37,7 @@ Usage::
 
     python3 video_engine/tools/__correlate_channels.py \
         ntcip_capture_20260719_173648.csv banks_events_20260719_1730.csv \
-        [--config _intersections.json --intersection 201] \
+        [--config video_engine/intersections/201.json --intersection 201] \
         [--min-score 0.4] [--margin 0.15] [--min-edges 4] [--verbose]
 """
 

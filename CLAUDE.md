@@ -262,12 +262,14 @@ Accuracy vs. an ATSPM ground-truth export is measured with
 `video_engine/tools/__accuracy_report.py` (correspondence-based
 precision/recall; models cooldown + poll aliasing), not by comparing raw
 counts. Build the export with `__decode_datz.py` → `__make_gt_export.py`, and
-pass the *same* intersection config the engine ran with — the three
-intersection JSONs disagree on pairs, and scoring against the wrong set
-invents misses — the cheap way to tell which config a run used is the set of
-`pair_key` values in its decision log (the 2026-08-02 run used the root
-`_intersections.json`, 17 pairs, **not** `video_engine/intersections.json`,
-which defines 5).
+pass the *same* intersection config the engine ran with — scoring against
+the wrong pair set invents misses — and the cheap way to tell which config a
+run used is the set of `pair_key` values in its decision log. Since ROADMAP 2
+(2026-08-03) there is **one** 201 config, `video_engine/intersections/201.json`
+(17 pairs), which is the file the committed 08-01 and 08-02 runs ran on,
+byte-identical to the `_intersections.json` they name; the 5-pair
+`video_engine/intersections.json` that used to sit beside it is retired.
+`--config` on `__make_gt_export.py` takes the directory or a single file.
 
 **The matcher matches on start alignment *and* containment (2026-08-03,
 ROADMAP 13 — load-bearing).** `_match` originally compared only the trigger's
@@ -501,6 +503,37 @@ When adding intersection-level config needs, extend `ConfigProvider`'s
 interface and both implementations together — don't special-case one
 deployment path with a dict lookup that bypasses the abstraction.
 
+**One file per intersection, in a directory (2026-08-03, ROADMAP 2 —
+load-bearing).** `JsonFileConfigProvider` accepts **either** a single JSON file
+holding one or more blocks (unchanged, and the natural shape for a central
+server) **or a directory**, whose `*.json` files — non-recursive, sorted — are
+merged into one namespace. The repo ships
+`video_engine/intersections/{201,701}.json` and that is the convention:
+
+- It mirrors `SqliteCentralConfigProvider`'s one-row-per-intersection table on
+  the filesystem, instead of leaving the JSON path uniquely "one blob holds
+  every site".
+- An edge box ships only its own site's file. A merged file would put every
+  site's SNMP community string and camera credentials on every box.
+- `_load` validates every block eagerly and raises on the first bad one, so a
+  malformed 701 block in a shared file would stop the 201 box from starting.
+
+Four properties are load-bearing. An intersection defined in **two files
+raises**, naming both — never a silent last-file-wins, which is how a box ends
+up on the wrong controller IP. **Nothing is published until every file parses
+and validates**, so a bad edit during commissioning leaves a running provider's
+previous config intact rather than emptying it. The scan is **not recursive**,
+so a backup or data folder underneath is not silently loaded. And an **empty
+directory raises** — a provider that quietly knows about no intersections is a
+worse failure than a loud one. `source_path(iid)` reports which file a block
+came from; it is deliberately **not** on the `ConfigProvider` ABC, because it
+is a property of a file-backed store and the SQLite provider has no answer for
+it — the one place the "extend both implementations together" rule doesn't
+apply. The two deploy-time tools re-implement the merge in
+`sync_ui_config.load_intersections` rather than importing the provider: they
+belong to neither package, and a half-authored config that fails validation is
+exactly when you still want the tool that helps you finish it to run.
+
 ## Hardware constraints (edge = J1900-class CPU)
 
 There is **one video-buffer backend**: `video_engine/remux_video_buffer.py`
@@ -588,7 +621,7 @@ the 2026-07-15 DESIGN_HISTORY entry.
   Baseline before the flip, for contrast: 8 sequential round trips, a
   1.0–1.5 s cycle, and only ~26 % of edges — which is why the pre-2026-07-31
   guidance treated every high-duty-channel trigger as unreliable. The
-  per-channel *mapping* in `_intersections.json` is verified correct against
+  per-channel *mapping* in `intersections/201.json` is verified correct against
   controller high-res data (`__correlate_channels.py`, twice: 2026-07-19 and
   again post-flip) — never "fix" accuracy problems by remapping channels.
   **Neither number transfers to another controller**: 8 is set only for 201,
@@ -751,7 +784,7 @@ They may import `ntcip_monitor`; they are never imported by it, and nothing in
 them relaxes the rule that the two packages don't import each other.
 
 - **`tools/sync_ui_config.py`** is the de-duplication mechanism for values that
-  live in both config files. `video_engine/intersections.json` is the
+  live in both config files. `video_engine/intersections/` is the
   authoring source; the script writes `controller.ip/port/community/chunk_size`
   and `overlay.camera_url` into `config.json`. **Dry run by default** (`--apply`
   to write), credentials masked in its output, atomic replace, idempotent.
@@ -774,14 +807,14 @@ them relaxes the rule that the two packages don't import each other.
 
 Eight suites, all **stdlib `unittest`** (pytest is not installed here), one file
 per subject, each runnable directly from any working directory via its own
-`sys.path` bootstrap. 426 cases total as of 2026-08-03:
+`sys.path` bootstrap. 446 cases total as of 2026-08-03:
 
 | Suite | Cases | Subject |
 |---|---|---|
 | `video_engine/tests/test_discrepancy_rules.py` | 168 | rule functions, `_evaluate_pair` integration, decision log, suppression log, sampling-floor + partner sub-floor-activity gates, detector groups + cross-pair duplicate rejection + AND-gated stop + per-rule dedup windows and the Rule 2 coverage guard, `_resolve_pytz` |
 | `video_engine/tests/test_video_cleanup.py` | 44 | clip-name parsing, containment + tolerance, `plan_removals` invariants, log rewrite, scan/sweep (stubbed duration probe) |
 | `video_engine/tests/test_remux_manager.py` | 22 | manager writer/timer bookkeeping (stubbed remuxer) |
-| `video_engine/tests/test_config_manager.py` | 9 | `ConfigProviderError` |
+| `video_engine/tests/test_config_manager.py` | 29 | `ConfigProviderError`, `JsonFileConfigProvider` file-or-directory loading (merge, duplicate-ID refusal, non-recursion, atomic reload, `source_path`) + the shipped `intersections/` directory |
 | `ntcip_monitor/tests/test_overlay_shapes.py` | 86 | shape reader, status resolution, live source (stubbed PyAV) |
 | `ntcip_monitor/tests/test_oid_helpers.py` | 33 | OID math + `parse_signal_state` |
 | `ntcip_monitor/tests/test_snmp_batching.py` | 17 | chunking, batched poll loops, cycle EMA (stubbed pysnmp) |
@@ -832,9 +865,14 @@ As of this writing:
   data for intersection 201 — `201_fisheye_shapes.csv` (a copy of the owner's
   `~/vid_cfg720.csv` calibration) and `201_fisheye.jpg` (a still extracted
   from `video_engine/tests/fixtures/sample.ts`). `config.json` points at both.
-- `video_engine/701_intersection.json` — real in-progress config for a second
-  intersection (701, US-95/Whitley Dr), distinct from intersection 201 in
-  `video_engine/intersections.json`. See [ROADMAP.md](ROADMAP.md) #2.
+- `video_engine/intersections/` is **not** clutter: it is the intersection
+  config directory (`201.json`, `701.json` — US-95/Whitley Dr). It replaced
+  three scattered files on 2026-08-03 (ROADMAP 2): the root
+  `_intersections.json`, `video_engine/intersections.json`, and
+  `video_engine/701_intersection.json`. All three are recoverable from git
+  history at commit `ff8244a`. An untracked `intersections.json` may still sit
+  at the repo root on this machine — that is a stale copy of the retired
+  5-pair 201 config, not a config the code reads any more.
 - `video_engine/tools/` holds the standalone debug/manual scripts. Two clean
   CLIs cover manual recording: **`record_clip.py`** (one-shot clip, or `--serve`
   to keep the buffer running while you drop triggers; replaced `__record.py`) and

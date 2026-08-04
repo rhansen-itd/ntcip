@@ -10,8 +10,23 @@ through a single, stable API regardless of the deployment target.
 Expected JSON schema (``JsonFileConfigProvider``)
 ────────────────────────────────────────────────────────────────────────────
 
-A single JSON file may contain **one or more** intersection blocks, keyed by
-``intersection_id``.  Example:
+``JsonFileConfigProvider`` accepts either a **file** or a **directory**:
+
+* a file holds one or more intersection blocks, keyed by ``intersection_id``;
+* a directory holds any number of such files (``*.json``, non-recursive), whose
+  blocks are merged into one namespace.  An intersection defined in two files
+  raises rather than silently taking the last one.
+
+The repository convention since ROADMAP 2 (2026-08-03) is **one file per
+intersection in a directory** — ``video_engine/intersections/{201,701}.json``.
+That mirrors ``SqliteCentralConfigProvider``'s one-row-per-intersection table
+on the filesystem, lets an edge box ship only its own site's file (rather than
+every site's SNMP community string and camera credentials), and keeps a
+malformed block from stopping an unrelated site.  A single multi-block file
+stays supported and is the natural shape for a central server.
+
+Either way each file has the same schema.  Example of a two-intersection file
+(equivalently: these two blocks in two files in a directory):
 
 .. code-block:: json
 
@@ -539,27 +554,44 @@ def _validate_intersection(cfg: dict, source_label: str) -> None:
 # ---------------------------------------------------------------------------
 
 class JsonFileConfigProvider(ConfigProvider):
-    """Load intersection configurations from a local JSON file.
+    """Load intersection configurations from a local JSON file or directory.
 
     Suitable for edge deployments (e.g. Intel J1900 per-intersection nodes)
-    where a single JSON file is written once during commissioning and read
-    repeatedly at runtime.  The file is parsed eagerly on construction and
+    where configuration is written once during commissioning and read
+    repeatedly at runtime.  The path is parsed eagerly on construction and
     cached in memory for the lifetime of the object; call :meth:`reload` to
     pick up changes without restarting the process.
 
+    ``config_path`` may be either shape:
+
+    * **A file** — one JSON object holding one or more intersection blocks,
+      keyed by ``intersection_id`` (the schema in this module's docstring).
+    * **A directory** — every ``*.json`` file directly inside it (sorted, not
+      recursive), each holding one or more blocks of that same schema.  The
+      blocks are merged into a single namespace, which is the on-disk mirror
+      of :class:`SqliteCentralConfigProvider`'s one-row-per-intersection
+      table.  This is the repository convention (ROADMAP 2): one file per
+      intersection, so an edge box ships only its own site's file and a
+      malformed block cannot stop an unrelated site from starting.
+
+    An intersection defined in two files is an error, never a silent
+    last-file-wins.
+
     Args:
-        config_path: Path to the JSON configuration file.  May be a
-            ``str`` or :class:`pathlib.Path`.
+        config_path: Path to the JSON configuration file **or** to a
+            directory of them.  May be a ``str`` or :class:`pathlib.Path`.
         validate: If ``True`` (default), each intersection block is
             validated against the expected schema on load.
 
     Raises:
-        ConfigProviderError: If the file does not exist, cannot be parsed,
-            or fails schema validation (when ``validate=True``).
+        ConfigProviderError: If the path does not exist, a directory holds no
+            ``*.json`` files, any file cannot be parsed, an intersection ID is
+            defined more than once, or a block fails schema validation (when
+            ``validate=True``).
 
     Example::
 
-        provider = JsonFileConfigProvider("/etc/traffic/intersections.json")
+        provider = JsonFileConfigProvider("/etc/traffic/intersections")
         cfg = provider.get_intersection_config("1234_main")
         rtsp_url = cfg["cameras"]["cam1"]["url"]
     """
@@ -568,6 +600,7 @@ class JsonFileConfigProvider(ConfigProvider):
         self._path = Path(config_path)
         self._validate = validate
         self._data: Dict[str, dict] = {}
+        self._sources: Dict[str, Path] = {}
         self._load()
 
     # ------------------------------------------------------------------
@@ -607,61 +640,145 @@ class JsonFileConfigProvider(ConfigProvider):
     # ------------------------------------------------------------------
 
     def reload(self) -> None:
-        """Re-read the JSON file from disk and replace the in-memory cache.
+        """Re-read the configuration from disk and replace the in-memory cache.
 
-        Useful when the configuration file is updated in place without
-        restarting the process (e.g. during commissioning or remote
-        reconfiguration).
+        Useful when the configuration is updated in place without restarting
+        the process (e.g. during commissioning or remote reconfiguration).  On
+        a directory path this also picks up files that have been added or
+        removed since construction.
 
         Raises:
-            ConfigProviderError: If the file cannot be read or parsed.
+            ConfigProviderError: If the path cannot be read or parsed.
         """
         self._load()
         log.info("Config reloaded", extra={"path": str(self._path)})
+
+    def source_path(self, intersection_id: str) -> Path:
+        """Return the file an intersection's configuration was read from.
+
+        On a directory path this is what identifies *which* per-intersection
+        file is in play; on a single-file path it is always that file.  Kept
+        off :class:`ConfigProvider` deliberately — it is a property of a
+        file-backed store, and the SQLite provider has no answer for it.
+
+        Args:
+            intersection_id: Canonical intersection identifier.
+
+        Returns:
+            The :class:`pathlib.Path` the block was loaded from.
+
+        Raises:
+            KeyError: If ``intersection_id`` was not loaded.
+        """
+        if intersection_id not in self._sources:
+            raise KeyError(
+                f"Intersection '{intersection_id}' not found in '{self._path}'."
+            )
+        return self._sources[intersection_id]
 
     # ------------------------------------------------------------------
     # Private
     # ------------------------------------------------------------------
 
-    def _load(self) -> None:
-        """Read, parse, and optionally validate the JSON file.
+    def _config_files(self) -> list[Path]:
+        """Resolve the configured path to the list of JSON files to read.
+
+        Returns:
+            A single-element list for a file path, or every ``*.json`` directly
+            inside a directory path, sorted for deterministic load order (and
+            so duplicate-ID errors name the same two files every run).
 
         Raises:
-            ConfigProviderError: On any I/O or parse failure.
+            ConfigProviderError: If the path does not exist, or is a directory
+                containing no ``*.json`` files — an empty provider is a worse
+                failure than a loud one.
         """
-        if not self._path.exists():
-            raise ConfigProviderError(
-                f"Configuration file not found: '{self._path}'"
-            )
+        if self._path.is_dir():
+            files = sorted(self._path.glob("*.json"))
+            if not files:
+                raise ConfigProviderError(
+                    f"Configuration directory '{self._path}' contains no "
+                    "'*.json' files."
+                )
+            return files
 
+        if self._path.is_file():
+            return [self._path]
+
+        raise ConfigProviderError(
+            f"Configuration path not found: '{self._path}'"
+        )
+
+    def _read_file(self, path: Path) -> Dict[str, Any]:
+        """Read and parse one JSON config file.
+
+        Args:
+            path: The file to read.
+
+        Returns:
+            The parsed top-level object, keyed by ``intersection_id``.
+
+        Raises:
+            ConfigProviderError: On any I/O or parse failure, or if the file's
+                top level is not a JSON object.
+        """
         try:
-            raw = self._path.read_text(encoding="utf-8")
+            raw = path.read_text(encoding="utf-8")
         except OSError as exc:
             raise ConfigProviderError(
-                f"Cannot read configuration file '{self._path}': {exc}", cause=exc
+                f"Cannot read configuration file '{path}': {exc}", cause=exc
             ) from exc
 
         try:
             parsed: Dict[str, Any] = json.loads(raw)
         except json.JSONDecodeError as exc:
             raise ConfigProviderError(
-                f"Invalid JSON in configuration file '{self._path}': {exc}", cause=exc
+                f"Invalid JSON in configuration file '{path}': {exc}", cause=exc
             ) from exc
 
         if not isinstance(parsed, dict):
             raise ConfigProviderError(
-                f"Configuration file '{self._path}' must contain a JSON object at "
+                f"Configuration file '{path}' must contain a JSON object at "
                 "the top level, keyed by intersection_id."
             )
+        return parsed
 
-        if self._validate:
-            for iid, block in parsed.items():
-                _validate_intersection(block, source_label=str(self._path))
+    def _load(self) -> None:
+        """Read, parse, and optionally validate every configured file.
 
-        self._data = parsed
+        Nothing is published until every file has been read and validated, so
+        a failure part-way through leaves the previously-loaded configuration
+        in place rather than a half-merged one.
+
+        Raises:
+            ConfigProviderError: On any I/O or parse failure, on a duplicate
+                intersection ID across files, or on validation failure.
+        """
+        merged: Dict[str, dict] = {}
+        sources: Dict[str, Path] = {}
+
+        for path in self._config_files():
+            for iid, block in self._read_file(path).items():
+                if iid in sources:
+                    raise ConfigProviderError(
+                        f"Intersection '{iid}' is defined in both "
+                        f"'{sources[iid]}' and '{path}'. Each intersection must "
+                        "be defined exactly once."
+                    )
+                if self._validate:
+                    _validate_intersection(block, source_label=str(path))
+                merged[iid] = block
+                sources[iid] = path
+
+        self._data = merged
+        self._sources = sources
         log.info(
             "Configuration loaded",
-            extra={"path": str(self._path), "intersections": list(parsed.keys())},
+            extra={
+                "path": str(self._path),
+                "files": [str(p) for p in sorted(set(sources.values()))],
+                "intersections": list(merged.keys()),
+            },
         )
 
 

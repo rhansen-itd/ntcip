@@ -1409,7 +1409,7 @@ def _build_grouped_monitor(trigger_dir, detectors, floor=0.01,
     return monitor
 
 
-# The five triangles in _intersections.json are authored as rings of scalars;
+# The five triangles in intersections/201.json are authored as rings of scalars;
 # the same group may also be authored as explicit lists.  Both must unify.
 _RING_TRIANGLE = {
     "2":  _det("17"),

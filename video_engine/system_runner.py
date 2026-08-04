@@ -8,7 +8,7 @@ contains *no* business logic of its own; it is pure "glue".
 Run
 ───
     python system_runner.py --intersection 1234_main \
-                            --config /etc/traffic/intersections.json
+                            --config /etc/traffic/intersections
 
 Or with all defaults:
     python system_runner.py
@@ -16,7 +16,7 @@ Or with all defaults:
 Dependency graph (all arrows are one-way; no module imports another laterally)
 ───────────────────────────────────────────────────────────────────────────────
 
-    intersections.json
+    intersections/ (one *.json per intersection)
            │
            ▼
     JsonFileConfigProvider
@@ -159,7 +159,10 @@ class SystemRunner:
     Args:
         intersection_id: Canonical intersection identifier (e.g.
             ``"1234_main"``).  Must exist in the config file.
-        config_path: Path to the ``intersections.json`` file.
+        config_path: Path to the intersection configuration — either a
+            directory of per-intersection ``*.json`` files (the repository
+            convention, e.g. ``video_engine/intersections/``) or a single
+            JSON file holding one or more blocks.
         trigger_dir: Hot Folder directory shared by the engines and the
             video buffer.  Created automatically if absent.
         output_dir: Directory where completed MP4 clips are stored, alongside
@@ -173,7 +176,7 @@ class SystemRunner:
             Keep at 2 for J1900 edge devices.
 
     Raises:
-        SystemExit: If the config file is missing or the intersection ID is
+        SystemExit: If the config path is missing or the intersection ID is
             not found.  We exit early here so the process doesn't start with
             a broken configuration.
     """
@@ -181,7 +184,7 @@ class SystemRunner:
     def __init__(
         self,
         intersection_id: str,
-        config_path: str | Path = "./intersections.json",
+        config_path: str | Path = "./intersections",
         trigger_dir: str | Path = "./trigger_queue",
         output_dir: str | Path = "./completed_videos",
         min_free_disk_mb: float = 500.0,
@@ -704,7 +707,7 @@ def _parse_args() -> argparse.Namespace:
         Parsed :class:`argparse.Namespace` with the following attributes:
 
         - ``intersection``: Intersection ID string.
-        - ``config``: Path to the ``intersections.json`` file.
+        - ``config``: Path to the intersection config directory or file.
         - ``trigger_dir``: Hot Folder directory path.
         - ``output_dir``: Completed-video output directory.
         - ``min_free_mb``: Minimum free disk space in MB before aborting a
@@ -722,8 +725,9 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--config",
-        default="./intersections.json",
-        help="Path to the intersections JSON configuration file.",
+        default="./intersections",
+        help="Path to the intersection config directory (one *.json per "
+             "intersection) or to a single multi-intersection JSON file.",
     )
     parser.add_argument(
         "--trigger-dir",

@@ -2360,3 +2360,83 @@ decided. Entries after this point are logged as the decision lands.
   that the poll phase is gone; what remains is the sampling cycle plus browser
   render. The overlay page's resolution caveat was updated from the stale
   "1–1.5 s" to the post-4a ~0.33 s while it was being touched.
+
+- 2026-08-03 — **One file per intersection, in a directory; 201 consolidated
+  onto the 17-pair config** (ROADMAP 2). The repo had drifted to *three*
+  intersection JSONs — root `_intersections.json` (201, 19 detectors /
+  17 pairs), `video_engine/intersections.json` (201, 10 detectors / 5 pairs),
+  and `video_engine/701_intersection.json` (701, 20 detectors / 10 pairs) —
+  with `system_runner`'s `--config` default and both `tools/` scripts pointing
+  at the 5-pair one while every committed engine run had actually used the
+  17-pair one. That divergence was already documented as a scoring footgun in
+  [[CLAUDE.md]]; the item's own question (merge 701 in, or teach the provider
+  per-intersection files) could not be answered without also answering it.
+
+  **Shape: per-intersection files.** `JsonFileConfigProvider` now accepts a
+  **directory** as well as a file; a directory's `*.json` files (sorted,
+  non-recursive) merge into one namespace. Three reasons the directory won over
+  merging everything into one file. It mirrors
+  `SqliteCentralConfigProvider`'s one-row-per-intersection table on the
+  filesystem — merging would have left the JSON path uniquely "one blob holds
+  every site", which is the shape that does not survive a tenth intersection.
+  An edge box ships only its own site's file, where a merged file would put
+  every site's SNMP community string and camera credentials on every J1900.
+  And `_load` validates every block eagerly and raises on the first bad one, so
+  a malformed 701 block in a shared file would stop the 201 box from starting;
+  per-file, a bad file is one file.
+
+  Worth recording that **neither shape needed new code to be usable** — the
+  provider already loaded a one-block file, and `sync_ui_config.py`'s own
+  docstring already showed `--intersections video_engine/701_intersection.json`.
+  So the item was a convention decision, not a capability gap; the directory
+  support is what makes the convention ergonomic (one `--config` for the box,
+  not one per site) rather than what makes it possible.
+
+  Four properties are load-bearing, each chosen against a specific failure. A
+  duplicate intersection ID across two files **raises, naming both files** —
+  a silent last-file-wins is how a box ends up polling the wrong controller.
+  Nothing is published until every file has parsed *and* validated, so a failed
+  `reload()` during commissioning leaves the previous config intact instead of
+  emptying a running provider. The scan is not recursive (a backup folder
+  underneath is not config). An empty directory raises, because a provider that
+  quietly knows about no intersections fails later and further away.
+  `source_path(iid)` reports the owning file and is deliberately **not** on the
+  `ConfigProvider` ABC — it is a property of a file-backed store and SQLite has
+  no answer for it, the one considered exception to CLAUDE.md's "extend the
+  interface and both implementations together" rule.
+
+  **201 consolidated onto the 17-pair content** (owner's call, asked because it
+  changes what a live site monitors: 5 pairs → 17). `_intersections.json` moved
+  to `video_engine/intersections/201.json` **byte-identical**, which is what
+  preserves the committed 08-01/08-02 artifacts' scoreability — the pair set
+  `__make_gt_export.py` needs is unchanged, only its path moved. The 5-pair
+  file is retired. Its channel map for phase 8 (`13:52`) disagreed with the
+  17-pair file's (`42:31:8`), and it is the 17-pair map that
+  `__correlate_channels.py` verified against controller high-res data twice, so
+  that drop is a correction. **The one real loss is pair `11:51`, phase 11 "WB
+  Bridge Clearance" (Currux video vs Evo radar), which exists in no other
+  config** — dropped rather than carried over, because adding an 18th pair
+  would have broken the byte-identity above and put an unverified channel pair
+  into production in the same move. Detectors 11 and 51 are unused in the
+  17-pair file, so re-adding it later is clean; logged as ROADMAP 16.
+
+  Consumers updated: `system_runner`'s `--config` default
+  `./intersections.json` → `./intersections`; `tools/sync_ui_config.py` and
+  `tools/grab_calibration_still.py` default to `video_engine/intersections`
+  and share a new `load_intersections()` that mirrors the provider's two
+  shapes. That helper **re-implements** the merge rather than importing
+  `config_manager` — the tools belong to neither package, and a half-authored
+  config that fails the provider's validation is exactly when you still want
+  the tool that helps you finish authoring it to run. `__make_gt_export.py`'s
+  `_load_pairs` took the same dir-or-file treatment so a run can be scored
+  against whatever the engine was pointed at. `sync_ui_config` with no
+  `-i` now lists both sites instead of defaulting to the only one, so its
+  usage examples gained `-i 201`.
+
+  Tests: `video_engine/tests/test_config_manager.py` grew from 9 to **29**
+  cases (**446** across eight suites), including a class that loads the
+  repository's *own* `intersections/` directory — a config directory that
+  fails to load is a deployment outage, and a rename or a stray file
+  introduces exactly that silently — and a check that every
+  `paired_detector_id` resolves, which schema validation does not cover and
+  which silently costs a configured comparison when it dangles.

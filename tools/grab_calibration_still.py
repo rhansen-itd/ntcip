@@ -45,6 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from sync_ui_config import (  # noqa: E402
     load_json,
+    load_intersections,
     mask_url,
     select_camera,
     select_intersection,
@@ -71,7 +72,7 @@ def resolve_url(args: argparse.Namespace) -> tuple:
         sys.exit("error: give a camera URL, or -i/--intersection to look one "
                  "up in " + str(args.intersections))
 
-    data = load_json(args.intersections)
+    data = load_intersections(args.intersections)
     intersection_id, section = select_intersection(data, args.intersection)
     camera_id, url = select_camera(section, args.camera)
     if not url:
@@ -95,9 +96,9 @@ def main() -> int:
     ap.add_argument("-i", "--intersection", metavar="ID",
                     help="look the URL up in the video engine's config")
     ap.add_argument("--intersections", type=Path,
-                    default=Path("video_engine/intersections.json"),
+                    default=Path("video_engine/intersections"),
                     help="intersection config to look in "
-                         "(default: video_engine/intersections.json)")
+                         "(default: video_engine/intersections)")
     ap.add_argument("--camera", metavar="ID",
                     help="camera to grab from (default: the only one defined)")
     ap.add_argument("-o", "--output", type=Path,

@@ -64,10 +64,19 @@ highest used so far.
 > docstring assumed). The 0–250 ms poll phase is gone from perceived latency;
 > the ~0.33 s sampling cycle is what remains.
 >
-> **Suggested order:** **2** or **3** (self-contained). SCOPE Item D
-> (the boundary-zone report diagnostic) is optional and needs owner sign-off.
-> **The next owner run is what measures 12A and 14** — both shipped with
-> replay projections only.
+> **Item 2 landed 2026-08-03** as well: intersection config is now one file
+> per intersection in `video_engine/intersections/`, with
+> `JsonFileConfigProvider` accepting a directory as well as a file. It also
+> collapsed the three drifted 201/701 JSONs into two files — 201 consolidated
+> onto the 17-pair config byte-identically, so the committed runs stay
+> scoreable. One casualty, logged as new **Item 16**: the phase 11 WB Bridge
+> Clearance pair (11:51) existed only in the retired 5-pair file and is now
+> configured nowhere.
+>
+> **Suggested order:** **3** (self-contained), then **16** or **10**. SCOPE
+> Item D (the boundary-zone report diagnostic) is optional and needs owner
+> sign-off. **The next owner run is what measures 12A and 14** — both shipped
+> with replay projections only.
 >
 > **Also ready, no hardware:** **10**, and **4e / 4h** (unblocked by 4d).
 > 4e now has a third stubbing precedent to copy (`test_ui_events.py`'s fake
@@ -327,23 +336,62 @@ An in-repo *route* test is still 4e's work.
 
 ---
 
-## 2 — Merge or finalize the second intersection config (Target: Opus)
+## 2 — Second intersection config — **done 2026-08-03**
 
-`video_engine/701_intersection.json` (intersection 701, US-95/Whitley Dr) is
-real in-progress config, separate from intersection 201 in
-`video_engine/intersections.json`. `JsonFileConfigProvider` expects one file
-keyed by intersection ID — decide whether to merge 701 into `intersections.json`
-or keep per-intersection files and adjust the config provider to support that
-shape.
+**Decided: one file per intersection, in a directory.**
+`JsonFileConfigProvider` now accepts a directory as well as a file, and the
+repo ships `video_engine/intersections/{201,701}.json`. The directory beat a
+single merged file because it mirrors `SqliteCentralConfigProvider`'s
+one-row-per-intersection table, lets an edge box ship only its own site's
+credentials, and stops one malformed block from failing an unrelated site's
+startup. Duplicate IDs across files raise (naming both), nothing is published
+until every file validates, the scan is non-recursive, and an empty directory
+raises. Full record in DESIGN_HISTORY (2026-08-03); conventions in CLAUDE.md
+("Config abstraction").
+
+The item also forced the **three-JSON** problem, resolved by owner decision:
+201 consolidated onto the 17-pair config (`_intersections.json` →
+`intersections/201.json`, **byte-identical**, so the committed 08-01/08-02
+artifacts stay scoreable), retiring the 5-pair `video_engine/intersections.json`
+whose phase-8 channel map (`13:52`) disagreed with the verified one
+(`42:31:8`). One pair was genuinely lost in that consolidation — see Item 16.
+
+- [x] Decide the storage shape and implement it (provider + 20 new tests).
+- [x] Consolidate the two 201 configs; preserve committed-run scoreability.
+- [x] Update consumers: `system_runner --config` default, both `tools/`
+  scripts (shared `load_intersections()`), `__make_gt_export.py:_load_pairs`.
+- [x] DESIGN_HISTORY entry + CLAUDE.md conventions.
+
+---
+
+## 16 — Phase 11 "WB Bridge Clearance" pair is no longer configured (Target: Opus)
+
+Item 2's consolidation of intersection 201 onto the 17-pair config dropped
+pair **`11:51`, phase 11, "WB Bridge Clearance"** (det 11 Currux video vs
+det 51 Evo radar). It existed *only* in the retired 5-pair
+`video_engine/intersections.json` and in no verified config, so nothing else
+covers that approach today.
+
+It was dropped rather than carried over for two reasons, both deliberate:
+adding an 18th pair would have broken the byte-identity that keeps the
+committed 08-01/08-02 artifacts scoreable against
+`intersections/201.json`, and channels 11/51 have never been through
+`__correlate_channels.py` the way the other 17 have. Neither ID is used by the
+17-pair config, so re-adding is clean.
+
+Open questions for the session: is the bridge-clearance detection still
+deployed and wired to those channels? Verify the mapping against controller
+high-res data before adding it, per CLAUDE.md's "never 'fix' accuracy problems
+by remapping channels". If it is added, note that the 201 config's pair set no
+longer matches the committed runs' and say so where the artifacts are
+described.
 
 Suggested prompt:
-> [Opus] In the ntcip project, do Item 2 of ROADMAP.md: decide and implement
-> how the second intersection config (`video_engine/701_intersection.json`,
-> intersection 701) is stored relative to intersection 201 in
-> `intersections.json` — either merge into the single keyed file or extend
-> `ConfigProvider`/`JsonFileConfigProvider` (and the central provider, per the
-> config-abstraction rule) to support per-intersection files. Land a
-> DESIGN_HISTORY.md entry recording the choice and why.
+> [Opus] In the ntcip project, do Item 16 of ROADMAP.md: determine whether the
+> phase 11 WB Bridge Clearance pair (detectors 11/51) is still deployed at
+> intersection 201, verify the channel mapping against controller high-res
+> data, and re-add it to `video_engine/intersections/201.json` if it checks
+> out. DESIGN_HISTORY entry + check off.
 
 ---
 
@@ -581,7 +629,7 @@ runs on a bare interpreter).  An in-repo *route* test is still **4e**'s work.
 | pyatspm CLI workflow | [`pyatspm/.../cli.py`](file:///home/hansrkid/pyatspm/src/atspm/cli.py) | L1573-1678 |
 | Live phase/overlap state | [`ntcip/.../phase_monitor.py`](file:///home/hansrkid/ntcip/ntcip_monitor/monitors/phase_monitor.py) | L54-56, L219-225 |
 | Live detector state | [`ntcip/.../detector_monitor.py`](file:///home/hansrkid/ntcip/ntcip_monitor/monitors/detector_monitor.py) | L48, L122-124 |
-| Camera RTSP URL source of truth | [`ntcip/.../intersections.json`](file:///home/hansrkid/ntcip/video_engine/intersections.json) | L12-19 |
+| Camera RTSP URL source of truth | [`ntcip/.../intersections/201.json`](file:///home/hansrkid/ntcip/video_engine/intersections/201.json) | `cameras` block |
 
 **Verified facts that outlive the item — don't re-derive:** the camera is
 720×720 h264 @ 10 fps and `~/vid_cfg720.csv` records `720,720`, so the existing
