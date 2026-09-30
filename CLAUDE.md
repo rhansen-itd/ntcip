@@ -28,9 +28,14 @@ Three docs divide the labor; keep them in sync:
 **At the end of a session:** check off completed boxes in ROADMAP.md, append a
 dated entry to DESIGN_HISTORY.md's Decisions log capturing the decision and its
 rationale (not just the diff), update this file if a load-bearing convention
-changed, and move fully-finished ROADMAP items into DESIGN_HISTORY.md. Default
-model routing is **Opus, one item end-to-end per session**; see ROADMAP.md's
-intro for the item conventions.
+changed, and move fully-finished ROADMAP items into DESIGN_HISTORY.md. **Model
+routing (owner, 2026-09-30):** the aim is now to spend fewer *Claude* tokens, and
+Gemini/Antigravity isn't usage-constrained. So an item may be split: **Opus
+plans** (the spec, golden tests, and any discrepancy-rule or Hot Folder schema
+decision), then **Gemini executes** via `delegate`, then **Opus reviews** the
+report. See `~/.claude/CLAUDE.md`, *Hybrid Claude + Gemini workflow*. This
+supersedes ROADMAP.md's intro, which still says "Opus end-to-end, no cross-model
+hand-off"; the rest of that intro (stable IDs, Suggested prompt) stands.
 
 ## Module boundaries — read this before touching either package
 
