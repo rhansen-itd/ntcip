@@ -96,712 +96,162 @@ Don't add fields casually — both sides (writer in `discrepancy_engine.py`,
 reader in `remux_video_buffer.py`) need to agree, and `config_manager.py`'s
 docstring is the canonical schema reference.
 
-### Discrepancy rules (the "brain")
+## Where the detail lives: `docs/`
 
-`video_engine/discrepancy_engine.py`'s module docstring is the authoritative
-spec for the three rules (Extended Holdover, Orphan Pulse, Chatter Exception)
-and the Rule 1 active-resolution state machine. Read it before modifying
-trigger-firing logic — it's dense but precise, including the cooldown/active-
-trigger-id interaction that prevents double-firing. Don't re-derive this from
-first principles; the docstring already encodes the corner cases that were
-worked out by hand.
+The detailed, load-bearing reference for every other subsystem was moved
+**verbatim** out of this file into `docs/` on 2026-09-30 (it cost ~15k tokens
+per session). Each section below is only a digest of the rules. **Read the
+linked doc before changing that subsystem.** It holds the rationale, the
+measurements, and corner cases the digest leaves out. When a convention
+changes, update both the doc and its digest here.
 
-**Detector groups and cross-pair duplicate rejection (2026-08-01, ROADMAP 9C4
-— load-bearing).** `paired_detector_id` accepts a **scalar or a list**; pairs
-are the union of all normalized links, and **groups** are the connected
-components of the resulting pair graph (`_build_groups`). A 3-way group can
-therefore be authored explicitly (A `[B,C]`, B `[A,C]`, C `[A,B]`) or as a ring
-of scalars (A→B, B→C, C→A) — for n=3 both give the identical 3 pairs. From n=4
-they diverge (ring 4 edges, list 6) and **both are legitimate**: a group is a
-**dedup scope only**, never an instruction to evaluate every internal pair, or
-a 4-ring silently grows comparisons nobody asked for. Pair generation stays
-link-driven. (Unrelated to NTCIP's 16-channel "detector groups" in
-`system_runner`'s poll planning — same word, different thing.)
+| Doc | Read it when |
+|---|---|
+| [docs/engine_rules.md](docs/engine_rules.md) | changing trigger firing, groups/dedup, or the Rule 2 gates |
+| [docs/engine_logs.md](docs/engine_logs.md) | touching a log writer, or reading a log to measure anything |
+| [docs/accuracy_measurement.md](docs/accuracy_measurement.md) | scoring a run against ATSPM ground truth or comparing runs (includes the last measured figures) |
+| [docs/video_cleanup.md](docs/video_cleanup.md) | changing `video_cleanup.py` or anything that deletes clips |
+| [docs/config_provider.md](docs/config_provider.md) | changing `config_manager.py` or the `intersections/` layout |
+| [docs/video_buffer.md](docs/video_buffer.md) | changing `remux_video_buffer.py` |
+| [docs/ntcip_snmp.md](docs/ntcip_snmp.md) | changing the SNMP client, poll loops, or chunk sizes |
+| [docs/web_ui.md](docs/web_ui.md) | changing `web_ui.py` routes, auth, or `ui/events.py` (SSE) |
+| [docs/overlay.md](docs/overlay.md) | changing `ui/overlay/`, repo-root `tools/`, or calibration |
+| [docs/repo_layout.md](docs/repo_layout.md) | looking for a tool, or wondering whether a file is clutter |
 
-Within a group, a `start` fired less than one **dedup window** after the
-group's last emitted `start` **for the same
-cameras** is not written to the Hot Folder: with triangles, one event where B
-disagrees with both A and C fires on `A:B` and `B:C` on the same tick, two
-clips of one moment burning both writer slots (137 of 523 starts, 26.2 %, on
-the 2026-08-01 run). Four properties are load-bearing: the window anchors on
-**emitted** starts only (a suppressed row never anchors, or a storm rolls the
-window forever); cameras are part of the key; a `stop` is never suppressed and
-never anchors; and a suppressed Rule 1 `start` **must not** set
-`active_trigger_id` — it engages the pair cooldown instead, because a later
-`stop` reusing that ID would reference a recording the buffer never started.
+### Discrepancy rules (digest of engine_rules.md)
 
-**Dropping the duplicate `start` is safe; dropping its `stop` is not — the
-stop is an AND** (2026-08-01, the same item). A clip stands for every
-disagreement folded into it, so if the owner pair resolves at t+4 while the
-folded pair keeps disagreeing to t+30, stopping on the owner alone ends the
-footage before the event it was suppressed for is over. A suppressed duplicate
-registers on the owner's `held_pair_keys`; the owner's resolution state machine
-treats the disagreement as resolved only when its own detectors agree **and**
-every held pair's do, and a re-divergence on any of them restarts the post-roll
-countdown. A held pair runs **no rules at all** while held (guard 0 in
-`_evaluate_pair`, ahead of the cooldown guard because the callback path can
-clear a cooldown early), and is released into a **fresh cooldown** when the
-stop goes out so it doesn't re-fire on the tail of the footage just recorded.
-Two asymmetries fall out and both are deliberate: **a Rule 1 start is never
-folded into a Rule 2 recording** (a Rule 2 clip's length is fixed at fire time
-and never gets a stop, so it can't be held open — measured cost, 2 of 137
-duplicates on the 2026-08-01 run), and **a Rule 2 duplicate never holds**
-anything open (its pulse is complete before it is even evaluated). A
-derived group spanning more than one `phase` logs a WARNING (transitive
-over-grouping from one stray link); the derived groups are logged at startup
-next to `_pairs`. **The schema lives in three places that must agree** —
-`_build_structures`, `config_manager.py`'s docstring, and
-`__make_gt_export.py:_load_pairs` — since an export covering fewer pairs than
-the run scores every trigger on a missing pair as a false positive.
+- `discrepancy_engine.py`'s module docstring is the authoritative spec for
+  Rules 1–3 and the Rule 1 resolution state machine. Don't re-derive it.
+- `paired_detector_id` is a scalar or a list. Groups are the connected
+  components of the pair graph. A group is a **dedup scope only**; pair
+  generation stays link-driven. The pair schema lives in three places that must
+  agree: `_build_structures`, `config_manager.py`'s docstring, and
+  `__make_gt_export.py:_load_pairs`.
+- Cross-pair dedup: a `start` within one dedup window of the group's last
+  **emitted** start, for the same cameras, is marked and not written to the
+  Hot Folder. A suppressed start never anchors the window. A `stop` is never
+  suppressed. A suppressed Rule 1 start must **not** set `active_trigger_id`;
+  it engages the pair cooldown instead.
+- The stop is an **AND**: a folded duplicate registers on the owner's
+  `held_pair_keys`, and the owner resolves only when it and every held pair
+  agree. A held pair runs no rules (guard 0, ahead of the cooldown guard) and
+  is released into a fresh cooldown. A Rule 1 start is never folded into a
+  Rule 2 recording, and a Rule 2 duplicate never holds anything open.
+- Windows are per rule: `dedup_window_rule1_sec` (10.0) and
+  `dedup_window_sec` (3.0, Rule 2). The Rule 2 fold must also pass
+  `_owner_covers_event`, which compares in event coordinates. `0` disables
+  its own path only.
+- Rule 2 overlap runs against the `_DetectorState.on_intervals` deque, never
+  a most-recent-edge scalar. A verdict older than
+  `_ORPHAN_DECISION_GRACE_SEC` is discarded, never fired late.
+- The sampling floor is **injected** (`set_sampling_floor()` from
+  `system_runner`, from `effective_cycle_sec()`). Never import
+  `ntcip_monitor` into the engine. Rule 2 refuses pulses shorter than
+  `min_pulse_floor_multiple × floor`. The duty-fraction horizon and the
+  `on_intervals` retention must stay consistent.
+- The partner sub-floor-activity gate (`partner_blip_max` 5 in
+  `partner_blip_window_sec` 300) sits **strictly after** the floor gate and
+  counts distinct pulses. `below_floor_pulses` is the one `_DetectorState`
+  field without the lock (evaluator thread only). Rule 1 hysteresis was
+  rejected and deliberately has no config key.
+- Run `python3 video_engine/tests/test_discrepancy_rules.py` after any engine
+  change.
 
-**The window is per rule, and the Rule 2 half is guarded (2026-08-03, ROADMAP
-14 — load-bearing).** One number can't serve both rules, because the guarantee
-a fold rests on differs: `dedup_window_rule1_sec` (new key, default **10.0** ≈
-`pre_roll + post_roll` here) covers a Rule 1 candidate folding into a Rule 1
-owner, safe at **any** width thanks to the AND-stop above;
-`dedup_window_sec` (**raised 1.0 → 3.0**) covers a Rule 2 candidate, which has
-no lever to hold a clip open and so must pass `_owner_covers_event`. Each key's
-`0` disables **its own path only**. The guard compares in **event
-coordinates** — a clip is `[event_start − pre_roll, that + max_duration_sec]`,
-i.e. what the candidate's own clip would have been — so it asks whether the
-owner's footage reaches at least as far in *both* directions. A Rule 2 owner's
-span is fixed at fire time and rides on `_GroupFire` (`span_start`/`span_end`);
-a Rule 1 owner is judged by **liveness** (`active_trigger_id` still set), and
-one that already stopped is refused (unreachable at the defaults; it exists so
-raising the window in config can't silently lose footage). Both widths are
-measured on clip **containment**, not the fire-time clustering that sized the
-original 1.0 s: median preventable gap 1.62 s, 29 of 38 within 3 s, 35 within
-10 s, three outliers ≥ 38 s left to the disk sweep. Replaying both committed
-decision logs **through the real monitor** (it reproduces the 08-02 run's own
-457 suppression marks 457/457 at the shipped settings, and 135 on 08-01):
-08-02 → **545 of 1553 starts (35.1 %)**, preventing **17 of the 38** contained
-same-group clips; 08-01 → **164 of 523**. The scope predicted 543/170 — the
-08-01 gap is the guard's **start-side** check, which the scope's audit omitted
-and which is load-bearing: even at the old 1.0 s window it refuses 5 folds on
-08-02 and 3 on 08-01 that the shipped runs performed with the pulse partly
-outside the clip.
+### Logs and accuracy (digest of engine_logs.md, accuracy_measurement.md)
 
-Two accuracy-critical Rule 2 mechanics (added 2026-07-19, see DESIGN_HISTORY):
-the partner-overlap test runs against `_DetectorState.on_intervals` — a
-bounded deque of completed `(on_ts, off_ts)` ON intervals appended on the
-falling edge under the per-detector lock, pruned only by the evaluator thread
-— **not** a most-recent-edge scalar (a scalar cannot represent an interval;
-that shape caused both false negatives and leaked Rule 3 overlaps). And a
-Rule 2 verdict older than `_ORPHAN_DECISION_GRACE_SEC` past its window close
-is discarded, never fired late (the pre-roll footage is gone by then).
+- `engine_decisions.csv`: one row per emitted trigger. **Score accuracy
+  against this file.** Cross-pair duplicates are marked here
+  (`suppressed_as_duplicate`), not dropped. `discrepancies_log.csv`: one row
+  per clip actually recorded, so recall read from it is a floor. It is the
+  one log the cleanup sweep rewrites. `engine_suppressions.csv`: candidates
+  the engine declined, tagged by a `reason` string. New populations become
+  new reason values, not new files.
+- Log paths are injected by `system_runner` (`None` disables). Writes are
+  best-effort and never stop a recording. `_DECISION_LOG_FIELDS`,
+  `_SUPPRESSION_LOG_FIELDS` and `_CLEANUP_LOG_FIELDS` are **append-only**.
+  The event window is not part of the trigger payload.
+- Score with `video_engine/tools/__accuracy_report.py` against a
+  `__decode_datz.py` → `__make_gt_export.py` export (run the latter under
+  pyatspm's interpreter), using the **same** intersection config the run
+  used. The run's `pair_key` values tell you which config that was.
+- **Measure controller clock skew per run** by cross-correlation (not
+  nearest-neighbour) and pass `--clock-offset`. The tell for an uncorrected
+  skew: every candidate FP shows nearly the same `nearest GT Δ`. The
+  monitoring machine runs PDT while the site is MDT.
+- The matcher matches on start alignment, then containment. Precision figures
+  from before 2026-08-03 are floors and aren't comparable across run lengths.
 
-**Sampling-floor gating (added 2026-07-30, ROADMAP 9 A+B — load-bearing).**
-The engine must not evaluate evidence finer than its own sampling resolution.
-The floor is **injected, never imported**: `system_runner` calls
-`DiscrepancyMonitor.set_sampling_floor()` at startup from the config's
-`sampling_floor_sec` (default 1.6 = the *pre-4a* NTCIP reality) and every 60 s
-thereafter from `DetectorMonitor.effective_cycle_sec()` — do not "simplify"
-this by importing `ntcip_monitor` into the engine. Rule 2 refuses orphan
-pulses shorter than `min_pulse_floor_multiple × floor` (default 2.0×),
-counting them in the per-pair `below_floor_suppressed` and recording each one
-in `engine_suppressions.csv` (below). **The runtime
-measurement, not the 1.6 default, is what governs in production** — since 4a
-landed, intersection 201 measures ~0.33 s, so the Rule 2 gate is ~0.65 s and
-the rule is fully live (114 of 180 triggers in the 2026-07-31 run). Before 4a
-the same default put the gate at 3.2 s, above a typical 2.0 s
-`lag_threshold_sec`, which disabled Rule 2 in practice; if you read that
-statement anywhere else, it is pre-2026-07-31. **Rule 2's precision at the new
-floor is now validated: 96.3 % on the 2026-08-01 high-duty run (ROADMAP 9C2).**
-The gate suppressed 710 distinct pulses over that run (998 rows, one per
-affected pair), median duration 0.34 s — i.e. sub-cycle blips, not lost
-signal. A rolling 120 s ON-duty fraction per pair
-drives a rate-limited WARNING; `suppress_high_duty_pairs` (default false) can
-disable Rules 1+2 for such pairs. Because the duty computation reads the same
-`on_intervals` deque, its retention horizon is now
-`max(3 × threshold + grace, 120 s)` — keep the two consistent if either
-changes.
+### Duplicate-clip cleanup (digest of video_cleanup.md)
 
-**Partner sub-floor-activity gate (added 2026-08-03, ROADMAP 12A —
-load-bearing).** The floor gate bounds the *orphan's* side of Rule 2; this one
-bounds the **partner's**, from the same principle. Rule 2's evidence is that
-the partner was completely OFF — worthless when that partner keeps producing
-0.1–0.4 s pulses a ~0.33 s sampler cannot see. That is the dominant rule-2 FP
-mechanism in ground truth (the orphan was real in 61 of 61 FPs checked; the
-partner *did* respond, sub-floor, in 6/9 and 28/52 of the two runs' rule-2
-FPs, against ~1 % of TPs). The signal is invisible at event time, so the gate
-is **statistical**: each `_DetectorState` keeps `below_floor_pulses`, a deque
-of the pulse windows *its own* candidates were declined at by the floor gate,
-and a Rule 2 candidate whose **partner** has ≥ `partner_blip_max` (config,
-default **5**) entries inside the trailing `partner_blip_window_sec` (default
-**300**, `0` on either disables) is declined — per-pair
-`partner_blip_suppressed`, plus an `engine_suppressions.csv` row with reason
-`partner_below_floor_activity` carrying `partner_blip_count` and the horizon.
-Four things are load-bearing: the gate sits **strictly after** the floor gate
-(a below-floor pulse is always `below_sampling_floor`, so the two populations
-stay disjoint); the deque counts **distinct pulses, not evaluations** (a
-triangle declines one physical pulse once per pair — entries are deduped
-against the deque's tail); it is the **one `_DetectorState` field not guarded
-by the lock** (written and read only on the evaluator thread); and the
-parameters are measured, not guessed — replayed over both committed runs, ≥5
-in 300 s kills 6 FP + 5 TP on 08-01 (→ **98.0 %** overall / 98.7 % rule 2) and
-15 FP + 10 TP on 08-02 (→ **95.0 %** / 94.7 %), while N=3 triples the TP cost
-for the same FPs and 600 s horizons are strictly worse. **Those two figures
-are replay projections, not measured runs** — the table further down still
-reports the last measured run. Kills concentrate on 26:33, whose det 33 is the
-#1 below-floor producer on both runs by ~2.4× and probably needs physical
-service; the gate is rolling precisely so it recovers on its own if that
-happens. Rule 1 hysteresis was evaluated on the same evidence and
-**rejected** (ROADMAP 12B — 4–9 FPs prevented against 22–53 genuine events
-demoted); the arithmetic lives in `discrepancy_engine.py`'s Rule 1 docstring
-section, and there is deliberately no config key for it.
+`video_engine/video_cleanup.py` deletes a clip only when another clip from the
+same camera covers its whole span, and repoints the log references to the
+survivor. The span comes from mtime plus the PyAV duration and is
+cross-checked against the filename epoch; a mismatch over 5 s is skipped,
+never deleted. `plan_removals` is conservative and never deletes a keeper.
+**Logs are rewritten first, the file is deleted second**, and if a rewrite
+raises, nothing is deleted that sweep. In-flight clips are protected twice
+(`_protected_clip_paths` and `cleanup_min_age_sec`). Every deletion is audited
+in `video_cleanup_log.csv`. The manual CLI `cleanup_clips.py` is a dry run
+until `--apply`. The module imports neither package, and PyAV is lazy.
 
-The rule functions are pinned by `video_engine/tests/test_discrepancy_rules.py`
-(154 stdlib-`unittest` cases, incl. the stale-refire guard, the floor gate, the
-partner gate, the
-decision log, the suppression log, group derivation in both config forms,
-cross-pair duplicate rejection and its AND-gated stop, and `_resolve_pytz`) —
-run it after any
-engine change:
-`python3 video_engine/tests/test_discrepancy_rules.py`.
-Accuracy vs. an ATSPM ground-truth export is measured with
-`video_engine/tools/__accuracy_report.py` (correspondence-based
-precision/recall; models cooldown + poll aliasing), not by comparing raw
-counts. Build the export with `__decode_datz.py` → `__make_gt_export.py`, and
-pass the *same* intersection config the engine ran with — scoring against
-the wrong pair set invents misses — and the cheap way to tell which config a
-run used is the set of `pair_key` values in its decision log. Since ROADMAP 2
-(2026-08-03) there is **one** 201 config, `video_engine/intersections/201.json`
-(17 pairs), which is the file the committed 08-01 and 08-02 runs ran on,
-byte-identical to the `_intersections.json` they name; the 5-pair
-`video_engine/intersections.json` that used to sit beside it is retired.
-`--config` on `__make_gt_export.py` takes the directory or a single file.
+### Config (digest of config_provider.md)
 
-**The matcher matches on start alignment *and* containment (2026-08-03,
-ROADMAP 13 — load-bearing).** `_match` originally compared only the trigger's
-event start against the GT anomaly's **start** (±`--tolerance`, 3.0 s). Rule 1
-does not always observe a disagreement from its beginning: after a cooldown,
-or picking one up part-way, `event_start_ts` lands mid-event while ground
-truth records the whole thing as one long `extended_disagreement` — so the
-trigger scored as a phantom despite the engine having caught the event, with
-the two durations agreeing exactly. A second pass now matches a trigger whose
-event start falls inside `[gt.start − tol, gt.end + tol]`. On the 2026-08-02
-run that recovered **44 of 135 apparent FPs**, the engine's start sitting a
-median **38 s** past the GT start. The bias is **volume-dependent** — 2.8
-points over 11.9 h against 0.4 over 3.75 h — so pre-2026-08-03 precision
-figures are floors and are **not** comparable across runs of different length.
+- `ConfigProvider` (ABC) has `JsonFileConfigProvider` (edge) and
+  `SqliteCentralConfigProvider` (central). Extend the interface and **both**
+  implementations together, never a bypassing dict lookup. `source_path()`
+  is the one deliberate exception (file-backed only).
+- The JSON provider takes a file or a directory. The convention is **one file
+  per intersection** in `video_engine/intersections/`. An ID defined in two
+  files raises. Nothing is published until every file validates. The scan is
+  not recursive. An empty directory raises.
 
-Pass 1 (start-aligned) stays one-to-one; pass 2 (containment) allows
-many-to-one, because a long disagreement the engine re-fires inside really does
-correspond to several triggers. That allowance is reported, not hidden — and on
-both committed runs it was never exercised (all 44 and all 2 landed on distinct
-GT events), so it is currently a theoretical generosity, not a live one.
+### Video buffer (digest of video_buffer.md)
 
-Last measured **2026-08-02** (11.9 h, 1553 starts, 3× the prior sample):
-overall precision **94.1 %**, rule 1 95.3 %, rule 2 92.8 %, adjusted recall
-88.3 %, writer-cap delivery loss 20.0 % (down from 33.6 %).
-2026-08-01 (ROADMAP 9C2, high-duty, 3.75 h): **96.9 %**, rule 1 97.5 %, rule 2
-96.3 %, adjusted recall 86.3 %, zero stale-refire phantoms — all four §Item C
-criteria passed. (Both figures pre-13 were 91.3 % and 96.5 %.) Artifacts for
-both runs are committed
-(`engine_decisions_*`, `engine_suppressions_*`, `discrepancies_log_*`,
-`banks_events_*`, `gt_anomalies_*`, plus `video_cleanup_log_20260802.csv`).
-The superseded 2026-07-31 figures (89.4 % / 59.9 %) were read off the
-*recording* log and were a floor for a different reason.
+- `remux_video_buffer.py` (PyAV stream copy) is the **only** backend. Don't
+  restore the retired CFR buffers. A future decoded need is a new RAM-bounded
+  branch.
+- Constraints: no `time.sleep()` in the read loop. The pre-roll deque is
+  bounded by time. Writers are capped by a semaphore (default 2). Free disk is
+  checked before a recording starts. Clips are muxed to disk incrementally.
+- Manager state is guarded by `_state_lock`: **pop/collect under the lock,
+  release, then act**. Never hold it across `finish()`, `join()`, a semaphore
+  acquire, subscribe/unsubscribe, or I/O. Timers carry a generation.
+- Forward PTS gaps are preserved; backward jumps are clamped.
 
-**Two traps when comparing runs**, both hit on 2026-08-03 and both ruled out
-before the matcher was found: per-pair figures from the 08-01 run are thin
-(7 of 17 pairs under 15 triggers, five reading "100 %" on 1–9), and traffic
-composition shifts between days (ph6 gained 9.6 points of share on the Sunday
-run) — but re-weighting one run's per-pair precision onto the other's trigger
-mix moves it only ~0.7 points, so mix is *not* an explanation for a precision
-gap. Neither is dedup (duplicates scored 91.9 % vs non-duplicates' 91.1 %).
+### NTCIP / SNMP (digest of ntcip_snmp.md)
 
-**Controller clock skew is real, must be measured per run, and drifts *within*
-a run (2026-08-01, revised 2026-08-03 — load-bearing).** The engine stamps
-events with the monitoring machine's clock; the ground truth is stamped by the
-Econolite controller. Nothing keeps them in sync. Measured values so far: ~0 s
-(2026-07-31), **+4.49 s** (2026-08-01), and on 2026-08-02 a *drift* from
-−0.30 s at 09:39 to **+2.2 s** by 18:15 and back to +1.2 s — ~2.5 s
-peak-to-peak with no step, even though the clock had been synced shortly
-before that run. `--clock-offset` takes a single scalar, which was still safe
-there (best fit +0.75 s, max residual ~1.45 s, inside the 3.0 s tolerance);
-on a run that wanders further it would not be, and the run would need scoring
-in segments.
+- All timestamps come from the monitoring machine's clock, never the
+  camera's or the controller's.
+- Event callbacks return in microseconds: a few scalar writes under a lock,
+  no I/O. Heavy work goes on the evaluator thread.
+- `EconoliteSNMPClient` `chunk_size` **defaults to 1. Don't raise the
+  default.** Raise it per deployment (`snmp_chunk_size`) only after a green
+  `__probe_snmp_batch.py` run. Intersection 201 uses 8.
+- `effective_cycle_sec()` is the sampling resolution to trust;
+  `poll_interval` is only a lower bound. `0.0` means no cycle yet, so fall
+  back to the configured default.
+- Never "fix" accuracy by remapping channels (201's map is verified).
+- Cobalt: SNMP **v1**, port **501**, community = controller username,
+  Phase 1 = bit 0.
 
-Uncorrected, a skew larger than `--tolerance` drags overall precision to
-**11.6 %** — a collapse that looks like a catastrophic engine regression and is
-not one. The tell: every candidate false positive reports nearly the *same*
-`nearest GT Δ`, while the per-pair table still shows healthy trigger and GT
-counts on the same pairs. (Contrast the ROADMAP 13 matcher defect, fixed
-2026-08-03, whose FPs showed *scattered* deltas — median 117.9 s on 08-02,
-only 1 of 135 inside 5 s.)
+### Web UI (digest of web_ui.md, overlay.md)
 
-Measure the skew from engine-observed detector edges (`engine_suppressions.csv`
-and rule-2 rows of `engine_decisions.csv` carry exact Unix ON/OFF windows)
-against the controller's 82/81 codes. **Use cross-correlation, not
-nearest-neighbour matching** — scan candidate offsets and take the peak match
-count; nearest-neighbour aliases onto the wrong pulse once the offset
-approaches the ~3.2 s median inter-edge gap, and reports a falsely small skew.
-The result is otherwise insensitive to the exact value (3.5–5.5 s scored
-identically on 08-01, since the offset only has to land inside the tolerance)
-— what matters is not leaving it at zero.
-
-Unrelated but adjacent: the monitoring machine here runs **PDT** while the site
-is **MDT**, so `datetime.fromtimestamp()` in an ad-hoc script prints an hour
-behind the site-local times `__accuracy_report.py` and the datZ filenames use.
-
-**Three logs, and they mean different things (2026-08-01, ROADMAP 9C1 + 9C3 —
-load-bearing for anyone measuring accuracy).** All land in `output_dir`:
-
-- **`engine_decisions.csv`** — written by `discrepancy_engine._log_decision`,
-  one row per trigger the engine emitted, appended right after the Hot Folder
-  rename succeeds and before any post-write state management. Nothing
-  downstream can suppress a row. **Score accuracy against this file.** The
-  path is injected by `system_runner` (`decision_log_path=output_dir /
-  "engine_decisions.csv"`); `None` disables it, which is the default for any
-  other construction path. Writing is best-effort — a failed append logs an
-  ERROR and is swallowed, because a full disk must never stop a recording.
-  Rows carry the underlying event's `event_start_ts` / `event_end_ts` as exact
-  Unix floats (either blank where the rule doesn't define it: a Rule 1 `start`
-  has no end yet, a `stop` has neither), so no consumer has to recover timing
-  from a 1-second local stamp plus a regex. `_DECISION_LOG_FIELDS` is
-  **append-only** — an existing log is never rewritten, so a new column
-  inserted mid-list desynchronizes a resumed file from its header. Rows also
-  carry `dedup_group` / `suppressed_as_duplicate` / `duplicate_of_trigger_id`
-  (9C4): a trigger rejected as a cross-pair duplicate is **marked here, not
-  dropped and not moved to the suppression log**, because ground truth
-  contains the same event on both pairs of the group — a consumer that never
-  saw the row would score the sibling pair's event as a miss. The event
-  window reaches `_fire_trigger` as one optional `event_window` tuple and is
-  deliberately **not** added to the trigger payload (the video buffer has no
-  use for it, and the Hot Folder schema is intentionally hard to grow).
-- **`discrepancies_log.csv`** — written by the video-buffer backend, one row
-  per clip actually *recorded*. `remux_video_buffer._handle_start` calls
-  `_log_discrepancy_to_csv` only after `_writer_semaphore.acquire()` succeeds,
-  so a trigger dropped by the `max_concurrent_writers` cap leaves no row.
-  Measured on the 2026-07-31 run, the cap was saturated 11.6 % of wall clock
-  yet accounted for 43 % of the apparent misses. **Recall read off this file
-  is a floor, not an estimate.** It is also the one log that is ever
-  *rewritten*: the duplicate-clip sweep (below) repoints `Video_Filename` at a
-  surviving clip. Rows are never added or removed by that, so anything scored
-  from timestamps is unaffected.
-- **`engine_suppressions.csv`** — written by
-  `discrepancy_engine._log_suppression`, one row per candidate the engine
-  deliberately **declined** to act on, tagged with a `reason` column. Two
-  reasons today: `below_sampling_floor` (the Rule 2 floor gate) and
-  `partner_below_floor_activity` (the 12A partner gate; its rows carry
-  `partner_blip_count` / `partner_blip_window_sec`, blank on the other
-  reason). Same injected
-  path (`suppression_log_path`, `None` disables) and the same best-effort
-  contract as the decision log; both share `_append_csv_row`, so the
-  never-re-header-a-resumed-file behavior cannot drift between them.
-  `_SUPPRESSION_LOG_FIELDS` is **append-only** for that reason.
-  `sampling_floor_sec` and `min_pulse_floor_multiple` are stored as separate
-  columns, not just their product, so a consumer can recompute the gate at
-  other multiples and recover the counterfactual from a finished run.
-  **A suppressed row is not a would-have-fired trigger** — the gate sits at
-  candidate registration, ahead of Rule 2's partner-overlap test, so recall
-  attributed to it is an upper bound. `reason` is a plain string precisely so
-  new populations can land here as new values, with no schema change and no
-  fourth file — the partner gate was the first to take that path, and the ones
-  `__accuracy_report.py` still *models* (cooldown, grace expiry, high-duty)
-  can follow it. The cross-pair duplicate deliberately did **not**
-  land here — see the decision log above.
-
-`__accuracy_report.py` auto-detects which format it was handed (on the
-presence of an `event_timestamp` column) and says so in its first line; the
-legacy path is preserved so the committed 2026-07-31 artifacts still score
-identically. Pass `--recording-log` alongside a decision log to get a DELIVERY
-section counting decisions that never became clips. Rows marked
-`suppressed_as_duplicate` are **scored like any other trigger** and excluded
-only from DELIVERY (they have no clip by design, not by back-pressure);
-verified by re-scoring the 2026-08-01 log with duplicates marked — precision
-and recall come out identical.
-
-### Duplicate-clip cleanup — the disk-side half of dedup (2026-08-01, load-bearing)
-
-`video_engine/video_cleanup.py` deletes a clip when **another clip from the
-same camera covers its whole wall-clock span**, and repoints every log
-reference at the survivor. It is the counterpart to 9C4, not a replacement:
-9C4 stops the *engine* firing twice **within a detector group**, and by
-construction cannot touch a Rule 2 orphan clip nested inside a Rule 1 clip
-(it explicitly refuses to fold those), two unrelated pairs disagreeing about
-the same approach, or a hand-dropped trigger over live footage. Sized against
-the committed 2026-08-01 artifacts (retrospectively, before 9C4 was live):
-**91 of 348 recorded clips (26.1 %) were wholly contained in another**; 68 of
-those were the population 9C4 now rejects upstream, predicting a **6.6 %**
-residual.
-
-**Measured for real on 2026-08-02, the first run with both live: 190 of 877
-clips (21.7 %, 93 min, 371 MB), not 6.6 %.** The prediction was sized on a
-3.75 h run and the dominant population grows with run length. Breakdown
-(corrected 2026-08-03 — the first published split, 139/30/21, was joined
-through the *rewritten* recording log, where every kept file appears in ≥ 2
-rows and aliases deleted clips onto their survivors; classify by the
-trigger-ID prefix in the clip filename instead, which maps 190/190 uniquely):
-**152 (80 %) different-group** — unrelated pairs covering the same approach,
-which only this sweep can catch; **38 (20 %) same-group/different-pair, which
-9C4 should have caught** — its single `dedup_window_sec` was 1.0 s while the
-median clip is 24.4 s and the sibling pair typically crosses threshold
-1.0–2.3 s later, so same-group starts both record and one ends up nested. The
-per-rule windows that landed 2026-08-03 (ROADMAP 14, above) prevent **17 of
-those 38** upstream; the rest are Rule 1 folded into a Rule 2 owner (refused by
-design) and three gap outliers ≥ 38 s. And
-**zero same-pair** — the 60 s cooldown spaces same-pair clips further apart
-than a 24.4 s median clip can contain.
-
-Four things are load-bearing:
-
-- **A clip's span is recovered, not recorded.** `end_ts` = the file's **mtime**
-  (`ClipRemuxer._finalize` closes the container as its last act), `duration` =
-  the container's own duration via PyAV (exact — clip length equals the source
-  PTS span by construction, there is no FPS to guess), `start_ts` = the
-  difference. That is cross-checked against the **dispatch epoch in the
-  filename** (`{trigger8}_{camera}_{int(time.time())}{ext}`): a clip whose
-  mtime and name disagree by more than 5 s is **skipped, never deleted** (the
-  likely cause is a copy that didn't preserve mtime). A file whose name doesn't
-  parse as a clip is not a candidate at all, so the CSV logs and any hand-named
-  export in `output_dir` are safe by construction.
-- **`plan_removals` is one pass over `(start asc, end desc, name)` against a
-  running list of survivors.** Three properties fall out: a keeper is never
-  itself deleted (so no rewrite can point at a file a later step removes, and
-  no chain resolution is needed), mutual containment resolves deterministically,
-  and it is **conservative** — a clip starting slightly *before* a much longer
-  one is kept, because it isn't contained. Keeping an extra file is a cost;
-  losing unique footage is a defect. The `tolerance_sec` (default 0.5) exists
-  only so two clips of the *same* moment that differ by poll latency still
-  compare as duplicates; at 0.0 the same run yields 31 removals instead of 91.
-- **Logs are rewritten first, the file is deleted second.** The reverse order
-  would leave a row naming a file that is gone; this order, if the delete
-  fails, leaves a row naming a clip that exists and still contains the event.
-  If a rewrite raises, **nothing is deleted that sweep**. Which logs get
-  rewritten is the single table `REFERENCE_COLUMNS` (`discrepancies_log.csv` /
-  `Video_Filename` today) — that is the whole extension point; the engine's two
-  logs are written before any clip exists and carry no filename.
-- **Two independent guards keep an in-flight recording off the list**: the
-  manager's live view of its active + draining writers (`_protected_clip_paths`,
-  authoritative in-process) and `cleanup_min_age_sec` (mtime-based, which also
-  covers clips left by a crashed run). The sweep runs on its own daemon thread
-  and shares the manager's `_csv_lock` with `_log_discrepancy_to_csv`, so a
-  rewrite can't interleave with an append.
-
-Every deletion is audited in **`video_cleanup_log.csv`** (`output_dir`,
-`_CLEANUP_LOG_FIELDS` append-only like the engine's logs) carrying *both*
-spans — deleting footage is the one irreversible thing this system does, and
-the row has to be enough to re-check the decision after the evidence is gone.
-Config is the intersection's optional `video_cleanup` block (`enabled` default
-**true**, `interval_sec` 300, `tolerance_sec` 0.5, `min_age_sec` 60); the
-canonical reference is `config_manager.py`'s docstring. Manual front end:
-`python3 video_engine/tools/cleanup_clips.py --output-dir <dir>` — **dry run
-until `--apply`**. `video_cleanup.py` imports neither `ntcip_monitor` nor
-`remux_video_buffer` (the manager imports *it*), and PyAV is imported lazily
-inside `probe_duration_sec` so the module and its tests load on a bare
-interpreter.
-
-## Config abstraction
-
-`video_engine/config_manager.py` already implements the provider pattern:
-`ConfigProvider` (ABC, `get_intersection_config()` / `list_intersection_ids()`),
-with `JsonFileConfigProvider` (edge) and `SqliteCentralConfigProvider` (central)
-as concrete implementations. `system_runner.py` defaults to the JSON provider.
-When adding intersection-level config needs, extend `ConfigProvider`'s
-interface and both implementations together — don't special-case one
-deployment path with a dict lookup that bypasses the abstraction.
-
-**One file per intersection, in a directory (2026-08-03, ROADMAP 2 —
-load-bearing).** `JsonFileConfigProvider` accepts **either** a single JSON file
-holding one or more blocks (unchanged, and the natural shape for a central
-server) **or a directory**, whose `*.json` files — non-recursive, sorted — are
-merged into one namespace. The repo ships
-`video_engine/intersections/{201,701}.json` and that is the convention:
-
-- It mirrors `SqliteCentralConfigProvider`'s one-row-per-intersection table on
-  the filesystem, instead of leaving the JSON path uniquely "one blob holds
-  every site".
-- An edge box ships only its own site's file. A merged file would put every
-  site's SNMP community string and camera credentials on every box.
-- `_load` validates every block eagerly and raises on the first bad one, so a
-  malformed 701 block in a shared file would stop the 201 box from starting.
-
-Four properties are load-bearing. An intersection defined in **two files
-raises**, naming both — never a silent last-file-wins, which is how a box ends
-up on the wrong controller IP. **Nothing is published until every file parses
-and validates**, so a bad edit during commissioning leaves a running provider's
-previous config intact rather than emptying it. The scan is **not recursive**,
-so a backup or data folder underneath is not silently loaded. And an **empty
-directory raises** — a provider that quietly knows about no intersections is a
-worse failure than a loud one. `source_path(iid)` reports which file a block
-came from; it is deliberately **not** on the `ConfigProvider` ABC, because it
-is a property of a file-backed store and the SQLite provider has no answer for
-it — the one place the "extend both implementations together" rule doesn't
-apply. The two deploy-time tools re-implement the merge in
-`sync_ui_config.load_intersections` rather than importing the provider: they
-belong to neither package, and a half-authored config that fails validation is
-exactly when you still want the tool that helps you finish it to run.
-
-## Hardware constraints (edge = J1900-class CPU)
-
-There is **one video-buffer backend**: `video_engine/remux_video_buffer.py`
-(PyAV stream-copy — demux to encoded packets, RAM-bounded time-windowed packet
-pre-roll, copy to disk using the source's own timestamps, no decode/encode).
-It meets every constraint below.
-
-The `full` CFR `cv2.VideoWriter` backend (`video_engine/video_buffer.py`) was
-**retired 2026-08-01** (ROADMAP Item 6) — no deployment ever selected it, it
-lost to `remux` on all three edge constraints, and its `DiskWriter._write_loop`
-collected every raw frame of a clip into an in-memory list before writing (to
-compute an exact FPS from total frames / total elapsed), making it
-RAM-unbounded: tens of GB for a multi-minute 1080p clip. `_build_video_manager`
-still *reads* `video_backend` purely to WARN that a stale value is being
-ignored; it is no longer a switch, and there is nothing to switch to. **If a
-central decoded/re-encode need ever appears, build it as a new RAM-bounded
-branch** (`ClipRemuxer`'s lifecycle is deliberately separable from its `_mux`
-write step for exactly this) — do not restore the CFR file from history.
-
-Constraint status:
-
-- **Zero-drift capture**: the stream-read loop has no `time.sleep()` — it
-  iterates `container.demux()`, which blocks on I/O naturally. ✅
-- **RAM pre-roll**: `collections.deque` of *encoded packets* bounded by a
-  **time window** (`pre_roll_sec + keyframe_margin_sec`), independent of clip
-  length. ✅
-- **Concurrent-recording cap**: `threading.Semaphore(max_concurrent_writers)`,
-  default 2. ✅
-- **Disk check**: free space checked before a recording starts, aborts + logs
-  below `min_free_disk_mb`. ✅
-- **"Dump pre-roll, then route live frames directly to disk"**: ✅ `ClipRemuxer`
-  muxes packets to disk incrementally (pre-roll then live), never accumulating
-  the clip in RAM. Verified: RSS flat (~1 MB growth) across a genuine 240s clip
-  in `__replay_verify.py`. (This was the constraint the CFR path violated.)
-
-**Manager thread-safety in `remux` (2026-07-31, ROADMAP 8 — load-bearing).**
-`VideoBufferManager`'s writer bookkeeping (`_active_writers`, `_stop_timers`,
-`_draining`) is touched by the poll loop, by `threading.Timer` callbacks
-(`_auto_stop`), and by the main thread's `stop()`, and is guarded by a single
-`_state_lock`. The discipline is **under the lock, pop/collect what to act on;
-release; then act** — never hold it across `finish()`, `join()`, a semaphore
-acquire, `buf.subscribe`/`unsubscribe`, or any I/O (`_auto_stop` re-enters
-`_stop_trigger` from a Timer thread, so a join under the lock deadlocks the reap
-path). `_stop_timers` maps `trigger_id -> (generation, timer)`; the generation
-lets a timer whose `cancel()` lost a race against `extend` detect that it has
-been superseded and do nothing. Tests:
-`python3 video_engine/tests/test_remux_manager.py` (22 stubbed-remuxer cases).
-
-Clip length in `remux` is accurate **by construction** (= source PTS span = true
-elapsed), so there is no FPS to guess and nothing drifts under RTSP jitter — the
-defect the three CFR variants all shared. See [[DESIGN_HISTORY.md]] (2026-07-14
-Item 1 entries) and
-[VIDEO_BUFFER_REMUX_PLAN.md](video_engine/VIDEO_BUFFER_REMUX_PLAN.md).
-**Real-stream Fable verification passed 2026-07-15** against the owner's
-capture (`tests/fixtures/sample.ts`): exact length fidelity under real jitter,
-RSS flat, and all plan-§4 adversarial probes green (B-frames, backward-jump
-clamp, concurrent triggers, drop/reconnect). One documented behavior: mid-clip
-**forward** PTS gaps are deliberately preserved (no frames arrived = real
-elapsed time), while backward jumps are clamped — see the module docstring and
-the 2026-07-15 DESIGN_HISTORY entry.
-
-## NTCIP / SNMP rules
-
-- All discrepancy timestamps come from the monitoring machine's own clock
-  (`time.time()` / `datetime.now()`), never from camera or controller-reported
-  time — sub-second comparisons depend on this.
-- Event callbacks (`on_detector_on`/`on_detector_off` etc.) must return in
-  microseconds — they only mutate a few scalar fields under a lock. Don't add
-  I/O, file writes, or blocking calls inside a callback; do that work on the
-  background evaluator thread instead.
-- `EconoliteSNMPClient` sends `chunk_size` OIDs per PDU (constructor param,
-  **default 1** — the verified-safe Cobalt/EOS setting that avoids "Too Big"
-  errors). **Do not raise the default**; raise it per-deployment only via the
-  intersection config's `snmp_chunk_size` key (standalone app:
-  `controller.chunk_size`) after a green `__probe_snmp_batch.py` run on that
-  controller. Monitor poll loops are batched into one `get(*oids)` call per
-  sweep (order-preserving; wire behavior at chunk 1 is identical to the old
-  per-OID loops), and `system_runner` polls only the detector groups the
-  config's detectors occupy. `stats['reads']` counts poll cycles, not OIDs.
-  Tests: `ntcip_monitor/tests/test_snmp_batching.py` (stubbed pysnmp).
-- **Measured 2026-07-31, post-4a (load-bearing):** with `snmp_chunk_size: 8`
-  the whole detector sweep is one PDU, and on intersection 201 the **effective
-  sampling cycle is ~0.33 s** (~0.125 s sweep + the 0.2 s `poll_interval`
-  sleep), catching **~94 % of true detector edges** (97 % of ON pulses).
-  Baseline before the flip, for contrast: 8 sequential round trips, a
-  1.0–1.5 s cycle, and only ~26 % of edges — which is why the pre-2026-07-31
-  guidance treated every high-duty-channel trigger as unreliable. The
-  per-channel *mapping* in `intersections/201.json` is verified correct against
-  controller high-res data (`__correlate_channels.py`, twice: 2026-07-19 and
-  again post-flip) — never "fix" accuracy problems by remapping channels.
-  **Neither number transfers to another controller**: 8 is set only for 201,
-  and `poll_interval` still bounds the cycle from below. Trust
-  `effective_cycle_sec()` (below) over either figure.
-- **The monitor measures its own cycle** (2026-07-30, ROADMAP 9A):
-  `BaseMonitor` folds each `_poll()`-plus-sleep into an EMA (α=0.1) exposed as
-  `effective_cycle_sec()` and in a new `get_stats()`, and logs a rate-limited
-  (5 min) structured INFO when it exceeds `2 × poll_interval`.
-  **`effective_cycle_sec()` is the number to trust for sampling resolution;
-  `poll_interval` is only a lower bound on it.** `0.0` means "no cycle
-  completed yet" — callers must fall back to a configured default, never treat
-  it as a fast sweep. Tests: `ntcip_monitor/tests/test_snmp_batching.py`
-  (17 cases).
-- Poll interval is configurable per-intersection; a warning is logged if it
-  drops below 0.5s (`config_manager.py`) — note this warning understates
-  reality given the sweep-time floor above.
-- Econolite Cobalt specifics baked into the code: SNMP **v1** (not v2c), port
-  **501** (not 161), community string = controller username, Phase 1 = bit 0.
-
-## Web UI exposure (2026-07-31, ROADMAP 4f — load-bearing)
-
-`ntcip_monitor/ui/web_ui.py` is an operator tool, not a service, and its
-`/api/control/*` routes drive real signal hardware (time sync, vehicle calls,
-output toggles). Two rules, both implemented:
-
-- **Bind host defaults to `127.0.0.1`.** Override with `--web-host` (run.py) or
-  `web_ui.host` in config — CLI beats config beats the default; `web_ui.port`
-  resolves the same way. Don't restore a `0.0.0.0` default.
-- **Control endpoints are gated by a shared secret** in the
-  `X-NTCIP-Control-Token` header (`hmac.compare_digest`, compared as bytes),
-  read from `$NTCIP_WEB_CONTROL_TOKEN` then `web_ui.control_token`. Policy:
-  token set → header must match (401); no token + loopback bind → allowed;
-  no token + non-loopback bind → **403, control disabled** plus a startup
-  warning. The two rules interlock on purpose — exposing hardware control to
-  the network takes both a host change and a secret. `/api/status`,
-  `/api/stats` and the two SSE routes below stay open (read-only).
-
-Both rules are implemented in one place: `_check_shared_secret()`, which
-`_check_control_access()` and the overlay's `_check_video_access()` both call.
-
-Deliberately not a session/user/JWT system — a reverse proxy owns real auth if
-the deployment story changes. There's still no in-repo route test (a
-Flask-test-client case is ROADMAP 4e), though `flask` and `pysnmp` were
-installed here during 11b and the routes were verified from a scratch harness
-(again in 15b, against a real Flask test client).
-
-### Pushed state updates (2026-08-03, ROADMAP 15 — load-bearing)
-
-Neither page polls any more. `/api/events` (raw state, dashboard) and
-`/api/overlay/events` (resolved shape statuses, overlay) are Server-Sent
-Events streams that push a change when the SNMP sweep detects it, removing the
-0–250 ms poll phase from perceived latency; what is left is the ~0.33 s
-sampling cycle. The plumbing is `ntcip_monitor/ui/events.py` —
-**stdlib-only and Flask-free**, like `ui/overlay/*`, with the `EVENT_*` names
-as string literals because `core/__init__.py` re-exports `snmp_client` and
-would drag pysnmp into a bare-interpreter suite.
-
-Six things are load-bearing:
-
-- **The dev server runs `threaded=True`** (15a). It is single-threaded by
-  default, so one MJPEG viewer or one SSE client — neither response ever
-  finishes — would occupy the only worker and stall every other request.
-  `remux`'s and the overlay source's docstrings had *assumed* this since 11c;
-  it wasn't true until now. Don't remove it.
-- **A monitor callback only enqueues.** `StateBroadcaster._dispatch` reads the
-  enum's name and does one `put_nowait`; every payload (`_build_status()`,
-  `resolve_all`) is built on the HTTP worker thread serving the stream. This is
-  the "callbacks return in microseconds" rule from the NTCIP section — a
-  browser's view of the world must never be a term in the sampling rate.
-- **Overflow drops and resynchronises; it never back-pressures.** Each client
-  owns a 256-entry queue. When it fills, pushes are dropped, the backlog is
-  discarded, and a full snapshot is sent — the queued items are the *oldest*
-  changes, so replaying them after a gap is worse than one snapshot.
-- **Subscriptions attach once and are never detached** — deliberately unlike
-  `overlay/source.py`'s ref-counted decoder, because an idle RTSP session is a
-  real resource and an idle callback is a lock plus an empty list. Don't add
-  ref-counting: its failure mode is a silently deaf stream.
-- **The overlay gets its own route because resolution stays server-side.** The
-  page consumes a positional `statuses` array from `overlay/status.py`; it does
-  **not** map detectors to shapes in JS, and porting that table into the
-  browser to consume raw deltas would duplicate the one piece of overlay logic
-  the unit tests pin. The stream re-resolves per edge and sends the whole array;
-  a change that resolves identically (a detector no shape maps) sends nothing.
-- **Both pages keep the 250 ms poll as a fallback**, started on `onerror` and
-  retired on `onopen`. `EventSource` reconnects itself and every connection
-  opens with a full snapshot, so the fallback only covers the gap. A delta is
-  shaped as the subset of a status payload it replaces, so `updateDisplay()`
-  applies snapshot and delta through one path.
-
-## Live video overlay (2026-07-31, ROADMAP 11a–11c — load-bearing)
-
-`GET /overlay` draws pyatspm-calibrated detector loops and stopbars on a
-`<canvas>` over a camera image, recolored from the live monitor state. Config
-lives in `config.json`'s `overlay` section (`enabled`, `shapes_csv`,
-`background`, `image_path`, `camera_url`, `stream_fps`, plus the optional
-`stream_quality` and `rtsp_transport`); absent or `enabled: false` means every
-overlay route answers 404. Deployment data for intersection 201 is in
-`overlay/` at the repo root. The shipped config uses `background: "file"`
-because `camera_url` is empty until ROADMAP 11d authors it.
-
-- **`ntcip_monitor/ui/overlay/` imports nothing heavy.** `shapes.py` (vendored
-  from pyatspm — see the module docstring for the four deliberate deviations),
-  `status.py`, and `source.py` are stdlib-only apart from one guarded
-  `import av` in `source.py` (`try/except ImportError`, touched only on the
-  live path): no Flask, no cv2, no `atspm`, no `video_engine`, no monitor
-  imports. That is what keeps 86 unit tests runnable on a bare interpreter
-  (`python3 ntcip_monitor/tests/test_overlay_shapes.py`) — the live source's
-  three PyAV seams (`_open_container` / `_decode` / `_encode_jpeg`) are
-  overridable precisely so its threading is testable without a camera. Flask
-  lives only in `web_ui.py`, including the MJPEG multipart framing.
-- **The live source shares one decoder per camera** (`RtspMjpegSource`,
-  `background: "live"`). Viewers are **ref-counted subscribers** — a stream
-  generator for its lifetime, a `/api/overlay/background` request for one
-  frame — and the decoder thread opens on the first and retires
-  `idle_grace_sec` (10 s) after the last. N tabs cost the intersection one
-  RTSP session, an idle page costs none. Bookkeeping follows the same lock
-  discipline as the remux manager (decide/collect under the lock, act after
-  releasing; never hold it across a connect, decode, encode, or socket write),
-  and each decoder thread carries a `_DecoderSession` liveness token so a
-  retiring thread can never stop its successor. Frames are decoded at the
-  source rate but encoded only at `stream_fps` — encoding is the expensive
-  half. JPEG quality comes from the encoder's `qmin`/`qmax`
-  (`overlay.stream_quality`, 1 best–31 worst, default 12); FFmpeg's
-  `-q:v`/`qscale` options are ignored by this encoder (verified, don't retry
-  them).
-- **Shape CSV colors are BGR** (OpenCV order, as pyatspm authors them):
-  `"255,0,0"` is *blue*. `shapes.bgr_to_rgb()` reverses the triple exactly
-  once, inside `shapes_payload()` on the way to `/api/overlay/shapes`; the
-  loaded shapes keep the authored order. Don't reverse again in the page.
-- **Three routes are open, two are gated.** `/api/overlay/shapes` (static,
-  fetched once), `/api/overlay/state` (the fallback poll) and
-  `/api/overlay/events` (the SSE stream, ROADMAP 15) are open like
-  `/api/status`. `/api/overlay/background` and `/api/overlay/stream` carry the
-  **same interlock as `/api/control/*`** — a deliberate departure from 4f,
-  because proxied camera video is a live view of a public roadway and
-  `--web-host 0.0.0.0` shouldn't publish it by accident. The video routes also
-  accept `?token=` (an `<img>` can't set a header); control is header-only.
-- **The canvas does all the scaling.** `canvas.width/height` = the config's
-  `video_width/video_height`; shapes are drawn in native calibration
-  coordinates; canvas and background are stacked at `width:100%`. No
-  coordinate math in the page — don't add any.
-- **Every failure degrades to a 503 on one route**, never a crash: a missing
-  CSV, an unreadable image, or an unreachable camera leaves the dashboard and
-  the rest of the page working. `FileImageSource` re-reads on mtime/size
-  change, so swapping the calibration still needs no restart; the live source
-  reconnects with 1 s→30 s backoff and keeps re-sending the last good frame
-  every 2 s so a viewer's `<img>` doesn't break mid-outage.
-- The page **labels its own resolution** — SNMP sampling is ~0.33 s effective
-  on intersection 201 post-4a (see the NTCIP rules above; the note said
-  "1–1.5 s" until 2026-08-03), still far coarser than the video. Keep that
-  caveat if you touch the template: since 15b the state is *pushed*, so the
-  sampling cycle is the whole of what remains.
-
-### Deploy-time tooling and the calibration workflow (ROADMAP 11d)
-
-`tools/` at the repo root holds **deploy-time** scripts that belong to neither
-package — the same role `video_engine/system_runner.py` plays at runtime.
-They may import `ntcip_monitor`; they are never imported by it, and nothing in
-them relaxes the rule that the two packages don't import each other.
-
-- **`tools/sync_ui_config.py`** is the de-duplication mechanism for values that
-  live in both config files. `video_engine/intersections/` is the
-  authoring source; the script writes `controller.ip/port/community/chunk_size`
-  and `overlay.camera_url` into `config.json`. **Dry run by default** (`--apply`
-  to write), credentials masked in its output, atomic replace, idempotent.
-  Poll intervals, timezone and `web_ui.*` are deliberately *not* synced — the
-  monitor tunes four monitors separately, and bind host/port/token are
-  properties of the host you run the UI on, not of the intersection.
-- **`tools/grab_calibration_still.py`** saves one frame as a JPEG, resolving
-  the URL from a `--intersection`/`--camera` pair or taking it directly. It
-  grabs through the overlay's own `RtspMjpegSource`, so a successful grab is
-  also proof the live overlay path can reach that camera.
-- **Calibration workflow** (no ntcip code involved in step 2): grab a still →
-  run pyatspm's `atspm video-calibrate-shapes --camera <name> --video <still>`
-  against it (only the first frame is used; record a short clip with
-  `video_engine/tools/__capture_rtsp.py` if OpenCV won't open the JPEG) → copy
-  the CSV it writes to `overlay.shapes_csv`. 11a's reader accepts either format
-  pyatspm produces. A browser-based calibrator would drop the pyatspm/Tkinter
-  dependency entirely; it's parked in ROADMAP's Future section.
+- It binds to `127.0.0.1` by default. Control routes require
+  `X-NTCIP-Control-Token` when a token is set. With no token they are allowed
+  on loopback and get 403 on a non-loopback bind. Both checks live in
+  `_check_shared_secret()`. The overlay's video routes carry the same
+  interlock (and accept `?token=`).
+- SSE (`/api/events`, `/api/overlay/events`): the dev server must stay
+  `threaded=True`. Callbacks only enqueue. On overflow the queue is dropped
+  and a snapshot sent. Subscriptions are never detached. Overlay status is
+  resolved server-side. The 250 ms poll is kept as a fallback.
+- `ui/overlay/` and `ui/events.py` stay stdlib-only (one guarded `import av`).
+  One ref-counted decoder is shared per camera. Shape CSV colors are **BGR**,
+  reversed exactly once in `shapes_payload()`. The canvas does all the
+  scaling. Every failure degrades to a 503 on one route.
+- Repo-root `tools/` holds deploy-time scripts. They may import
+  `ntcip_monitor` but are never imported by it. `sync_ui_config.py` is a dry
+  run until `--apply`.
 
 ## Tests
 
@@ -839,81 +289,6 @@ deliberate; preserve it when adding cases.
 - **No unsolicited files**: don't generate README/requirements/deployment
   manifests unless explicitly asked. Don't rewrite existing classes unless
   asked to refactor/optimize — provide the requested module/change only.
-
-## Known repo clutter
-
-As of this writing:
-
-- `video_engine/archive/` and the `* - Copy.py` backup files across both
-  packages have been removed (none were imported anywhere). The superseded
-  drafts that were never committed are preserved at commit `1f48bfa` if ever
-  needed again; the rest are recoverable from their normal file history.
-- **All three CFR video buffers are gone** (deleted 2026-08-01, ROADMAP #5 and
-  #6): `_edge_video_buffer.py` and `_old_video_buffer.py` (interim RAM-bounded
-  CFR attempts, superseded by the 2026-07-14 remux decision and imported by
-  nothing), and `video_buffer.py` (the `full` central/server backend — see the
-  hardware-constraints section). All three are recoverable from git history;
-  they last exist at commit `0c2e11b`. `remux_video_buffer.py` is the only
-  buffer. Don't restore any of them — a future decoded backend is a new
-  RAM-bounded branch, not a revival.
-- `ntcip_monitor/monitors/ring_monitor.py` — new, not yet committed to git.
-- `tools/` (repo root) is **not** clutter and is distinct from
-  `video_engine/tools/`: it holds the deploy-time scripts described above
-  (`sync_ui_config.py`, `grab_calibration_still.py`), which belong to neither
-  package. Package-specific debug tools still go under `video_engine/tools/`.
-- `overlay/` (repo root) is **not** clutter: it's the overlay's per-deployment
-  data for intersection 201 — `201_fisheye_shapes.csv` (a copy of the owner's
-  `~/vid_cfg720.csv` calibration) and `201_fisheye.jpg` (a still extracted
-  from `video_engine/tests/fixtures/sample.ts`). `config.json` points at both.
-- `video_engine/intersections/` is **not** clutter: it is the intersection
-  config directory (`201.json`, `701.json` — US-95/Whitley Dr). It replaced
-  three scattered files on 2026-08-03 (ROADMAP 2): the root
-  `_intersections.json`, `video_engine/intersections.json`, and
-  `video_engine/701_intersection.json`. All three are recoverable from git
-  history at commit `ff8244a`. An untracked `intersections.json` may still sit
-  at the repo root on this machine — that is a stale copy of the retired
-  5-pair 201 config, not a config the code reads any more.
-- `video_engine/tools/` holds the standalone debug/manual scripts. Two clean
-  CLIs cover manual recording: **`record_clip.py`** (one-shot clip, or `--serve`
-  to keep the buffer running while you drop triggers; replaced `__record.py`) and
-  **`drop_trigger.py`** (writes a Hot Folder trigger; replaced `__trigger.py`).
-  **`cleanup_clips.py`** is the third clean CLI: the manual front end to the
-  duplicate-clip sweep, dry-run until `--apply`.
-  The rest are `__`-prefixed dev/verification tools: `__capture_rtsp.py`,
-  `__replay_verify.py`, `__probe_adversarial.py`, `__accuracy_report.py`
-  (engine-log vs ATSPM-export precision/recall report), `__capture_ntcip.py`
-  (raw NTCIP detector-edge capture, all 64 channels, ATSPM 82/81 event codes —
-  for channel-mapping audits against the pyatspm DB; reuses the production
-  SNMP client/OID math **including one batched `get(*group_oids)` per sweep**,
-  so its reported median/p95 sweep time represents the monitor's — pass
-  `--chunk-size` or a `--config` carrying `snmp_chunk_size` to match
-  production, and `--simulate` for offline smoke tests),
-  `__decode_datz.py` (controller `.datZ`/`.zip` → `timestamp,event_code,
-  parameter` CSV — the ground truth the next two tools eat; calls **pyatspm's
-  own** decoder helpers by file path, and applies the datZ header's sub-minute
-  offset, which an ad-hoc extraction once dropped: see the 2026-07-31
-  DESIGN_HISTORY entry and note `banks_events_20260719_1730.csv` is 1 s early),
-  `__make_gt_export.py` (those events → the ATSPM anomaly export
-  `__accuracy_report.py` scores against, via pyatspm's own
-  `analyze_discrepancies()`, with pairs and `lag_threshold_sec` read from the
-  intersection config so they can't drift from the engine run — **run it under
-  pyatspm's interpreter**, it needs pandas/numpy which this repo deliberately
-  doesn't depend on),
-  `__correlate_channels.py` (MCC waveform correlation of a capture against a
-  controller high-res export — verifies the channel map; see the 2026-07-19
-  and 2026-07-31 DESIGN_HISTORY entries), plus `simulate_playback.py`.
-  `video_engine/tests/` holds the unit tests
-  (`test_discrepancy_rules.py`, `test_remux_manager.py`,
-  `test_config_manager.py`, `test_video_cleanup.py`; stdlib `unittest`) and
-  `video_engine/tests/fixtures/` the captured test data
-  (`sample.ts` + its `.packets.jsonl` profile). The five tools that import
-  `video_engine/` modules (`record_clip`, `cleanup_clips`, `__replay_verify`,
-  `__probe_adversarial`, `simulate_playback`) add a `sys.path` bootstrap
-  (`.../tools/` → parent) so they run from any working directory; the others
-  (`__capture_rtsp`, `drop_trigger`, `__accuracy_report`, `__decode_datz`,
-  `__make_gt_export`) don't import them and are location-independent
-  (`__accuracy_report` needs `pytz`; the two datZ-chain tools resolve the
-  sibling pyatspm checkout themselves, overridable with `--pyatspm`).
 
 See [ROADMAP.md](ROADMAP.md) for open architectural decisions and planned work.
 

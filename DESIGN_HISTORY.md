@@ -2440,3 +2440,23 @@ decided. Entries after this point are logged as the decision lands.
   introduces exactly that silently — and a check that every
   `paired_detector_id` resolves, which schema validation does not cover and
   which silently costs a configured comparison when it dangles.
+
+- 2026-09-30 — **`CLAUDE.md` split into a rules digest plus `docs/`
+  (agent-workflow backlog item 3).** `CLAUDE.md` had grown to 60.7 KB, about
+  15k tokens loaded into every session, mostly measurement history and
+  rationale. It is now **18.3 KB**. The module boundaries, the Hot Folder
+  bridge, the tests, style and environment sections stay verbatim. Every
+  other section moved **verbatim** (whole sections, byte-identical, source
+  `93addce`) into ten topic files under `docs/`, each headed with its source
+  line range and when to read it. In their place `CLAUDE.md` carries an index
+  table and a short digest of the load-bearing rules per subsystem.
+  Whole-section moves were chosen over a paragraph-level split because the
+  rules and the measurements share paragraphs; splitting those would have
+  meant rewriting the rationale, not moving it. The cost is deliberate
+  duplication: a digest line and its doc can drift, so both carry "update
+  both" instructions. Done in Claude, not delegated: the move was a 15-line
+  script against a line-range map, and the digest is judgment work. A
+  verifier checked that every non-blank source line lands exactly once.
+  Existing references elsewhere to named `CLAUDE.md` sections (such as "Hot
+  Folder pattern") still resolve: the Hot Folder section stays in place, and
+  the others keep their headings, verbatim, in `docs/`.
